@@ -101,7 +101,10 @@ for when steps need egress.
 
 - Steps in a job run sequentially; a failing step (`exitCode != 0`) fails the
   job and skips its remaining steps.
-- A failed job marks the workflow failed and skips not-yet-started jobs.
+- Independent jobs run **in parallel** (Absurd worker `concurrency` + fan-out);
+  the `needs` DAG gates ordering. A job is **skipped** only if one of its
+  dependencies failed or was skipped — independent jobs are unaffected. The
+  workflow fails if any job failed.
 - Env layers `workflow ← job ← step`, the later layer winning.
 - `run` steps only. `uses` (agentic) steps are recognized and rejected.
 
@@ -128,16 +131,17 @@ rewrite:
   the branch that currently rejects `uses`. (See
   `docs/agent-uses-interface.md` for the interface, `docs/pi-coding-agent-sdk.md`
   for the Pi surface.)
-- **`needs` DAG / matrix / `if`:** the spec and plan already model these; the
-  runtime gains the logic to await dependencies and expand matrices.
+- **`needs` DAG:** done — the runtime walks the dependency graph and runs
+  independent jobs in parallel via worker `concurrency`. **`matrix` / `if`** are
+  still modeled-but-not-executed (matrix expansion and conditional evaluation
+  are future work).
 
 ## Known Phase 1 limitations
 
 - Durable step checkpointing works, but **cross-process crash-resume** isn't
-  wired yet (needs a persistent dataDir + run id + `--resume`); the default
-  PGLite is ephemeral in-memory per run.
-- `needs` order is computed and respected, but jobs still run sequentially —
-  PGLite is single-connection, so there's no parallel fan-out yet.
+  wired yet (the cross-job orchestration lives in the runtime, not a durable
+  task; needs a persistent dataDir + run id + `--resume`). The default PGLite is
+  ephemeral in-memory per run.
 - No `uses` (agentic) steps, no `matrix`, no `if` evaluation, no step-`outputs`
   passing between steps/jobs.
 - Gondolin runs on the minimal Alpine guest image (no language runtimes) and

@@ -36,12 +36,12 @@ The engine runs end-to-end today: GHA-style YAML → validated spec → runtime-
 **Implemented:**
 
 - **Spec + compiler** — `name`, workflow/job/step `env` layering, per-job `runs-on`, a `needs` DAG (deterministic topological order), and `run` steps; stable step naming; validation with path-aware errors.
-- **Durable runtime** — `AbsurdRuntime` on **Absurd + PGLite**: steps are checkpointed and memoized (a completed step is never recomputed on a retry). PGLite is single-connection, so execution serializes — the same code targets a server Postgres provider unchanged.
+- **Durable runtime** — `AbsurdRuntime` on **Absurd + PGLite**: each job is its own durable task, each step a checkpointed/memoized `ctx.step` (never recomputed on a retry). The runtime walks the `needs` DAG and runs a `concurrency`-driven worker, so **independent jobs run in parallel** (verified to overlap even on single-connection PGLite). A job is skipped only if one of its dependencies failed; independent jobs are unaffected.
 - **Execution targets** — `local` (host child process) and `gondolin` (hardware-virtualized Alpine micro-VM via `@earendil-works/gondolin`). Per-job **workspace staging**: the workflow's own folder is copied into each job's working directory, so committed companion files (e.g. a `script.sh`) are available.
 - **CLI** — `./pi-workflows <workflow.yaml>` streams step output and exits non-zero on failure.
 - **Quality** — unit + e2e tests (`node --test`, the `test/e2e/` examples double as fixtures, all run through the durable runtime), ESLint + `tsc`, and GitHub Actions CI including a Gondolin VM job (QEMU + KVM).
 
-**Not yet (design sketches):** agentic **`uses:`** steps via **Pi**, parallel job execution (Absurd worker `concurrency` + fan-out child tasks), cross-process crash-resume (durability is in place; the resume UX — persistent dataDir + run id — is the next step), `strategy.matrix`, `if:` conditionals, and cross-step/job `outputs`. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md). **Out of scope:** PGMQ (single-host engine — no runner fleet to coordinate).
+**Not yet (design sketches):** agentic **`uses:`** steps via **Pi**, cross-process crash-resume (durability is in place; the resume UX — persistent dataDir + run id — is the next step), `strategy.matrix`, `if:` conditionals, and cross-step/job `outputs`. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md). **Out of scope:** PGMQ (single-host engine — no runner fleet to coordinate).
 
 ```bash
 npm install

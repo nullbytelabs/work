@@ -125,3 +125,36 @@ jobs:
     assert.match(output, /hi override/);
   });
 });
+
+describe("pipeline — parallelism & skip semantics", () => {
+  it("runs independent jobs in parallel (wall-clock beats serial)", async () => {
+    const t0 = Date.now();
+    const { result } = await runWorkflow(`
+name: parallel
+jobs:
+  a: { steps: [{ run: "sleep 0.4" }] }
+  b: { steps: [{ run: "sleep 0.4" }] }
+  c: { steps: [{ run: "sleep 0.4" }] }
+`);
+    const elapsed = Date.now() - t0;
+    assert.equal(result.status, "success");
+    // 3 × 0.4s serial = 1.2s; parallel should be well under. Generous margin.
+    assert.ok(elapsed < 1000, `expected parallel (<1000ms), took ${elapsed}ms`);
+  });
+
+  it("skips only the failed job's dependents — independent jobs still run", async () => {
+    const { result } = await runWorkflow(`
+name: partial-failure
+jobs:
+  boom: { steps: [{ run: "exit 1" }] }
+  independent: { steps: [{ run: "echo fine" }] }
+  downstream:
+    needs: [boom]
+    steps: [{ run: "echo nope" }]
+`);
+    assert.equal(result.status, "failure");
+    assert.equal(result.jobs.find((j) => j.id === "boom")!.status, "failure");
+    assert.equal(result.jobs.find((j) => j.id === "independent")!.status, "success");
+    assert.equal(result.jobs.find((j) => j.id === "downstream")!.status, "skipped");
+  });
+});

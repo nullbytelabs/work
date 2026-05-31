@@ -11,14 +11,12 @@ name: fan-out-fan-in
 
 jobs:
   prepare:
-    # runs-on: local
     steps:
       - name: prepare
         run: |
           echo "prepared build inputs"
 
   lint:
-    # runs-on: local
     needs: [prepare]
     steps:
       - name: lint
@@ -26,7 +24,6 @@ jobs:
           echo "lint: 0 problems"
 
   unit:
-    # runs-on: local
     needs: [prepare]
     steps:
       - name: unit
@@ -34,7 +31,6 @@ jobs:
           echo "unit: 12 passed"
 
   typecheck:
-    # runs-on: local
     needs: [prepare]
     steps:
       - name: typecheck
@@ -42,7 +38,6 @@ jobs:
           echo "typecheck: clean"
 
   report:
-    # runs-on: local 
     needs: [lint, unit, typecheck]
     steps:
       - name: report

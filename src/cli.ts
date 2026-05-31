@@ -95,6 +95,19 @@ async function main(): Promise<void> {
   const out = process.stdout;
   if (!args.quiet) out.write(`workflow: ${plan.name}\n`);
 
+  // Jobs run in parallel, so buffer each job's lines and flush the whole block
+  // atomically on completion — keeps per-job output contiguous instead of
+  // interleaved. Blocks print in job-completion order.
+  const buffers = new Map<string, string[]>();
+  const lines = (jobId: string) => {
+    let b = buffers.get(jobId);
+    if (!b) {
+      b = [`[job: ${jobId}]`];
+      buffers.set(jobId, b);
+    }
+    return b;
+  };
+
   const runtime = new AbsurdRuntime();
   let result;
   try {
@@ -104,17 +117,24 @@ async function main(): Promise<void> {
       hooks: args.quiet
         ? undefined
         : {
-            onJobStart: (jobId) => out.write(`\n[job: ${jobId}]\n`),
-            onStepStart: (_jobId, stepName) => out.write(`  > ${stepName}\n`),
-            onOutput: (_jobId, _stepName, chunk) => {
+            onJobStart: (jobId) => void lines(jobId),
+            onStepStart: (jobId, stepName) => lines(jobId).push(`  > ${stepName}`),
+            onOutput: (jobId, _stepName, chunk) => {
               const prefix = chunk.stream === "stderr" ? "    ! " : "    ";
               for (const line of chunk.text.replace(/\n$/, "").split("\n")) {
-                out.write(`${prefix}${line}\n`);
+                lines(jobId).push(`${prefix}${line}`);
               }
             },
-            onStepEnd: (_jobId, step) => {
+            onStepEnd: (jobId, step) => {
               const mark = step.status === "success" ? "ok" : step.status;
-              out.write(`    (${mark}, exit ${step.exitCode})\n`);
+              lines(jobId).push(`    (${mark}, exit ${step.exitCode})`);
+            },
+            onJobEnd: (jobId) => {
+              const b = buffers.get(jobId);
+              if (b) {
+                out.write(`\n${b.join("\n")}\n`);
+                buffers.delete(jobId);
+              }
             },
           },
     });

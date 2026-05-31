@@ -35,6 +35,8 @@ export interface RunHooks {
   onStepStart?: (jobId: string, stepName: string) => void;
   onOutput?: (jobId: string, stepName: string, chunk: { stream: "stdout" | "stderr"; text: string }) => void;
   onStepEnd?: (jobId: string, result: StepResult) => void;
+  /** Fired when a job finishes (success or failure) — the point to flush buffered per-job output. */
+  onJobEnd?: (jobId: string, result: JobResult) => void;
 }
 
 export interface RunContext {
