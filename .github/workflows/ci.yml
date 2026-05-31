@@ -47,6 +47,7 @@ jobs:
   gondolin:
     name: gondolin VM smoke
     runs-on: ubuntu-latest
+    needs: [test]
     # Provisional: GitHub's x86_64 runners expose /dev/kvm and Gondolin ships
     # x86_64 Alpine guest images, so this should work — but it hasn't been proven
     # green from a real run yet. `continue-on-error` keeps it from blocking merges;
