@@ -7,6 +7,7 @@
  * interpolated) `with` values into the agent's inputs, resolve the model from
  * config, call the AgentRunner, and map the result to a `UsesResult`.
  */
+import { join } from "node:path";
 import type { UsesHandler, UsesContext, UsesResult } from "../runtime/types.ts";
 import { resolveModel, type PiWorkflowsConfig } from "../config/index.ts";
 import { parseAgentUses, loadAgent, buildAgentPrompt, agentOutputs, type AgentRunner } from "./index.ts";
@@ -17,6 +18,12 @@ export interface AgentUsesHandlerOptions {
   config?: PiWorkflowsConfig;
   /** Runner (default: Pi SDK). Tests inject a mock so no inference happens. */
   runner?: AgentRunner;
+  /**
+   * Override where agent packages are resolved from. By default packages are
+   * project-local: `<projectDir>/agents/`, where `projectDir` is the running
+   * workflow's own folder. Set this to pin a fixed search dir (e.g. in tests).
+   */
+  agentsDir?: string;
 }
 
 const TRUNCATION_WARNING =
@@ -31,7 +38,19 @@ export function createAgentUsesHandler(opts: AgentUsesHandlerOptions = {}): Uses
     async run(ctx: UsesContext): Promise<UsesResult> {
       try {
         const { name } = parseAgentUses(ctx.uses);
-        const agent = await loadAgent(name);
+        // Workflow-local resolution: agents live in an `agents/` folder beside
+        // the workflow definition (its `workflowDir` — e.g. `.workflows/agents/`,
+        // like a GitHub Actions local action), unless an explicit agentsDir is
+        // configured. Falls back to the project root for the simple case where
+        // the workflow file sits at the project root.
+        const base = ctx.workflowDir ?? ctx.projectDir;
+        const agentsDir = opts.agentsDir ?? (base ? join(base, "agents") : undefined);
+        if (!agentsDir) {
+          throw new Error(
+            `cannot resolve agent "${name}": no workflow directory for this run (agent packages live in <workflow-dir>/agents/<name>/)`,
+          );
+        }
+        const agent = await loadAgent(name, agentsDir);
 
         // Split the well-known `model` override from the agent's declared inputs.
         let modelAlias: string | undefined;

@@ -50,5 +50,5 @@ jobs:
           path: ~/.cache/gondolin/images
           key: gondolin-images-${{ runner.os }}-${{ runner.arch }}
       - run: npm ci
-      - name: Run full suite (gondolin enabled)
-        run: PI_WF_TEST_GONDOLIN=1 npm test
+      - name: Run full suite (gondolin + real npm pipeline enabled)
+        run: PI_WF_TEST_GONDOLIN=1 PI_WF_TEST_NPM=1 npm test

@@ -7,17 +7,20 @@
  * full Pi-SDK runner later). Tests inject a stub runner, so the whole pipeline
  * is exercisable without inference.
  *
- * An agent is a **directory package** under `src/agents/<name>/`:
+ * An agent is a **directory package** the *project* supplies (like a GitHub
+ * Actions local action), resolved from `<agents-dir>/<name>/`:
  *   agent.yaml       — manifest (inputs/outputs, description; model/tools later)
  *   instructions.md  — the system prompt (standing persona/policy)
  *   task.md          — the task prompt template; `{{ <input> }}` placeholders
  *                      bound from the step's `with`
  * (skills/, extension.ts are reserved for the future Pi-SDK runner.) This is the
- * package shape from docs/agent-uses-interface.md; project/user override paths
- * come later — for now we load the built-in packages shipped here.
+ * package shape from docs/agent-uses-interface.md. Packages are NOT shipped in
+ * the engine — they live in the project (the agent uses-handler points
+ * `loadAgent` at `<projectDir>/agents/`). Remote `@ref` sourcing
+ * (github/gitlab/codeberg) and project/user override search paths come later,
+ * and stay inside the agent layer — the durable core never learns about them.
  */
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { UserFacingError } from "../errors.ts";
@@ -110,8 +113,8 @@ export interface LoadedAgent {
   outputs: string[];
 }
 
-/** Where built-in agent packages live (sibling `src/agents/`). */
-const AGENTS_DIR = fileURLToPath(new URL("../agents/", import.meta.url));
+// Cache keyed by the resolved package directory (resolution is project-relative,
+// so the same name in different projects must not collide).
 const cache = new Map<string, LoadedAgent>();
 
 /** Parse a `uses:` value into an agent name. Only the `agent/<name>[@ref]` scheme today. */
@@ -125,17 +128,21 @@ export function parseAgentUses(uses: string): { name: string; ref?: string } {
   return out;
 }
 
-/** Load an agent package by name from `src/agents/<name>/` (cached). */
-export async function loadAgent(name: string): Promise<LoadedAgent> {
-  const cached = cache.get(name);
+/**
+ * Load an agent package `<agentsDir>/<name>/` (cached by resolved path).
+ * `agentsDir` is supplied by the caller (the uses-handler resolves it from the
+ * workflow's project directory) — packages are project-local, not shipped here.
+ */
+export async function loadAgent(name: string, agentsDir: string): Promise<LoadedAgent> {
+  const dir = join(agentsDir, name);
+  const cached = cache.get(dir);
   if (cached) return cached;
 
-  const dir = join(AGENTS_DIR, name);
   let manifestText: string;
   try {
     manifestText = await readFile(join(dir, "agent.yaml"), "utf-8");
   } catch {
-    throw new UserFacingError(`unknown agent "${name}" (no package at src/agents/${name}/)`);
+    throw new UserFacingError(`unknown agent "${name}" (no package at ${dir})`);
   }
 
   const manifest = (parseYaml(manifestText) ?? {}) as {
@@ -155,7 +162,7 @@ export async function loadAgent(name: string): Promise<LoadedAgent> {
     : Object.keys(manifest.outputs ?? {});
 
   const agent: LoadedAgent = { name, instructions, task, inputs, outputs };
-  cache.set(name, agent);
+  cache.set(dir, agent);
   return agent;
 }
 

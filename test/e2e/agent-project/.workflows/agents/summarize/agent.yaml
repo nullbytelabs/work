@@ -1,6 +1,6 @@
-# Agent package manifest (the action.yml analog).
-# See docs/agent-uses-interface.md for the full design (skills/extensions are
-# future; today's runner uses instructions + task + inputs/outputs).
+# Agent package manifest (the action.yml analog), supplied by THIS project — not
+# the engine. See docs/agent-uses-interface.md for the full design (skills/
+# extensions are future; today's runner uses instructions + task + inputs/outputs).
 name: summarize
 description: Summarize a block of text into one concise sentence.
 

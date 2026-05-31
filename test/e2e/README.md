@@ -1,17 +1,22 @@
 # Examples / e2e fixtures
 
-Each subfolder is one example: a `workflow.yaml` plus any committed companion
-files (e.g. `run-script/script.sh`). They double as the end-to-end fixtures the
-test suite runs. Run any of them with:
+Each subfolder is one example. Most are a single `workflow.yaml` plus any
+committed companion files (e.g. `run-script/script.sh`); `agent-project/` shows
+the fuller **project shape** — a `.workflows/main.yaml` pipeline (like
+`.github/workflows/`) alongside the project it builds. They double as the
+end-to-end fixtures the test suite runs. Run any of them with:
 
 ```bash
 ./pi-workflows ./test/e2e/<name>/workflow.yaml
+./pi-workflows ./test/e2e/agent-project/.workflows/main.yaml   # the project-shaped one
 ```
 
-When a workflow runs, **its folder is staged into each job's workspace** (copied
-in for `local`, mounted at `/workspace` for `gondolin`) — analogous to a
-checkout. So files committed next to `workflow.yaml` are available to the steps,
-and other examples' files are not.
+When a workflow runs, **its checkout is staged into each job's workspace**
+(copied in for `local`, mounted at `/workspace` for `gondolin`) — analogous to a
+git checkout (`node_modules/` and `.git/` are never staged; a job installs its
+own deps). The checkout is the workflow's own folder, or — when the workflow
+lives in a `.workflows/` directory — the **project root** (its parent), so
+`package.json`/source files are present. Other examples' files are not.
 
 Everything here uses only Phase 1 capabilities: `name`, workflow/job/step `env`,
 per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, and `run` steps.
@@ -34,7 +39,7 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, and `run` steps.
 | `run-script/` | a committed `script.sh`, staged into the workspace and run with `sh script.sh` | workspace staging of committed files |
 | `with-inputs/` | typed `inputs:` (string `name`, number `age`) mapped into step env vars (defaults `world`/`36`; pass `--inputs '{"name":"josh","age":40}'`) | typed workflow inputs + interpolation |
 | `input-validation/` | a `required` enum (`options`) + a regex-`pattern` (UUID) input; bad values are rejected at compile time (`--inputs '{"release":"staging","id":"<uuid>"}'`) | required / options / pattern validators |
-| `agent-summarize/` | a job emits a job `output`; a dependent reads it via `needs.<job>.outputs` and runs `agent/summarize`, exposing `steps.<id>.outputs.summary` (needs `--config`; the suite mocks the LLM) | outputs + `needs.*`/`steps.*` + agent step |
+| `agent-project/` | a **real coding project**: its pipeline + agent live in `.workflows/` (like `.github/workflows/`), the workflow runs against the project-root checkout — `npm install` → `tsc` validity → `npm start` smoke → an agent reviews the captured source. Runs `npm install` for real, so it's gated behind `PI_WF_TEST_NPM=1` (the agent is mocked). | `.workflows/` project model; checkout = project root; multiline `$PI_OUTPUT`; workflow-local agents |
 
 ## Notes on current behavior
 

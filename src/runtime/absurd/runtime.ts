@@ -19,7 +19,7 @@
  * so whole-workflow crash-resume isn't covered yet. See docs/phase-1.md.
  */
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { mkdir, cp, readFile, rm } from "node:fs/promises";
 import type { TaskContext } from "absurd-sdk";
 import { makeTarget } from "../../targets/index.ts";
@@ -160,10 +160,31 @@ async function awaitTaskTerminal(app: AbsurdEngine["app"], taskID: string) {
   }
 }
 
-/** Parse `key=value` lines from a step's $PI_OUTPUT file. */
+/**
+ * Parse a step's $PI_OUTPUT file (GitHub-Actions `$GITHUB_OUTPUT` semantics):
+ *   - `key=value` for single-line values, and
+ *   - a heredoc block for multi-line values:
+ *         key<<DELIMITER
+ *         line 1
+ *         line 2
+ *         DELIMITER
+ *     (everything up to the line that exactly equals DELIMITER is the value).
+ * A later write to the same key wins.
+ */
 function parseOutputFile(text: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of text.split("\n")) {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const heredoc = /^([A-Za-z_][\w-]*)<<(\S+)\s*$/.exec(line);
+    if (heredoc) {
+      const [, key, delimiter] = heredoc as unknown as [string, string, string];
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && lines[i] !== delimiter) body.push(lines[i++]!);
+      out[key] = body.join("\n");
+      continue; // i sits on the delimiter line; the for-loop's i++ steps past it
+    }
     const eq = line.indexOf("=");
     if (eq <= 0) continue;
     out[line.slice(0, eq).trim()] = line.slice(eq + 1);
@@ -182,7 +203,18 @@ async function runJobInTask(
   const workdir = join(ctx.workRoot, job.id);
 
   await mkdir(workdir, { recursive: true });
-  if (ctx.workspaceSource) await cp(ctx.workspaceSource, workdir, { recursive: true });
+  if (ctx.workspaceSource) {
+    // Stage the checkout like a fresh `git checkout`: never carry a foreign
+    // `node_modules` (a job installs its own — copying one across platforms
+    // breaks native deps) or `.git`. Keeps staging fast and reproducible.
+    await cp(ctx.workspaceSource, workdir, {
+      recursive: true,
+      filter: (src) => {
+        const b = basename(src);
+        return b !== "node_modules" && b !== ".git";
+      },
+    });
+  }
 
   let target;
   try {
@@ -323,7 +355,16 @@ async function runUsesStep(
   }
 
   try {
-    const res = await handler.run({ uses, with: resolvedWith, workdir, runsOn: job.runsOn, emit });
+    const workflowDir = deps.ctx.workflowDir ?? deps.ctx.workspaceSource;
+    const res = await handler.run({
+      uses,
+      with: resolvedWith,
+      workdir,
+      ...(deps.ctx.workspaceSource ? { projectDir: deps.ctx.workspaceSource } : {}),
+      ...(workflowDir ? { workflowDir } : {}),
+      runsOn: job.runsOn,
+      emit,
+    });
     return {
       name: step.name,
       status: res.status,

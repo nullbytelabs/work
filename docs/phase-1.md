@@ -142,26 +142,68 @@ for when steps need egress.
 
 GitHub-Actions-style, resolved at **runtime** (after the producing step/job runs):
 
-- A `run` step writes `key=value` lines to **`$PI_OUTPUT`** (a file the engine
-  reads back — `local` target only for now; the gondolin guest path differs).
+- A `run` step writes to **`$PI_OUTPUT`** (a file the engine reads back —
+  `local` target only for now; the gondolin guest path differs), using
+  `$GITHUB_OUTPUT` syntax: `key=value` for single-line values, or a heredoc for
+  multi-line values (e.g. a whole source file to hand an agent):
+
+  ```bash
+  {
+    echo "source<<EOF"
+    cat main.ts
+    echo "EOF"
+  } >> "$PI_OUTPUT"
+  ```
+
 - A job exposes `outputs:` mapping names to `${{ steps.<id>.outputs.<key> }}`.
-- A dependent reads `${{ needs.<job>.outputs.<name> }}` (in `env`, `run`, `with`).
+- A dependent reads `${{ needs.<job>.outputs.<name> }}` (in `env`, `run`, `with`);
+  multi-line values flow through unchanged.
 
 So `${{ }}` is two-phase: `inputs.*` bind at compile time; `steps.*`/`needs.*`
-resolve at runtime. Unknown roots still error. See `test/e2e/agent-summarize/`.
+resolve at runtime. Unknown roots still error. See `test/e2e/agent-project/`.
+
+## Project layout (`.workflows/`)
+
+A real project keeps its pipelines and agents in a `.workflows/` directory, the
+analog of `.github/workflows/`. The CLI's `resolveWorkflowLayout` then treats the
+**parent** of `.workflows/` as the project root — the checkout staged into each
+job — so `npm install`, `npm start`, and source files are present, while agent
+packages resolve from `.workflows/agents/`. A standalone `workflow.yaml` not in a
+`.workflows/` folder uses its own directory as both. The checkout is staged like
+a fresh `git checkout`: `node_modules/` and `.git/` are never copied (each job
+installs its own deps — copying a foreign `node_modules` breaks native binaries).
+`test/e2e/agent-project/` is the worked example: `npm install` → `tsc` validity →
+`npm start` smoke → an agent reviews the captured source.
 
 ## Agent steps (`uses: agent/<name>`)
 
-`uses: agent/summarize` runs an agent **package** — a directory under
-`src/agents/<name>/`:
+`uses: agent/summarize` runs an agent **package the project supplies** — a
+directory beside the workflow definition, checked in like a GitHub Actions local
+action. Packages are **not** shipped in the engine; the `agent` handler resolves
+them relative to the workflow's directory (`<workflowDir>/agents/<name>/`). In
+the full project shape that's `.workflows/agents/<name>/`:
 
 ```
-src/agents/summarize/
-  agent.yaml        # manifest: description, declared inputs/outputs
-  instructions.md   # system prompt (standing persona/policy)
-  task.md           # task template; {{ input }} placeholders bound from `with`
-  # skills/, extension.ts — reserved for the future Pi-SDK (tool-using) runner
+<project root>/             # the checkout jobs run against (npm, source, …)
+  package.json
+  main.ts
+  .workflows/               # workflowDir — like .github/workflows/
+    main.yaml
+    agents/
+      summarize/
+        agent.yaml          # manifest: description, declared inputs/outputs
+        instructions.md     # system prompt (standing persona/policy)
+        task.md             # task template; {{ input }} placeholders bound from `with`
+        # skills/, extension.ts — reserved for the future Pi-SDK (tool-using) runner
 ```
+
+This is the boundary the user asked for: the engine ships the agent *handler*
+(how to run an agent), the project ships the agent *packages* (what each agent
+is). Remote sourcing (`agent/<name>@<ref>` from github/gitlab/codeberg) and
+project/user override search paths are future work that lives entirely inside
+the agent layer — `loadAgent(name, agentsDir)` already takes the search dir, so
+adding a resolver (clone + cache → a local dir) doesn't touch the durable core.
+See `test/e2e/agent-project/` for a project that brings its own `summarize`.
 
 **The durable core is agent-agnostic.** It dispatches a `uses:` step to a
 registered handler by **scheme** (`<scheme>/<…>`) via a small `UsesHandler`

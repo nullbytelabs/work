@@ -53,6 +53,14 @@ export interface RunContext {
    * an empty workspace.
    */
   workspaceSource?: string;
+  /**
+   * Directory holding the workflow definition and its local assets (agent
+   * packages under `<workflowDir>/agents/`). Distinct from `workspaceSource`
+   * when the workflow lives in a `.workflows/` folder: the checkout staged into
+   * jobs is the project root, while agents resolve from `.workflows/agents/`.
+   * Defaults to `workspaceSource` when omitted.
+   */
+  workflowDir?: string;
   hooks?: RunHooks;
 }
 
@@ -75,6 +83,18 @@ export interface UsesContext {
   with: Record<string, unknown>;
   /** The job's working directory (staged workspace). */
   workdir: string;
+  /**
+   * The project/checkout root (the run's `workspaceSource`) — the same tree
+   * staged into `workdir`. Undefined for an inline run with no source folder.
+   */
+  projectDir?: string;
+  /**
+   * The directory holding the workflow definition and its local assets. A
+   * handler resolves workflow-local packages relative to this — e.g. the agent
+   * handler finds packages in `<workflowDir>/agents/<name>/`. Defaults to
+   * `projectDir`; differs when the workflow lives in a `.workflows/` folder.
+   */
+  workflowDir?: string;
   /** The job's `runs-on` target key. */
   runsOn: string;
   /** Stream output live (shown by the CLI, captured by hooks). */

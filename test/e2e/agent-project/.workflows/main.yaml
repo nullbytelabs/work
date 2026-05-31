@@ -1,0 +1,58 @@
+# A real coding project's CI pipeline.
+#
+# This project keeps its pipeline + agents in `.workflows/` (like
+# `.github/workflows/`). The workflow operates on the PROJECT ROOT checkout — the
+# parent of `.workflows/` — so `package.json`, `main.ts`, `npm install`, and
+# `npm start` are all right there in each job's workspace. Agent packages live in
+# `.workflows/agents/` and are referenced as `uses: agent/<name>`.
+#
+#   verify: install deps -> check main.ts is valid -> smoke-run `npm start`,
+#           then capture the source so a later job can review it.
+#   review: an agent reviews/summarizes the captured source.
+#
+# Tests inject a mock runner (no inference). For a real review against a model:
+#   ./pi-workflows ./test/e2e/agent-project/.workflows/main.yaml --config pi-workflows.config.json
+---
+name: ci
+
+jobs:
+  verify:
+    runs-on: local
+    outputs:
+      source: ${{ steps.read.outputs.source }}
+    steps:
+      - name: install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: check main.ts is valid
+        run: npx tsc --noEmit main.ts
+
+      - name: smoke test (npm start)
+        run: npm start --silent
+
+      - id: read
+        name: capture source for review
+        run: |
+          {
+            echo "source<<__PI_EOF__"
+            printf '%s\n' "$(cat main.ts)"
+            echo "__PI_EOF__"
+          } >> "$PI_OUTPUT"
+
+  review:
+    needs: [verify]
+    runs-on: local
+    outputs:
+      review: ${{ steps.summary.outputs.summary }}
+    steps:
+      - id: summary
+        name: review the source with an agent
+        uses: agent/summarize
+        with:
+          input: ${{ needs.verify.outputs.source }}
+
+      - name: show review
+        env:
+          REVIEW: ${{ steps.summary.outputs.summary }}
+        run: |
+          echo "review -> $REVIEW"

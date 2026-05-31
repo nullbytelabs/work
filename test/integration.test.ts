@@ -12,14 +12,24 @@ import { useSharedRuntime } from "./_support.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const runtime = useSharedRuntime();
 
+// Agent packages are workflow-local; point inline agent-step tests at the
+// agent-project's `.workflows/` so `uses: agent/summarize` resolves to its
+// package (`.workflows/agents/summarize`). AGENT_PROJECT is the project root.
+const AGENT_PROJECT = resolve(HERE, "e2e", "agent-project");
+const AGENT_WORKFLOWS = join(AGENT_PROJECT, ".workflows");
+
 /** Run a YAML string through the whole pipeline (durably), collecting output. */
-async function runWorkflow(yaml: string): Promise<{ result: WorkflowResult; output: string }> {
+async function runWorkflow(
+  yaml: string,
+  workspaceSource?: string,
+): Promise<{ result: WorkflowResult; output: string }> {
   const plan = compile(parseWorkflow(yaml));
   const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-int-"));
   let output = "";
   try {
     const result = await runtime.run(plan, {
       workRoot,
+      ...(workspaceSource ? { workspaceSource } : {}),
       hooks: { onOutput: (_j, _s, c) => (output += c.text) },
     });
     return { result, output };
@@ -179,7 +189,7 @@ jobs:
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-trunc-"));
     let result: WorkflowResult;
     try {
-      result = await runtime.run(plan, { workRoot }, truncating);
+      result = await runtime.run(plan, { workRoot, workspaceSource: AGENT_WORKFLOWS }, truncating);
     } finally {
       await rm(workRoot, { recursive: true, force: true });
     }
@@ -204,7 +214,7 @@ jobs:
     let result: WorkflowResult;
     let output = "";
     try {
-      result = await runtime.run(plan, { workRoot, hooks: { onOutput: (_j, _s, c) => (output += c.text) } }, boom);
+      result = await runtime.run(plan, { workRoot, workspaceSource: AGENT_WORKFLOWS, hooks: { onOutput: (_j, _s, c) => (output += c.text) } }, boom);
     } finally {
       await rm(workRoot, { recursive: true, force: true });
     }
@@ -229,7 +239,7 @@ jobs:
       - env:
           S: \${{ steps.sum.outputs.summary }}
         run: echo "out=$S"
-`);
+`, AGENT_WORKFLOWS);
     assert.equal(result.status, "success");
     assert.match(output, /out=MOCK SUMMARY/);
   });
@@ -248,5 +258,62 @@ jobs:
     assert.equal(result.jobs.find((j) => j.id === "boom")!.status, "failure");
     assert.equal(result.jobs.find((j) => j.id === "independent")!.status, "success");
     assert.equal(result.jobs.find((j) => j.id === "downstream")!.status, "skipped");
+  });
+});
+
+// The real-world shape: a project keeps its pipeline + agents in `.workflows/`
+// and the workflow operates on the PROJECT ROOT checkout. This proves the wiring
+// offline (mock agent, no npm): checkout == project root, multiline `$PI_OUTPUT`,
+// and agent resolution from `.workflows/agents/`.
+describe("project layout (.workflows/): checkout is the project root", () => {
+  it("stages the project root, captures multiline source, and resolves a .workflows agent", async () => {
+    const plan = compile(parseWorkflow(`
+name: layout
+jobs:
+  go:
+    runs-on: local
+    steps:
+      - name: checkout is the project root
+        run: |
+          test -f package.json && grep -q helloWorld main.ts && echo CHECKOUT_OK
+      - id: read
+        name: capture source (multiline)
+        run: |
+          {
+            echo "source<<__EOF__"
+            printf '%s\\n' "$(cat main.ts)"
+            echo "__EOF__"
+          } >> "$PI_OUTPUT"
+      - id: rev
+        name: review with the project's own agent
+        uses: agent/summarize
+        with:
+          input: \${{ steps.read.outputs.source }}
+      - name: show
+        env:
+          R: \${{ steps.rev.outputs.summary }}
+        run: echo "review=$R"
+`));
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-layout-"));
+    let output = "";
+    try {
+      const result = await runtime.run(plan, {
+        workRoot,
+        workspaceSource: AGENT_PROJECT,
+        workflowDir: join(AGENT_PROJECT, ".workflows"),
+        hooks: { onOutput: (_j, _s, c) => (output += c.text) },
+      });
+      assert.equal(result.status, "success");
+      assert.match(output, /CHECKOUT_OK/); // run steps see the project root checkout
+      assert.match(output, /review=MOCK SUMMARY/); // agent resolved from .workflows/agents/
+
+      // The multiline source survived $PI_OUTPUT heredoc capture intact.
+      const src = result.jobs[0]!.steps.find((s) => s.outputs?.["source"])?.outputs?.["source"] ?? "";
+      assert.match(src, /function helloWorld/);
+      assert.match(src, /console\.log\(helloWorld\("Josh"\)\)/);
+      assert.ok(src.includes("\n"), "captured source should be multiline");
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -9,12 +9,13 @@
 import { readFile, mkdtemp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { AbsurdRuntime } from "./runtime/index.ts";
 import { loadConfig, type PiWorkflowsConfig } from "./config/index.ts";
 import { createAgentUsesHandler } from "./agent/index.ts";
+import { resolveWorkflowLayout } from "./project.ts";
 import { UserFacingError } from "./errors.ts";
 
 const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
@@ -99,9 +100,14 @@ function fail(msg: string): never {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
+  // Resolve where the workflow lives and what its checkout is: a workflow inside
+  // a `.workflows/` folder operates on the project root (parent), with agents in
+  // `.workflows/agents/`; otherwise its own folder is both.
+  const layout = resolveWorkflowLayout(args.file);
+
   let yamlText: string;
   try {
-    yamlText = await readFile(resolve(args.file), "utf-8");
+    yamlText = await readFile(layout.file, "utf-8");
   } catch {
     fail(`cannot read workflow file: ${args.file}`);
   }
@@ -127,10 +133,6 @@ async function main(): Promise<void> {
     ? resolve(args.workdir)
     : await mkdtemp(join(tmpdir(), "pi-workflows-"));
 
-  // The workflow's own directory is staged into each job's workspace, so
-  // committed companion files (scripts, fixtures) sit next to the workflow.
-  const workspaceSource = dirname(resolve(args.file));
-
   const out = process.stdout;
   if (!args.quiet) out.write(`workflow: ${plan.name}\n`);
 
@@ -153,7 +155,8 @@ async function main(): Promise<void> {
   try {
     result = await runtime.run(plan, {
       workRoot,
-      workspaceSource,
+      workspaceSource: layout.workspaceSource,
+      workflowDir: layout.workflowDir,
       hooks: args.quiet
         ? undefined
         : {
