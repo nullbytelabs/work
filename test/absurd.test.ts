@@ -1,13 +1,15 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { createAbsurdEngine, ABSURD_SCHEMA_VERSION, type AbsurdEngine } from "../src/runtime/index.ts";
+import { createAbsurdEngine, ABSURD_SCHEMA_VERSION, SILENT_LOG, type AbsurdEngine } from "../src/runtime/index.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("absurd engine (PGLite-backed)", () => {
   let engine: AbsurdEngine;
   before(async () => {
-    engine = await createAbsurdEngine();
+    // Silent logger: the retry test intentionally fails a step once, and we
+    // don't want Absurd's expected-failure log spamming the test output.
+    engine = await createAbsurdEngine({ log: SILENT_LOG });
   });
   after(async () => {
     await engine.close();

@@ -29,12 +29,25 @@ export interface AbsurdEngine {
   close(): Promise<void>;
 }
 
+/** Minimal logger shape accepted by the Absurd client. */
+export interface AbsurdLog {
+  log: (...args: unknown[]) => void;
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
+}
+
 export interface AbsurdEngineOptions {
   /** PGLite data directory for persistence; omit for ephemeral in-memory. */
   dataDir?: string;
   /** Queue name (default "default"). */
   queueName?: string;
+  /** Logger for the Absurd client (defaults to console). Pass a silent logger to mute expected failures (e.g. retry tests). */
+  log?: AbsurdLog;
 }
+
+const SILENT_LOG: AbsurdLog = { log() {}, info() {}, warn() {}, error() {} };
+export { SILENT_LOG };
 
 /** Start the wire-protocol socket server, retrying on port contention. */
 async function startSocketServer(db: PGlite): Promise<{ server: PGLiteSocketServer; port: number }> {
@@ -71,7 +84,7 @@ export async function createAbsurdEngine(opts: AbsurdEngineOptions = {}): Promis
   // PGLite is single-connection — max:1 is required.
   const pool = new pg.Pool({ host: "127.0.0.1", port, database: "postgres", user: "postgres", max: 1 });
 
-  const app = new Absurd({ db: pool, queueName });
+  const app = new Absurd({ db: pool, queueName, ...(opts.log ? { log: opts.log } : {}) });
   try {
     await app.createQueue(queueName);
   } catch {
