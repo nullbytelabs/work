@@ -76,24 +76,47 @@ function stepInfos(plan: ExecutionPlan, id: string): StepInfo[] {
   });
 }
 
-/** Mermaid flowchart. Nodes get synthetic ids (`n0`…) so job names never clash
- *  with Mermaid's id grammar; the real name lives in the label. */
+/** Mermaid flowchart. Jobs get synthetic ids (`n0`…) so names never clash with
+ *  Mermaid's id grammar; the real name lives in the label. Without `steps`, one
+ *  node per job. With `steps`, each job becomes a subgraph whose nodes are its
+ *  ordered steps (chained), `uses` steps drawn as a distinct stadium shape, and
+ *  job dependencies connect the subgraphs. */
 function toMermaid(plan: ExecutionPlan, opts: GraphOptions): string {
   const nodeId = new Map<string, string>();
   plan.jobOrder.forEach((id, i) => nodeId.set(id, `n${i}`));
 
   const lines: string[] = ["flowchart TD"];
-  for (const id of plan.jobOrder) {
-    const m = metaOf(plan, id);
-    let label = `${escapeMermaid(id)}<br/>${m.runsOn} · ${stepsLabel(m.steps)}`;
-    if (opts.steps) {
-      for (const s of stepInfos(plan, id)) {
-        const suffix = s.kind === "uses" ? ` <em>uses ${escapeMermaid(s.uses ?? "")}</em>` : "";
-        label += `<br/>${s.ordinal}. ${escapeMermaid(s.label)}${suffix}`;
-      }
+
+  if (!opts.steps) {
+    for (const id of plan.jobOrder) {
+      const m = metaOf(plan, id);
+      lines.push(`  ${nodeId.get(id)}["${escapeMermaid(id)}<br/>${m.runsOn} · ${stepsLabel(m.steps)}"]`);
     }
-    lines.push(`  ${nodeId.get(id)}["${label}"]`);
+  } else {
+    for (const id of plan.jobOrder) {
+      const nid = nodeId.get(id)!;
+      const m = metaOf(plan, id);
+      lines.push(`  subgraph ${nid}["${escapeMermaid(id)} · ${m.runsOn}"]`);
+      lines.push(`    direction TB`);
+      const infos = stepInfos(plan, id);
+      if (infos.length === 0) {
+        lines.push(`    ${nid}_s0["(no steps)"]`);
+      } else {
+        for (const s of infos) {
+          const tag = s.id !== undefined ? ` #91;${escapeMermaid(s.id)}#93;` : "";
+          const usesLine = s.kind === "uses" ? `<br/><em>uses ${escapeMermaid(s.uses ?? "")}</em>` : "";
+          const text = `${s.ordinal}. ${escapeMermaid(s.label)}${tag}${usesLine}`;
+          // Stadium shape for `uses` steps; rectangle for `run`.
+          lines.push(s.kind === "uses" ? `    ${nid}_s${s.ordinal}(["${text}"])` : `    ${nid}_s${s.ordinal}["${text}"]`);
+        }
+        if (infos.length > 1) {
+          lines.push(`    ${infos.map((s) => `${nid}_s${s.ordinal}`).join(" --> ")}`);
+        }
+      }
+      lines.push(`  end`);
+    }
   }
+
   for (const id of plan.jobOrder) {
     for (const need of plan.jobs[id]?.needs ?? []) {
       const from = nodeId.get(need);
@@ -104,27 +127,63 @@ function toMermaid(plan: ExecutionPlan, opts: GraphOptions): string {
   return lines.join("\n") + "\n";
 }
 
-/** Graphviz DOT. Job names are valid quoted node ids; escape quotes/backslashes. */
+/** Graphviz DOT. Without `steps`, one node per job. With `steps`, each job is a
+ *  `cluster_<i>` containing its ordered step nodes (chained); job dependencies
+ *  are drawn cluster-to-cluster via `compound=true` + `lhead`/`ltail`. Synthetic
+ *  ids (`j0s1`, `cluster_0`) keep names valid regardless of job-id characters. */
 function toDot(plan: ExecutionPlan, opts: GraphOptions): string {
-  const lines: string[] = [`digraph "${escapeDot(plan.name)}" {`, "  rankdir=TB;", "  node [shape=box, style=rounded];"];
-  for (const id of plan.jobOrder) {
-    const m = metaOf(plan, id);
-    let label = `${escapeDot(id)}\\n${m.runsOn} · ${stepsLabel(m.steps)}`;
-    if (opts.steps) {
-      // Left-justify multi-line node labels (\l) so the step list reads cleanly.
-      label = `${escapeDot(id)}\\n${m.runsOn} · ${stepsLabel(m.steps)}\\l`;
-      for (const s of stepInfos(plan, id)) {
-        const suffix = s.kind === "uses" ? `  (uses ${escapeDot(s.uses ?? "")})` : "";
-        label += `${s.ordinal}. ${escapeDot(s.label)}${suffix}\\l`;
+  const idx = new Map<string, number>();
+  plan.jobOrder.forEach((id, i) => idx.set(id, i));
+
+  const lines: string[] = [`digraph "${escapeDot(plan.name)}" {`, "  rankdir=TB;"];
+  if (opts.steps) lines.push("  compound=true;");
+  lines.push("  node [shape=box, style=rounded];");
+
+  if (!opts.steps) {
+    for (const id of plan.jobOrder) {
+      const m = metaOf(plan, id);
+      lines.push(`  "${escapeDot(id)}" [label="${escapeDot(id)}\\n${m.runsOn} · ${stepsLabel(m.steps)}"];`);
+    }
+    for (const id of plan.jobOrder) {
+      for (const need of plan.jobs[id]?.needs ?? []) {
+        lines.push(`  "${escapeDot(need)}" -> "${escapeDot(id)}";`);
       }
     }
-    lines.push(`  "${escapeDot(id)}" [label="${label}"];`);
-  }
-  for (const id of plan.jobOrder) {
-    for (const need of plan.jobs[id]?.needs ?? []) {
-      lines.push(`  "${escapeDot(need)}" -> "${escapeDot(id)}";`);
+  } else {
+    for (const id of plan.jobOrder) {
+      const i = idx.get(id)!;
+      const m = metaOf(plan, id);
+      lines.push(`  subgraph cluster_${i} {`);
+      lines.push(`    label="${escapeDot(id)} · ${m.runsOn}";`);
+      lines.push(`    style=rounded;`);
+      const infos = stepInfos(plan, id);
+      if (infos.length === 0) {
+        lines.push(`    j${i}s0 [label="(no steps)"];`);
+      } else {
+        for (const s of infos) {
+          const tag = s.id !== undefined ? ` [${escapeDot(s.id)}]` : "";
+          const usesLine = s.kind === "uses" ? `\\n(uses ${escapeDot(s.uses ?? "")})` : "";
+          const style = s.kind === "uses" ? `, style="rounded,filled", fillcolor="#eaf2ff"` : "";
+          lines.push(`    j${i}s${s.ordinal} [label="${s.ordinal}. ${escapeDot(s.label)}${tag}${usesLine}"${style}];`);
+        }
+        for (let k = 0; k < infos.length - 1; k++) {
+          lines.push(`    j${i}s${infos[k]!.ordinal} -> j${i}s${infos[k + 1]!.ordinal};`);
+        }
+      }
+      lines.push(`  }`);
+    }
+    for (const id of plan.jobOrder) {
+      const ti = idx.get(id)!;
+      const toFirst = `j${ti}s${plan.jobs[id]!.steps.length === 0 ? 0 : 1}`;
+      for (const need of plan.jobs[id]?.needs ?? []) {
+        const fi = idx.get(need)!;
+        const fromSteps = plan.jobs[need]!.steps.length;
+        const fromLast = `j${fi}s${fromSteps === 0 ? 0 : fromSteps}`;
+        lines.push(`  ${fromLast} -> ${toFirst} [ltail=cluster_${fi}, lhead=cluster_${ti}];`);
+      }
     }
   }
+
   lines.push("}");
   return lines.join("\n") + "\n";
 }

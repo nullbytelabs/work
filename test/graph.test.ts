@@ -119,9 +119,24 @@ describe("emitGraph: steps option", () => {
     });
   });
 
-  it("mermaid and dot embed steps in the node label", () => {
-    assert.match(emitGraph(withSteps(), "mermaid", { steps: true }), /1\. install dependencies/);
-    assert.match(emitGraph(withSteps(), "dot", { steps: true }), /2\. capture source\\l/);
+  it("mermaid renders steps as first-class subgraph nodes", () => {
+    const out = emitGraph(withSteps(), "mermaid", { steps: true });
+    assert.match(out, /subgraph n0\["verify · local"\]/);
+    assert.match(out, /n0_s1\["1\. install dependencies"\]/);
+    assert.match(out, /n0_s1 --> n0_s2/); // ordered chain
+    // uses step gets the stadium shape and uses ref
+    assert.match(out, /n1_s1\(\["1\. review with agent.*uses agent\/summarize.*"\]\)/);
+    assert.match(out, /n0 --> n1/); // job dependency between subgraphs
+  });
+
+  it("dot renders steps as clustered nodes with cluster-to-cluster edges", () => {
+    const out = emitGraph(withSteps(), "dot", { steps: true });
+    assert.match(out, /compound=true;/);
+    assert.match(out, /subgraph cluster_0 \{/);
+    assert.match(out, /j0s1 \[label="1\. install dependencies"\];/);
+    assert.match(out, /j0s1 -> j0s2;/); // ordered chain
+    assert.match(out, /fillcolor="#eaf2ff"/); // uses step styled
+    assert.match(out, /j0s2 -> j1s1 \[ltail=cluster_0, lhead=cluster_1\];/);
   });
 
   it("omits step detail by default", () => {
