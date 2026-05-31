@@ -32,6 +32,8 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, and `run` steps.
 | `fan-out-fan-in/` | a diamond DAG: one job fans out to three, which fan back into one | `needs` as fan-out / fan-in |
 | `inline-polyglot/` | bash + Node + Python steps sharing files and cross-checking results | polyglot `run` steps |
 | `run-script/` | a committed `script.sh`, staged into the workspace and run with `sh script.sh` | workspace staging of committed files |
+| `with-inputs/` | typed `inputs:` (string `name`, number `age`) mapped into step env vars (defaults `world`/`36`; pass `--inputs '{"name":"josh","age":40}'`) | typed workflow inputs + interpolation |
+| `input-validation/` | a `required` enum (`options`) + a `format: uuid` input; bad values are rejected at compile time (`--inputs '{"release":"staging","id":"<uuid>"}'`) | required / options / format validators |
 
 ## Notes on current behavior
 

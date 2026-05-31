@@ -48,6 +48,38 @@ jobs:
     assert.equal(spec.jobs["a"]!.runsOn, "local");
   });
 
+  it("parses inputs (shorthand null + full declaration)", () => {
+    const spec = parseWorkflow(`
+name: w
+inputs:
+  name:
+  count:
+    type: number
+    required: true
+    default: 3
+    description: how many
+jobs:
+  a:
+    steps: [{ run: "true" }]
+`);
+    assert.deepEqual(spec.inputs?.["name"], {});
+    assert.deepEqual(spec.inputs?.["count"], { type: "number", required: true, default: 3, description: "how many" });
+  });
+
+  it("parses scalar-shorthand inputs (inferred type + default)", () => {
+    const spec = parseWorkflow(`
+name: w
+inputs:
+  age: 36
+  who: bob
+jobs:
+  a:
+    steps: [{ run: "true" }]
+`);
+    assert.deepEqual(spec.inputs?.["age"], { type: "number", default: 36 });
+    assert.deepEqual(spec.inputs?.["who"], { type: "string", default: "bob" });
+  });
+
   it("normalizes a scalar needs into an array", () => {
     const spec = parseWorkflow(`
 name: w
@@ -125,6 +157,22 @@ describe("parseWorkflow — validation", () => {
     const e = err(`name: w\njobs:\n  a:\n    when: manual\n    steps: [{ run: x }]`);
     assert.equal(e.path, "jobs.a");
     assert.match(e.message, /conditionals/);
+  });
+
+  it("rejects an invalid input type", () => {
+    const e = err(`name: w\ninputs:\n  x:\n    type: secret\njobs:\n  a:\n    steps: [{ run: "true" }]`);
+    assert.equal(e.path, "inputs.x.type");
+  });
+
+  it("rejects an invalid regex pattern", () => {
+    const e = err(`name: w\ninputs:\n  x:\n    pattern: "([unclosed"\njobs:\n  a:\n    steps: [{ run: "true" }]`);
+    assert.equal(e.path, "inputs.x.pattern");
+    assert.match(e.message, /not a valid regular expression/);
+  });
+
+  it("rejects pattern on a non-string input", () => {
+    const e = err(`name: w\ninputs:\n  x:\n    type: number\n    pattern: "^[0-9]+$"\njobs:\n  a:\n    steps: [{ run: "true" }]`);
+    assert.match(e.message, /pattern only applies to string/);
   });
 
   it("rejects invalid YAML with a clear message", () => {

@@ -20,6 +20,11 @@ const RUN_VM = process.env["PI_WF_TEST_GONDOLIN"] === "1";
 // Examples needing a runtime not guaranteed in the local/CI environment.
 const NEEDS_PYTHON = new Set(["inline-polyglot"]);
 
+// Inputs to supply for examples that declare required inputs (others default).
+const EXAMPLE_INPUTS: Record<string, Record<string, unknown>> = {
+  "input-validation": { release: "staging", id: "3cd7a864-f023-5a35-9db1-39a1be5bdcca" },
+};
+
 /** Every e2e test is a folder containing a workflow.yaml (+ optional fixtures). */
 const examples = readdirSync(EXAMPLES, { withFileTypes: true })
   .filter((d) => d.isDirectory() && existsSync(join(EXAMPLES, d.name, "workflow.yaml")))
@@ -27,7 +32,8 @@ const examples = readdirSync(EXAMPLES, { withFileTypes: true })
   .sort();
 
 function compilePlan(name: string) {
-  return compile(parseWorkflow(readFileSync(join(EXAMPLES, name, "workflow.yaml"), "utf-8")));
+  const yaml = readFileSync(join(EXAMPLES, name, "workflow.yaml"), "utf-8");
+  return compile(parseWorkflow(yaml), { inputs: EXAMPLE_INPUTS[name] ?? {} });
 }
 
 /** Run an example's workflow, staging its folder into the workspace (as the CLI does). */

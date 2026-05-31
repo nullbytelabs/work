@@ -1,0 +1,32 @@
+# input validation
+# description: shows required inputs, an options (enum) list, and a regex
+#              pattern (a UUID is just a pattern — no built-in format registry).
+#              Values outside the options / not matching the pattern are rejected
+#              at compile time.
+# usage: ./pi-workflows ./test/e2e/input-validation/workflow.yaml \
+#          --inputs '{"release":"staging","id":"3cd7a864-f023-5a35-9db1-39a1be5bdcca"}'
+---
+name: input-validation
+
+inputs:
+  release:
+    type: string
+    required: true                 # no default → must be provided
+    options: [dev, staging, prod]  # rejected if not one of these
+    description: target environment
+  id:
+    type: string
+    # UUID validation via a regex pattern (include anchors for a full match).
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    description: optional run id
+
+jobs:
+  validate:
+    runs-on: local
+    steps:
+      - name: show
+        env:
+          RELEASE: ${{ inputs.release }}
+          ID: ${{ inputs.id }}
+        run: |
+          echo "releasing to ${RELEASE} (id=${ID:-none})"

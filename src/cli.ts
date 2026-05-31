@@ -19,18 +19,33 @@ interface CliArgs {
   file: string;
   workdir?: string;
   quiet: boolean;
+  inputs: Record<string, unknown>;
 }
 
 function parseArgs(argv: string[]): CliArgs {
   let file: string | undefined;
   let workdir: string | undefined;
   let quiet = false;
+  let inputs: Record<string, unknown> = {};
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--workdir") {
       workdir = argv[++i];
       if (!workdir) fail("--workdir requires a directory path");
+    } else if (arg === "--inputs") {
+      const json = argv[++i];
+      if (!json) fail("--inputs requires a JSON object string");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(json);
+      } catch {
+        fail("--inputs must be valid JSON");
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        fail("--inputs must be a JSON object, e.g. '{\"name\":\"josh\"}'");
+      }
+      inputs = parsed as Record<string, unknown>;
     } else if (arg === "--quiet") {
       quiet = true;
     } else if (arg === "-h" || arg === "--help") {
@@ -49,12 +64,12 @@ function parseArgs(argv: string[]): CliArgs {
     printUsage();
     process.exit(2);
   }
-  return { file, workdir, quiet };
+  return { file, workdir, quiet, inputs };
 }
 
 function printUsage(): void {
   process.stderr.write(
-    "Usage: pi-workflows <workflow.yaml> [--workdir <dir>] [--quiet]\n",
+    "Usage: pi-workflows <workflow.yaml> [--inputs '<json>'] [--workdir <dir>] [--quiet]\n",
   );
 }
 
@@ -76,7 +91,7 @@ async function main(): Promise<void> {
   let plan;
   try {
     const spec = parseWorkflow(yamlText);
-    plan = compile(spec);
+    plan = compile(spec, { inputs: args.inputs });
   } catch (err) {
     if (err instanceof WorkflowParseError || err instanceof WorkflowCompileError) {
       fail(err.message);

@@ -22,7 +22,7 @@ fills each with its simplest honest implementation:
 
 | Layer | README role | Phase 1 |
 |---|---|---|
-| spec | "what to run" | full parse + validation of `name`/`env`/`jobs`/`steps`; `needs`/`runs-on`/`uses`/`if` are modeled and validated but only partially acted on |
+| spec | "what to run" | full parse + validation of `name`/`inputs`/`env`/`jobs`/`steps`; `needs`/`runs-on` acted on; `uses`/`if` modeled but rejected at parse/compile |
 | compiler | "spec → task graph" | runtime-agnostic `ExecutionPlan`: env layering, default `runs-on`, stable step names, deterministic topo order |
 | runtime | "how durably" | `AbsurdRuntime` on Absurd + in-process PGLite; steps are durable `ctx.step` checkpoints (memoized across retries) |
 | targets | "where" (`runs-on`) | `LocalTarget` (host process) and `GondolinTarget` (secure micro-VM, optional dep loaded lazily) |
@@ -39,8 +39,38 @@ npm test        # unit + integration suite (Node's built-in test runner)
 npm run typecheck
 ```
 
-Flags: `--workdir <dir>` (default: a temp dir), `--quiet` (suppress streaming).
-Exit code is `0` on success, `1` on workflow failure, `2` on bad input.
+Flags: `--inputs '<json>'` (workflow inputs), `--workdir <dir>` (default: a temp
+dir), `--quiet` (suppress streaming). Exit code is `0` on success, `1` on
+workflow failure, `2` on bad input.
+
+## Inputs
+
+A workflow declares `inputs:` and reads them with `${{ inputs.<name> }}`:
+
+```yaml
+inputs:
+  name:                 # shorthand: optional string
+  age: 36               # scalar shorthand: number input, default 36 (type inferred)
+  count: { type: number, required: true, default: 3, description: "…" }
+  release: { options: [dev, staging, prod], required: true }   # enum
+  id: { pattern: "^[0-9a-fA-F-]{36}$" }                        # regex (a UUID is just a pattern)
+```
+
+Types are `string | boolean | number`. Values are passed as a JSON object
+(`--inputs '{"name":"josh","age":40}'`) and validated against the declarations:
+unknown inputs, missing-`required`, **type mismatches**, out-of-`options`, and
+`pattern` mismatches all error. Typing is **strict**, with no coercion (a string
+`"40"` is rejected for a `number` input). `pattern` is a regex (`test`, so include
+anchors) and applies to string inputs — it's the single general validator, so the
+engine ships **no named-`format` registry** to grow. An *absent optional* input
+isn't validated (an optional pattern-constrained input that wasn't provided
+resolves to `""` rather than failing).
+Resolved values are **interpolated at compile time** into `run` and `env`, so the
+durable plan contains concrete values and the runtime never sees an expression.
+Only `${{ inputs.<name> }}` is supported today (dot or `['name']` form); any other
+expression context (`matrix`, `github`, …) errors rather than passing through.
+Idiomatic use is to map an input into a step `env` var, then reference `$NAME`
+in the shell — see `test/e2e/with-inputs/`.
 
 ## Tests
 

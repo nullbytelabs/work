@@ -6,7 +6,7 @@
  * parser does NOT execute anything — it only produces a validated spec object.
  */
 import { parse as parseYaml } from "yaml";
-import type { EnvMap, JobSpec, StepSpec, WorkflowSpec } from "./types.ts";
+import type { EnvMap, InputSpec, JobSpec, StepSpec, WorkflowSpec } from "./types.ts";
 
 /** Thrown when a workflow file is structurally invalid. */
 export class WorkflowParseError extends Error {
@@ -32,6 +32,83 @@ function parseEnv(raw: unknown, path: string): EnvMap | undefined {
       throw new WorkflowParseError(`value for "${k}" must be a scalar`, path);
     }
     out[k] = String(v);
+  }
+  return out;
+}
+
+const INPUT_TYPES = new Set(["string", "boolean", "number"]);
+
+/** Parse the workflow `inputs:` block. `name:` (null) is shorthand for an optional string. */
+function parseInputs(raw: unknown, path: string): Record<string, InputSpec> | undefined {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) throw new WorkflowParseError("inputs must be a mapping of name -> declaration", path);
+
+  const out: Record<string, InputSpec> = {};
+  for (const [name, decl] of Object.entries(raw)) {
+    const ip = `${path}.${name}`;
+    if (decl === null || decl === undefined) {
+      out[name] = {}; // shorthand: optional string
+      continue;
+    }
+    // Scalar shorthand: `age: 36` => a number input defaulting to 36; the type
+    // is inferred from the scalar (string | number | boolean).
+    if (typeof decl === "string" || typeof decl === "number" || typeof decl === "boolean") {
+      out[name] = { type: typeof decl as InputSpec["type"], default: decl };
+      continue;
+    }
+    if (!isPlainObject(decl)) {
+      throw new WorkflowParseError(`input "${name}" must be a mapping, a scalar default, or empty`, ip);
+    }
+    const spec: InputSpec = {};
+    if (decl.type !== undefined) {
+      if (typeof decl.type !== "string" || !INPUT_TYPES.has(decl.type)) {
+        throw new WorkflowParseError('type must be one of "string", "boolean", "number"', `${ip}.type`);
+      }
+      spec.type = decl.type as InputSpec["type"];
+    }
+    if (decl.required !== undefined) {
+      if (typeof decl.required !== "boolean") throw new WorkflowParseError("required must be a boolean", `${ip}.required`);
+      spec.required = decl.required;
+    }
+    if (decl.default !== undefined) {
+      const t = typeof decl.default;
+      if (t !== "string" && t !== "number" && t !== "boolean") {
+        throw new WorkflowParseError("default must be a scalar", `${ip}.default`);
+      }
+      spec.default = decl.default as InputSpec["default"];
+    }
+    if (decl.description !== undefined) {
+      if (typeof decl.description !== "string") throw new WorkflowParseError("description must be a string", `${ip}.description`);
+      spec.description = decl.description;
+    }
+
+    const effectiveType = spec.type ?? "string";
+
+    if (decl.options !== undefined) {
+      if (!Array.isArray(decl.options) || decl.options.length === 0) {
+        throw new WorkflowParseError("options must be a non-empty array", `${ip}.options`);
+      }
+      for (const o of decl.options) {
+        if (typeof o !== effectiveType) {
+          throw new WorkflowParseError(`options entries must be of type ${effectiveType}`, `${ip}.options`);
+        }
+      }
+      spec.options = decl.options as InputSpec["options"];
+    }
+    if (decl.pattern !== undefined) {
+      if (typeof decl.pattern !== "string") throw new WorkflowParseError("pattern must be a string", `${ip}.pattern`);
+      try {
+        new RegExp(decl.pattern);
+      } catch {
+        throw new WorkflowParseError("pattern is not a valid regular expression", `${ip}.pattern`);
+      }
+      if (effectiveType !== "string") {
+        throw new WorkflowParseError("pattern only applies to string inputs", ip);
+      }
+      spec.pattern = decl.pattern;
+    }
+
+    out[name] = spec;
   }
   return out;
 }
@@ -159,6 +236,8 @@ export function parseWorkflow(yamlText: string): WorkflowSpec {
 
   const spec: WorkflowSpec = { name: doc.name, jobs };
   if (doc.on !== undefined) spec.on = doc.on;
+  const inputs = parseInputs(doc.inputs, "inputs");
+  if (inputs) spec.inputs = inputs;
   const env = parseEnv(doc.env, "env");
   if (env) spec.env = env;
 

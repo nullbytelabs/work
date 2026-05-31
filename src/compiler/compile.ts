@@ -17,6 +17,16 @@ export class WorkflowCompileError extends Error {
   }
 }
 
+// Imported after the error class so the (function-level) circular reference with
+// inputs.ts is resolved by the time these are called.
+import { resolveInputs, interpolate, type ResolvedInputs } from "./inputs.ts";
+
+/** Options for compiling a workflow. */
+export interface CompileOptions {
+  /** Raw input values (e.g. parsed from `--inputs '<json>'`), validated against the spec. */
+  inputs?: Record<string, unknown>;
+}
+
 /**
  * Default execution target. The README treats `gondolin` as the eventual
  * default, but Phase 1 only ships LocalTarget, so we default to "local" here.
@@ -33,26 +43,34 @@ function compileStep(
   jobId: string,
   index: number,
   baseEnv: Record<string, string>,
+  inputs: ResolvedInputs,
 ): PlannedStep {
   const stepKey = step.id ?? String(index);
-  const planned: PlannedStep = {
-    name: `${jobId}/${stepKey}`,
-    env: mergeEnv(baseEnv, step.env),
-  };
-  if (step.run !== undefined) planned.run = step.run;
+  // Interpolate ${{ inputs.x }} in every env value (workflow <- job <- step).
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(mergeEnv(baseEnv, step.env))) {
+    env[k] = interpolate(v, inputs);
+  }
+  const planned: PlannedStep = { name: `${jobId}/${stepKey}`, env };
+  if (step.run !== undefined) planned.run = interpolate(step.run, inputs);
   if (step.uses !== undefined) planned.uses = step.uses;
   if (step.with !== undefined) planned.with = step.with;
   if (step.if !== undefined) planned.if = step.if;
   return planned;
 }
 
-function compileJob(jobId: string, job: JobSpec, workflowEnv: Record<string, string>): PlannedJob {
+function compileJob(
+  jobId: string,
+  job: JobSpec,
+  workflowEnv: Record<string, string>,
+  inputs: ResolvedInputs,
+): PlannedJob {
   const jobEnv = mergeEnv(workflowEnv, job.env);
   return {
     id: jobId,
     runsOn: job.runsOn ?? DEFAULT_RUNS_ON,
     needs: job.needs ?? [],
-    steps: job.steps.map((s, i) => compileStep(s, jobId, i, jobEnv)),
+    steps: job.steps.map((s, i) => compileStep(s, jobId, i, jobEnv, inputs)),
   };
 }
 
@@ -95,12 +113,13 @@ function topoSort(jobs: Record<string, PlannedJob>): string[] {
   return order;
 }
 
-/** Compile a validated spec into an execution plan. */
-export function compile(spec: WorkflowSpec): ExecutionPlan {
+/** Compile a validated spec into an execution plan, binding any provided inputs. */
+export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): ExecutionPlan {
+  const inputs = resolveInputs(spec.inputs, opts.inputs ?? {});
   const workflowEnv = spec.env ?? {};
   const jobs: Record<string, PlannedJob> = {};
   for (const [jobId, job] of Object.entries(spec.jobs)) {
-    jobs[jobId] = compileJob(jobId, job, workflowEnv);
+    jobs[jobId] = compileJob(jobId, job, workflowEnv, inputs);
   }
   return { name: spec.name, jobs, jobOrder: topoSort(jobs) };
 }

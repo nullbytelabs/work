@@ -36,6 +36,7 @@ The engine runs end-to-end today: GHA-style YAML → validated spec → runtime-
 **Implemented:**
 
 - **Spec + compiler** — `name`, workflow/job/step `env` layering, per-job `runs-on`, a `needs` DAG (deterministic topological order), and `run` steps; stable step naming; validation with path-aware errors.
+- **Inputs** — a workflow declares typed `inputs:` (`string`/`number`/`boolean`, with `required`/`default`/`description`, or a `name: 36` scalar shorthand) plus two validators: `options:` (enum) and `pattern:` (regex — the general validator; a UUID is just a pattern, so there's no named-`format` registry to maintain). Values come from `--inputs '<json>'`, are referenced with `${{ inputs.<name> }}` (in `run` and `env`), and are resolved + **strictly type-checked** (no coercion) + validated + interpolated at compile time, so the durable plan holds concrete values. Missing-required, unknown, wrong-type, out-of-options, pattern mismatches, and unsupported expressions all error clearly.
 - **Durable runtime** — `AbsurdRuntime` on **Absurd + PGLite**: each job is its own durable task, each step a checkpointed/memoized `ctx.step` (never recomputed on a retry). The runtime walks the `needs` DAG and runs a `concurrency`-driven worker, so **independent jobs run in parallel** (verified to overlap even on single-connection PGLite). A job is skipped only if one of its dependencies failed; independent jobs are unaffected.
 - **Execution targets** — `local` (host child process) and `gondolin` (hardware-virtualized Alpine micro-VM via `@earendil-works/gondolin`). Per-job **workspace staging**: the workflow's own folder is copied into each job's working directory, so committed companion files (e.g. a `script.sh`) are available.
 - **CLI** — `./pi-workflows <workflow.yaml>` streams step output and exits non-zero on failure.
@@ -203,7 +204,7 @@ The agent's behavior (system prompt, tool allowlist, defaults) lives in the **ag
 
 How it compiles: `build`, `test`, `review` become Absurd child tasks on the jobs queue; the orchestrator enforces `needs` by awaiting results; the `matrix.node` expands into three `test` children with deterministic names; `if:` becomes a conditional inside the step; the `agent/review` step resolves its package, validates `with` against the manifest's declared inputs, then builds a Pi session (system prompt + tools from the package, model via LiteLLM) running inside the job's Gondolin VM.
 
-> **Phase 1 reality check:** per-job `runs-on`, `env`, `needs`, and `run` steps are implemented; `on:`, `strategy.matrix`, `if:`, `uses:`/agentic steps, and `$OUTPUT`/cross-step outputs are **not yet** — they illustrate the target experience. See [`docs/phase-1.md`](docs/phase-1.md) for the current subset and [`test/e2e/`](test/e2e/) for runnable examples.
+> **Phase 1 reality check:** per-job `runs-on`, `env`, `needs`, `run` steps, `inputs:` and `${{ inputs.<name> }}` are implemented; `on:`, `strategy.matrix`, `if:`, `uses:`/agentic steps, other `${{ }}` contexts (`matrix`, `github`, …), and `$OUTPUT`/cross-step outputs are **not yet** — they illustrate the target experience. See [`docs/phase-1.md`](docs/phase-1.md) for the current subset and [`test/e2e/`](test/e2e/) for runnable examples.
 
 ---
 
@@ -221,6 +222,7 @@ pi-workflows/
 │   ├── absurd-durable-workflows.md  ← Absurd reference + YAML→Absurd mapping
 │   ├── gondolin-secure-execution.md ← Gondolin reference + ExecutionTarget design
 │   ├── gondolin-custom-images.md    ← custom guest images (toolchains) + runs-on: gondolin:<variant>
+│   ├── tui-research.md              ← future live-run TUI: library landscape + direction
 │   ├── pgmq-message-queues.md       ← PGMQ reference (OUT OF SCOPE — single host, kept for reference)
 │   └── pglite-wasm-postgres-database.md ← PGLite reference + provider-tier fit
 ├── src/
