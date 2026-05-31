@@ -1,6 +1,15 @@
 # PGMQ (Postgres Message Queue) — Reference & pi-workflows Context
 
-> Two halves: **Part A** is a verified general reference on PGMQ setup/usage. **Part B** is how PGMQ fits this engine alongside Absurd — they don't overlap; they complement each other when the boundary is drawn correctly. Items that couldn't be confirmed from docs/source are flagged **UNVERIFIED — needs confirmation**.
+> **⚠️ OUT OF SCOPE — not used by pi-workflows.** PGMQ's one unique value here was
+> coordinating a **fleet of separate runner machines** (work-stealing dispatch for
+> `runs-on`). The engine targets a **single host**, so that need doesn't exist, and
+> everything else PGMQ was considered for is covered by Absurd natively (events for
+> signals/cancellation, task results, retries/failed-task state, durable sleeps for
+> scheduling). This doc is **retained for reference only**, in case a multi-machine
+> topology is ever wanted. Parallelism on one host comes from Absurd worker
+> `concurrency` + fan-out child tasks — not a message bus.
+
+> Two halves: **Part A** is a verified general reference on PGMQ setup/usage. **Part B** is how PGMQ *would* fit alongside Absurd in a multi-machine deployment. Items that couldn't be confirmed from docs/source are flagged **UNVERIFIED — needs confirmation**.
 
 ---
 

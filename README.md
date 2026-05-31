@@ -9,10 +9,9 @@ A **GitHub-Actions-style workflow engine with durable execution**, built in Type
 | **Absurd** (`absurd-sdk`) | Durable execution backbone — turns a YAML workflow into checkpointed, crash-recoverable tasks/steps | [`docs/absurd-durable-workflows.md`](docs/absurd-durable-workflows.md) |
 | **Gondolin** (`@earendil-works/gondolin`) | Secure execution target — runs a step's task inside a local micro-VM. Backs the `runs-on` concept | [`docs/gondolin-secure-execution.md`](docs/gondolin-secure-execution.md) |
 | **Pi** (`@earendil-works/pi-coding-agent`) | Agent / model layer — when a step needs an agent, it calls Pi. Models are referenced through a single LiteLLM key | [`docs/pi-coding-agent-sdk.md`](docs/pi-coding-agent-sdk.md) |
-| **PGMQ** (`pgmq` Postgres extension) | Message-transport layer at the edges of the Absurd graph — trigger ingress, runner-pool dispatch for `runs-on`, fan-out, results, signals, dead-letters | [`docs/pgmq-message-queues.md`](docs/pgmq-message-queues.md) |
-| **PGLite** (`@electric-sql/pglite`) | Optional Postgres *provider* — WASM PG17.5 in-process. The embedded/dev/CI/single-tenant tier behind Absurd + PGMQ (server Postgres for production) | [`docs/pglite-wasm-postgres-database.md`](docs/pglite-wasm-postgres-database.md) |
+| **PGLite** (`@electric-sql/pglite`) | Postgres *provider* — WASM PG17.5, in-process. The single-host backing store behind Absurd (a server Postgres provider is a drop-in swap for scale-out) | [`docs/pglite-wasm-postgres-database.md`](docs/pglite-wasm-postgres-database.md) |
 
-> **Status:** **Implemented** — a working engine that parses/compiles GHA-style YAML and runs it durably on **Absurd + PGLite**, with `local` (host process) and `gondolin` (micro-VM) execution targets, an e2e suite, and CI. Still design sketches: agentic steps (**Pi**) and the **PGMQ** transport tier. The five docs above are SDK research (signatures verified against docs/source; unconfirmed items flagged `UNVERIFIED`); this README is the architectural thesis, and **[`docs/phase-1.md`](docs/phase-1.md)** documents what's actually built.
+> **Status:** **Implemented** — a working engine that parses/compiles GHA-style YAML and runs it durably on **Absurd + PGLite**, with `local` (host process) and `gondolin` (micro-VM) execution targets, an e2e suite, and CI. Still a design sketch: agentic steps (**Pi**). The engine targets a **single host**, so the previously-considered PGMQ transport layer is **out of scope** (it only earned its keep coordinating a multi-machine runner fleet — see [`docs/pgmq-message-queues.md`](docs/pgmq-message-queues.md)). The docs above are SDK research (signatures verified against docs/source; unconfirmed items flagged `UNVERIFIED`); this README is the architectural thesis, and **[`docs/phase-1.md`](docs/phase-1.md)** documents what's actually built.
 
 ---
 
@@ -42,7 +41,7 @@ The engine runs end-to-end today: GHA-style YAML → validated spec → runtime-
 - **CLI** — `./pi-workflows <workflow.yaml>` streams step output and exits non-zero on failure.
 - **Quality** — unit + e2e tests (`node --test`, the `test/e2e/` examples double as fixtures, all run through the durable runtime), ESLint + `tsc`, and GitHub Actions CI including a Gondolin VM job (QEMU + KVM).
 
-**Not yet (design sketches):** agentic **`uses:`** steps via **Pi**, parallel job execution, cross-process crash-resume (durability is in place; the resume UX — persistent dataDir + run id — is the next step), `strategy.matrix`, `if:` conditionals, cross-step/job `outputs`, and the **PGMQ** transport tier. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md).
+**Not yet (design sketches):** agentic **`uses:`** steps via **Pi**, parallel job execution (Absurd worker `concurrency` + fan-out child tasks), cross-process crash-resume (durability is in place; the resume UX — persistent dataDir + run id — is the next step), `strategy.matrix`, `if:` conditionals, and cross-step/job `outputs`. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md). **Out of scope:** PGMQ (single-host engine — no runner fleet to coordinate).
 
 ```bash
 npm install
@@ -147,9 +146,11 @@ The model-reference layer is the payoff for "one API key for several providers":
 
 Pi's durability lives at the **session-tree** granularity (JSONL, branch/fork/label/checkpoint), which slots in below Absurd's step-level checkpointing — but note there is **no mid-LLM-turn suspend/resume**, so an agentic step is the durable unit, not a point inside one.
 
-### 4. Dispatch & transport → PGMQ (optional, at the edges)
+### 4. Dispatch & transport → PGMQ (out of scope)
 
-Absurd and PGMQ both live in Postgres but answer different questions — **Absurd remembers; PGMQ delivers.** Absurd owns durable execution state and step memoization; PGMQ provides SQS-style at-least-once message transport where the engine wants decoupling Absurd deliberately doesn't offer. PGMQ does **not** replace Absurd's internal task queues — it sits at the *edges* of the graph: a `wf_triggers` ingress queue feeding the dispatcher, per-`runs-on` runner queues (`runner_gondolin`, `runner_local`) that let a fleet of VM runners work-steal via `FOR UPDATE SKIP LOCKED` + visibility-timeout leases, a partitioned `wf_fanout` queue for fine-grained homogeneous work, and `wf_results` / `wf_signals` / `*_dlq` queues. The two compose cleanly because PGMQ's weakest guarantee (at-least-once delivery) is exactly covered by Absurd's strongest one (durable step memoization): a redelivered job whose step already completed returns the cached result instead of re-running. Full topology and rationale in [`docs/pgmq-message-queues.md`](docs/pgmq-message-queues.md).
+Earlier design research considered PGMQ as an SQS-style transport at the edges of the graph — its one unique value being **runner-pool dispatch**: letting a *fleet of separate runner machines* work-steal jobs. Since pi-workflows targets a **single host**, that need doesn't exist, and everything else PGMQ was proposed for is already covered by Absurd natively: signals/approvals/cancellation → Absurd **events**, results → task results, dead-letters/retries → failed-task state + retry config, scheduling → durable sleeps. So **PGMQ is not used.** The analysis is retained in [`docs/pgmq-message-queues.md`](docs/pgmq-message-queues.md) for the day a multi-machine topology is ever wanted.
+
+Parallel jobs on the single host come from Absurd itself — worker `concurrency` plus fan-out child tasks joined via `awaitTaskResult` — not from a message bus.
 
 ---
 
@@ -220,7 +221,7 @@ pi-workflows/
 │   ├── absurd-durable-workflows.md  ← Absurd reference + YAML→Absurd mapping
 │   ├── gondolin-secure-execution.md ← Gondolin reference + ExecutionTarget design
 │   ├── gondolin-custom-images.md    ← custom guest images (toolchains) + runs-on: gondolin:<variant>
-│   ├── pgmq-message-queues.md       ← PGMQ reference + dispatch/transport design
+│   ├── pgmq-message-queues.md       ← PGMQ reference (OUT OF SCOPE — single host, kept for reference)
 │   └── pglite-wasm-postgres-database.md ← PGLite reference + provider-tier fit
 ├── src/
 │   ├── spec/        # YAML schema + parser + validation
@@ -234,14 +235,14 @@ pi-workflows/
 │   └── e2e/<name>/  # runnable examples = e2e fixtures (workflow.yaml + companion files)
 └── .github/workflows/ci.yml         # lint + typecheck + full suite (incl. gondolin)
 
-# future: src/agent/ (Pi), src/queue/ (PGMQ), src/core/, images/ (custom guest images)
+# future: src/agent/ (Pi), src/core/, images/ (custom guest images)
 ```
 
 ---
 
 ## Open design questions (carry-over from research)
 
-1. **Matrix `max-parallel` / concurrency groups** — Absurd has no native cap; the compiler must throttle via queue/worker concurrency. *(UNVERIFIED in Absurd; prototype first.)*
+1. **Matrix `max-parallel` / concurrency groups** — CONFIRMED: Absurd has no native cap (verified against SDK source + Concepts); throttle in the orchestrator via batched spawns + worker `concurrency`. Also open for our single-host PGLite backend: does in-process worker `concurrency > 1` actually overlap job execution, or does `ctx.step` serialize on the one connection? (spike before the fan-out refactor.)
 2. **Inter-step replay determinism** — confirm Absurd's exact replay contract before relying on step ordering.
 3. **Agent inside the VM vs host** — Pi's own Gondolin example runs Pi on the host and redirects only its tool I/O into the VM. For true isolation we likely want the whole agent process inside the guest via RPC mode. *(UNVERIFIED — needs confirmation.)*
 4. **LiteLLM `compat` flags** — some OpenAI-compatible proxies need `supportsDeveloperRole:false` / `supportsReasoningEffort:false`. Test against the actual proxy.
