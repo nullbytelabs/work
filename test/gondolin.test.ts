@@ -36,14 +36,15 @@ describe("GondolinTarget — unit (no VM)", () => {
 const RUN_VM = process.env["PI_WF_TEST_GONDOLIN"] === "1";
 
 describe("GondolinTarget — VM smoke (opt-in)", { skip: !RUN_VM }, () => {
-  it("runs the test/e2e/hello-world-gondolin.yaml workflow in a VM", async () => {
-    const yaml = await readFile(resolve(HERE, "e2e", "hello-world-gondolin.yaml"), "utf-8");
-    const plan = compile(parseWorkflow(yaml));
+  it("runs the test/e2e/hello-world-gondolin/workflow.yaml workflow in a VM", async () => {
+    const dir = resolve(HERE, "e2e", "hello-world-gondolin");
+    const plan = compile(parseWorkflow(await readFile(resolve(dir, "workflow.yaml"), "utf-8")));
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-gondolin-"));
     let output = "";
     try {
       const result = await new DirectRuntime().run(plan, {
         workRoot,
+        workspaceSource: dir,
         hooks: { onOutput: (_j, _s, c) => (output += c.text) },
       });
       assert.equal(result.status, "success");

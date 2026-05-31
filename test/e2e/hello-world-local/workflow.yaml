@@ -1,6 +1,6 @@
 # hello world
 # description: simplest possible workflow. uses the workflow engine to simply set an env var `HELLO_WORLD` and then echos it back out
-# usage: ./pi-workflows ./test/e2e/hello-world-local.yaml
+# usage: ./pi-workflows ./test/e2e/hello-world-local/workflow.yaml
 ---
 name: hello-world
 

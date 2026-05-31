@@ -40,6 +40,13 @@ export interface RunHooks {
 export interface RunContext {
   /** Base working directory; each job gets a subdirectory under this. */
   workRoot: string;
+  /**
+   * Directory whose contents are staged into every job's working directory
+   * before its steps run (the workflow's own folder — analogous to a checkout).
+   * Lets a workflow run committed companion files (e.g. `script.sh`). Omit for
+   * an empty workspace.
+   */
+  workspaceSource?: string;
   hooks?: RunHooks;
 }
 

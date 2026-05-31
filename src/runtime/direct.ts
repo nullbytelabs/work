@@ -14,6 +14,7 @@
  *    (Phase 2 will refine this to only skip the failed job's dependents)
  */
 import { join } from "node:path";
+import { mkdir, cp } from "node:fs/promises";
 import { makeTarget } from "../targets/index.ts";
 import type { ExecutionPlan, PlannedJob } from "../compiler/index.ts";
 import type { JobResult, RunContext, Runtime, StepResult, WorkflowResult } from "./types.ts";
@@ -46,6 +47,14 @@ export class DirectRuntime implements Runtime {
   private async runJob(job: PlannedJob, ctx: RunContext): Promise<JobResult> {
     ctx.hooks?.onJobStart?.(job.id);
     const workdir = join(ctx.workRoot, job.id);
+
+    // Stage the workflow's directory into this job's (isolated) workspace so
+    // committed companion files are available. Each job gets its own copy.
+    await mkdir(workdir, { recursive: true });
+    if (ctx.workspaceSource) {
+      await cp(ctx.workspaceSource, workdir, { recursive: true });
+    }
+
     const target = makeTarget(job.runsOn, { workdir });
     const steps: StepResult[] = [];
     let failed = false;

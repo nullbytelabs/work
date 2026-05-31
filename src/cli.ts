@@ -9,7 +9,7 @@
 import { readFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { DirectRuntime } from "./runtime/index.ts";
@@ -88,12 +88,17 @@ async function main(): Promise<void> {
     ? resolve(args.workdir)
     : await mkdtemp(join(tmpdir(), "pi-workflows-"));
 
+  // The workflow's own directory is staged into each job's workspace, so
+  // committed companion files (scripts, fixtures) sit next to the workflow.
+  const workspaceSource = dirname(resolve(args.file));
+
   const out = process.stdout;
   if (!args.quiet) out.write(`workflow: ${plan.name}\n`);
 
   const runtime = new DirectRuntime();
   const result = await runtime.run(plan, {
     workRoot,
+    workspaceSource,
     hooks: args.quiet
       ? undefined
       : {

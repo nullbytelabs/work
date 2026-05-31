@@ -6,7 +6,7 @@
 # note: runs-on MUST be `local` here — the minimal Gondolin Alpine guest ships
 #       no node/python. on `local`, steps inherit the host PATH.
 # prerequisites: node and python3 on PATH.
-# usage: ./pi-workflows ./test/e2e/inline-polyglot.yaml
+# usage: ./pi-workflows ./test/e2e/inline-polyglot/workflow.yaml
 ---
 name: inline-polyglot
 

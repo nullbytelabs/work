@@ -5,7 +5,7 @@
 # note: today jobs run in deterministic topological order (alphabetical among
 #       ready jobs); true parallel execution of the middle tier is a planned
 #       runtime enhancement — the DAG is already expressed correctly.
-# usage: ./pi-workflows ./test/e2e/fan-out-fan-in.yaml
+# usage: ./pi-workflows ./test/e2e/fan-out-fan-in/workflow.yaml
 ---
 name: fan-out-fan-in
 

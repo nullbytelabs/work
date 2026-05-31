@@ -1,0 +1,22 @@
+# run script
+# description: runs a committed script (script.sh, in this folder) over piped
+#              input. demonstrates workspace staging — the workflow's own folder
+#              is copied into the job's workspace, so files committed next to
+#              workflow.yaml are available to the steps.
+# note: invoked as `sh script.sh` (no exec bit needed). THRESHOLD (workflow env)
+#       is in the step environment, which the script reads.
+# usage: ./pi-workflows ./test/e2e/run-script/workflow.yaml
+---
+name: run-script
+
+env:
+  THRESHOLD: "100"
+
+jobs:
+  analyze:
+    runs-on: local
+    steps:
+      - name: run
+        run: |
+          # total = 20+50+40+30 = 140, which exceeds THRESHOLD (100) -> ALERT.
+          printf "20\n50\n40\n30\n" | sh script.sh

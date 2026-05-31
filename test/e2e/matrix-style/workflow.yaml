@@ -4,7 +4,7 @@
 #              own env, all depending on `setup` and converging into `aggregate`.
 #              when matrix support lands, these three build-* jobs collapse into
 #              a single job with `strategy.matrix.node: [18, 20, 22]`.
-# usage: ./pi-workflows ./test/e2e/matrix-style.yaml
+# usage: ./pi-workflows ./test/e2e/matrix-style/workflow.yaml
 ---
 name: matrix-style
 

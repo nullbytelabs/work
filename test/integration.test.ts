@@ -52,8 +52,8 @@ jobs:
     assert.equal(step(result, "hello-world", "hello-world/0").exitCode, 0);
   });
 
-  it("runs the actual test/e2e/hello-world-local.yaml file", async () => {
-    const yaml = await readFile(resolve(HERE, "e2e", "hello-world-local.yaml"), "utf-8");
+  it("runs the actual test/e2e/hello-world-local/workflow.yaml file", async () => {
+    const yaml = await readFile(resolve(HERE, "e2e", "hello-world-local", "workflow.yaml"), "utf-8");
     const { result, output } = await runWorkflow(yaml);
     assert.equal(result.status, "success");
     assert.match(output, /hello world/);
