@@ -1,12 +1,12 @@
 /**
  * Runtime — the "how durably" layer.
  *
- * A Runtime takes a compiled ExecutionPlan and runs it. Phase 1 ships
- * DirectRuntime (in-process, sequential, no persistence). Phase 2 adds an
- * Absurd-backed runtime that implements the SAME interface: each job becomes an
- * Absurd child task, each step a `ctx.step(name, fn)` checkpoint, and the plan's
- * `jobOrder` drives spawn/await. Because both implement `Runtime`, the CLI and
- * everything above it are unchanged when durability lands.
+ * A Runtime takes a compiled ExecutionPlan and runs it. The engine's runtime is
+ * `AbsurdRuntime` (durable execution on Absurd + PGLite): a whole run is one
+ * Absurd task and each step is a `ctx.step(name, fn)` checkpoint, so completed
+ * steps are memoized and never recomputed. The interface stays small so the
+ * Postgres provider (in-process PGLite vs. a server) is a config choice, not a
+ * runtime swap.
  */
 import type { ExecutionPlan } from "../compiler/index.ts";
 

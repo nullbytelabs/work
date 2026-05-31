@@ -3,7 +3,7 @@
  *
  *   pi-workflows <workflow.yaml> [--workdir <dir>] [--quiet]
  *
- * Pipeline: read file -> parseWorkflow -> compile -> DirectRuntime.run.
+ * Pipeline: read file -> parseWorkflow -> compile -> AbsurdRuntime.run.
  * Streams step output live and exits non-zero if any job fails.
  */
 import { readFile } from "node:fs/promises";

@@ -12,7 +12,7 @@ A **GitHub-Actions-style workflow engine with durable execution**, built in Type
 | **PGMQ** (`pgmq` Postgres extension) | Message-transport layer at the edges of the Absurd graph — trigger ingress, runner-pool dispatch for `runs-on`, fan-out, results, signals, dead-letters | [`docs/pgmq-message-queues.md`](docs/pgmq-message-queues.md) |
 | **PGLite** (`@electric-sql/pglite`) | Optional Postgres *provider* — WASM PG17.5 in-process. The embedded/dev/CI/single-tenant tier behind Absurd + PGMQ (server Postgres for production) | [`docs/pglite-wasm-postgres-database.md`](docs/pglite-wasm-postgres-database.md) |
 
-> **Status:** **Phase 1 is implemented** — a working engine that parses and compiles GHA-style YAML and runs it on a swappable runtime, with `local` (host process) and `gondolin` (micro-VM) execution targets, an e2e suite, and CI. The durable runtime (**Absurd**), agentic steps (**Pi**), and the **PGMQ/PGLite** tiers are still design sketches. The five docs above are SDK research (signatures verified against docs/source; unconfirmed items flagged `UNVERIFIED`); this README is the architectural thesis, and **[`docs/phase-1.md`](docs/phase-1.md)** documents what's actually built.
+> **Status:** **Implemented** — a working engine that parses/compiles GHA-style YAML and runs it durably on **Absurd + PGLite**, with `local` (host process) and `gondolin` (micro-VM) execution targets, an e2e suite, and CI. Still design sketches: agentic steps (**Pi**) and the **PGMQ** transport tier. The five docs above are SDK research (signatures verified against docs/source; unconfirmed items flagged `UNVERIFIED`); this README is the architectural thesis, and **[`docs/phase-1.md`](docs/phase-1.md)** documents what's actually built.
 
 ---
 
@@ -32,16 +32,17 @@ And the **agent/model layer** (Pi) is uniform: one LiteLLM key fans out to every
 
 ## What's built (Phase 1)
 
-The engine runs end-to-end today on a **swappable runtime** seam: GHA-style YAML → validated spec → runtime-agnostic execution plan → `DirectRuntime` (in-process, sequential) executing each job on an `ExecutionTarget`. It runs on Node's native TypeScript — no build step, no native-binary deps (Gondolin is an optional dep loaded lazily).
+The engine runs end-to-end today: GHA-style YAML → validated spec → runtime-agnostic execution plan → **`AbsurdRuntime`** executing each job on an `ExecutionTarget`. A whole run is one Absurd task and every step is a durable `ctx.step` checkpoint, on an in-process PGLite (WASM Postgres) — no external services. It runs on Node's native TypeScript — no build step, no native-binary deps (Gondolin is an optional dep loaded lazily).
 
 **Implemented:**
 
 - **Spec + compiler** — `name`, workflow/job/step `env` layering, per-job `runs-on`, a `needs` DAG (deterministic topological order), and `run` steps; stable step naming; validation with path-aware errors.
+- **Durable runtime** — `AbsurdRuntime` on **Absurd + PGLite**: steps are checkpointed and memoized (a completed step is never recomputed on a retry). PGLite is single-connection, so execution serializes — the same code targets a server Postgres provider unchanged.
 - **Execution targets** — `local` (host child process) and `gondolin` (hardware-virtualized Alpine micro-VM via `@earendil-works/gondolin`). Per-job **workspace staging**: the workflow's own folder is copied into each job's working directory, so committed companion files (e.g. a `script.sh`) are available.
 - **CLI** — `./pi-workflows <workflow.yaml>` streams step output and exits non-zero on failure.
-- **Quality** — unit + e2e tests (`node --test`, the `test/e2e/` examples double as fixtures), ESLint + `tsc`, and GitHub Actions CI including a Gondolin VM job (QEMU + KVM).
+- **Quality** — unit + e2e tests (`node --test`, the `test/e2e/` examples double as fixtures, all run through the durable runtime), ESLint + `tsc`, and GitHub Actions CI including a Gondolin VM job (QEMU + KVM).
 
-**Not yet (design sketches):** the **Absurd** durable runtime (no persistence/crash-recovery — `DirectRuntime` is the stand-in behind the same `Runtime` interface), agentic **`uses:`** steps via **Pi**, parallel job execution, `strategy.matrix`, `if:` conditionals, cross-step/job `outputs`, and the **PGMQ/PGLite** tiers. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md).
+**Not yet (design sketches):** agentic **`uses:`** steps via **Pi**, parallel job execution, cross-process crash-resume (durability is in place; the resume UX — persistent dataDir + run id — is the next step), `strategy.matrix`, `if:` conditionals, cross-step/job `outputs`, and the **PGMQ** transport tier. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md).
 
 ```bash
 npm install
@@ -224,7 +225,7 @@ pi-workflows/
 ├── src/
 │   ├── spec/        # YAML schema + parser + validation
 │   ├── compiler/    # spec -> runtime-agnostic ExecutionPlan
-│   ├── runtime/     # Runtime interface + DirectRuntime  (Absurd runtime: future)
+│   ├── runtime/     # Runtime interface + AbsurdRuntime (Absurd + PGLite, vendored schema)
 │   ├── targets/     # ExecutionTarget: LocalTarget, GondolinTarget
 │   ├── errors.ts    # UserFacingError (clean CLI messages vs. stack traces)
 │   └── cli.ts       # read -> parse -> compile -> run

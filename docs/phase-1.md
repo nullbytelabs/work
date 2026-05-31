@@ -12,7 +12,7 @@ src/
 ├── spec/        # YAML -> WorkflowSpec types, parser, validation
 ├── compiler/    # WorkflowSpec -> ExecutionPlan (env layering, needs topo-sort)
 ├── targets/     # ExecutionTarget: LocalTarget (host) + GondolinTarget (micro-VM)
-├── runtime/     # Runtime interface + DirectRuntime (in-process, sequential)
+├── runtime/     # Runtime interface + AbsurdRuntime (Absurd + PGLite) + vendored schema.sql
 ├── errors.ts    # UserFacingError (clean CLI messages vs. unexpected stack traces)
 └── cli.ts       # read -> parse -> compile -> run
 ```
@@ -24,7 +24,7 @@ fills each with its simplest honest implementation:
 |---|---|---|
 | spec | "what to run" | full parse + validation of `name`/`env`/`jobs`/`steps`; `needs`/`runs-on`/`uses`/`if` are modeled and validated but only partially acted on |
 | compiler | "spec → task graph" | runtime-agnostic `ExecutionPlan`: env layering, default `runs-on`, stable step names, deterministic topo order |
-| runtime | "how durably" | `DirectRuntime` runs in-process, no persistence |
+| runtime | "how durably" | `AbsurdRuntime` on Absurd + in-process PGLite; steps are durable `ctx.step` checkpoints (memoized across retries) |
 | targets | "where" (`runs-on`) | `LocalTarget` (host process) and `GondolinTarget` (secure micro-VM, optional dep loaded lazily) |
 
 Runs on Node's native TypeScript support — no build step and no native-binary
@@ -110,11 +110,12 @@ for when steps need egress.
 Phase 1 was written so durability and sandboxing drop in by *substitution*, not
 rewrite:
 
-- **Durability:** add an `AbsurdRuntime implements Runtime`. The compiled
-  `ExecutionPlan` already carries everything it needs — a job becomes an Absurd
-  child task, a step becomes `ctx.step(name, fn)` (step names are already stable
-  and unique), and `jobOrder` drives the spawn/await sequence. The CLI does not
-  change. (See `docs/absurd-durable-workflows.md`.)
+- **Durability:** done — `AbsurdRuntime implements Runtime` runs every workflow
+  as one Absurd task with each `<job>/<step>` as a durable `ctx.step` checkpoint,
+  on an in-process PGLite (vendored `schema.sql` @ 0.4.0). Remaining: cross-process
+  **crash-resume** (a persistent dataDir + a run id + `--resume`), and a server
+  Postgres provider option for production. (See `docs/absurd-durable-workflows.md`
+  and `docs/pglite-wasm-postgres-database.md`.)
 - **Sandboxing:** done — `GondolinTarget implements ExecutionTarget`, registered
   in `targets/factory.ts`. Remaining Gondolin work: a curated guest image with
   language runtimes (default Alpine is minimal), workspace artifact persistence
@@ -132,9 +133,11 @@ rewrite:
 
 ## Known Phase 1 limitations
 
-- No persistence / crash recovery (that is the whole point of the Absurd layer).
+- Durable step checkpointing works, but **cross-process crash-resume** isn't
+  wired yet (needs a persistent dataDir + run id + `--resume`); the default
+  PGLite is ephemeral in-memory per run.
 - `needs` order is computed and respected, but jobs still run sequentially —
-  there is no parallel fan-out yet.
+  PGLite is single-connection, so there's no parallel fan-out yet.
 - No `uses` (agentic) steps, no `matrix`, no `if` evaluation, no step-`outputs`
   passing between steps/jobs.
 - Gondolin runs on the minimal Alpine guest image (no language runtimes) and
