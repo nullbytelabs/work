@@ -115,6 +115,18 @@ describe("parseWorkflow — validation", () => {
     assert.match(e.message, /individual job/);
   });
 
+  it("rejects a step-level conditional (if) until supported", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        if: \${{ false }}`);
+    assert.equal(e.path, "jobs.a.steps[0]");
+    assert.match(e.message, /conditionals .* aren't supported/);
+  });
+
+  it("rejects a job-level conditional (when) until supported", () => {
+    const e = err(`name: w\njobs:\n  a:\n    when: manual\n    steps: [{ run: x }]`);
+    assert.equal(e.path, "jobs.a");
+    assert.match(e.message, /conditionals/);
+  });
+
   it("rejects invalid YAML with a clear message", () => {
     assert.match(err(`name: : :`).message, /invalid YAML/);
   });

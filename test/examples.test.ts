@@ -70,13 +70,4 @@ describe("examples — DAG shape", () => {
     const plan = compilePlan("fan-out-fan-in");
     assert.deepEqual(plan.jobOrder, ["prepare", "lint", "typecheck", "unit", "report"]);
   });
-
-  it("matrix-style runs every build-* sibling before aggregate", () => {
-    const plan = compilePlan("matrix-style");
-    const aggregateIdx = plan.jobOrder.indexOf("aggregate");
-    for (const j of ["build-node18", "build-node20", "build-node22"]) {
-      assert.ok(plan.jobOrder.indexOf(j) < aggregateIdx, `${j} must precede aggregate`);
-    }
-    assert.equal(aggregateIdx, plan.jobOrder.length - 1);
-  });
 });

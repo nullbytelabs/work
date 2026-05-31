@@ -36,6 +36,20 @@ function parseEnv(raw: unknown, path: string): EnvMap | undefined {
   return out;
 }
 
+/**
+ * Conditionals (`if` / `when`) are modeled in the spec but NOT yet evaluated by
+ * the runtime. Reject them at parse time so a condition is never silently
+ * ignored (which would be worse than not supporting it).
+ */
+function rejectConditionals(raw: Record<string, unknown>, path: string): void {
+  if (raw.if !== undefined || raw.when !== undefined) {
+    throw new WorkflowParseError(
+      "conditionals (if/when) aren't supported yet — remove the condition",
+      path,
+    );
+  }
+}
+
 function parseStep(raw: unknown, path: string): StepSpec {
   if (!isPlainObject(raw)) throw new WorkflowParseError("step must be a mapping", path);
 
@@ -47,6 +61,7 @@ function parseStep(raw: unknown, path: string): StepSpec {
   if (hasRun && hasUses) {
     throw new WorkflowParseError('step cannot define both "run" and "uses"', path);
   }
+  rejectConditionals(raw, path);
 
   const step: StepSpec = {};
   if (typeof raw.name === "string") step.name = raw.name;
@@ -54,7 +69,6 @@ function parseStep(raw: unknown, path: string): StepSpec {
   if (hasRun) step.run = raw.run as string;
   if (hasUses) step.uses = raw.uses as string;
   if (isPlainObject(raw.with)) step.with = raw.with;
-  if (typeof raw.if === "string") step.if = raw.if;
   const env = parseEnv(raw.env, `${path}.env`);
   if (env) step.env = env;
   return step;
@@ -62,6 +76,7 @@ function parseStep(raw: unknown, path: string): StepSpec {
 
 function parseJob(raw: unknown, path: string): JobSpec {
   if (!isPlainObject(raw)) throw new WorkflowParseError("job must be a mapping", path);
+  rejectConditionals(raw, path);
 
   if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
     throw new WorkflowParseError("job must have a non-empty steps array", `${path}.steps`);

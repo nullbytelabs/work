@@ -30,7 +30,6 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, and `run` steps.
 |---|---|---|
 | `pipeline-steps/` | several steps in one job passing data through the shared per-job workspace; step-level env override | steps share a working directory |
 | `fan-out-fan-in/` | a diamond DAG: one job fans out to three, which fan back into one | `needs` as fan-out / fan-in |
-| `matrix-style/` | sibling jobs per parameter → an aggregate job (the manual stand-in for a future `strategy.matrix`) | parameterized fan-out |
 | `inline-polyglot/` | bash + Node + Python steps sharing files and cross-checking results | polyglot `run` steps |
 | `run-script/` | a committed `script.sh`, staged into the workspace and run with `sh script.sh` | workspace staging of committed files |
 
