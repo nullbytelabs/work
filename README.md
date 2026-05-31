@@ -12,7 +12,7 @@ A **GitHub-Actions-style workflow engine with durable execution**, built in Type
 | **PGMQ** (`pgmq` Postgres extension) | Message-transport layer at the edges of the Absurd graph — trigger ingress, runner-pool dispatch for `runs-on`, fan-out, results, signals, dead-letters | [`docs/pgmq-message-queues.md`](docs/pgmq-message-queues.md) |
 | **PGLite** (`@electric-sql/pglite`) | Optional Postgres *provider* — WASM PG17.5 in-process. The embedded/dev/CI/single-tenant tier behind Absurd + PGMQ (server Postgres for production) | [`docs/pglite-wasm-postgres-database.md`](docs/pglite-wasm-postgres-database.md) |
 
-> **Status:** design sketch. The three docs above are SDK research with API signatures verified against docs/source; items that couldn't be verified are flagged `UNVERIFIED` inline. This README is the architectural thesis tying them together.
+> **Status:** **Phase 1 is implemented** — a working engine that parses and compiles GHA-style YAML and runs it on a swappable runtime, with `local` (host process) and `gondolin` (micro-VM) execution targets, an e2e suite, and CI. The durable runtime (**Absurd**), agentic steps (**Pi**), and the **PGMQ/PGLite** tiers are still design sketches. The five docs above are SDK research (signatures verified against docs/source; unconfirmed items flagged `UNVERIFIED`); this README is the architectural thesis, and **[`docs/phase-1.md`](docs/phase-1.md)** documents what's actually built.
 
 ---
 
@@ -27,6 +27,29 @@ Three clean separations make this tractable:
 3. **Where** is the `runs-on` target: a Gondolin micro-VM (default, secure) or local (fast, less isolated).
 
 And the **agent/model layer** (Pi) is uniform: one LiteLLM key fans out to every provider, so a step just names a model.
+
+---
+
+## What's built (Phase 1)
+
+The engine runs end-to-end today on a **swappable runtime** seam: GHA-style YAML → validated spec → runtime-agnostic execution plan → `DirectRuntime` (in-process, sequential) executing each job on an `ExecutionTarget`. It runs on Node's native TypeScript — no build step, no native-binary deps (Gondolin is an optional dep loaded lazily).
+
+**Implemented:**
+
+- **Spec + compiler** — `name`, workflow/job/step `env` layering, per-job `runs-on`, a `needs` DAG (deterministic topological order), and `run` steps; stable step naming; validation with path-aware errors.
+- **Execution targets** — `local` (host child process) and `gondolin` (hardware-virtualized Alpine micro-VM via `@earendil-works/gondolin`). Per-job **workspace staging**: the workflow's own folder is copied into each job's working directory, so committed companion files (e.g. a `script.sh`) are available.
+- **CLI** — `./pi-workflows <workflow.yaml>` streams step output and exits non-zero on failure.
+- **Quality** — unit + e2e tests (`node --test`, the `test/e2e/` examples double as fixtures), ESLint + `tsc`, and GitHub Actions CI including a Gondolin VM job (QEMU + KVM).
+
+**Not yet (design sketches):** the **Absurd** durable runtime (no persistence/crash-recovery — `DirectRuntime` is the stand-in behind the same `Runtime` interface), agentic **`uses:`** steps via **Pi**, parallel job execution, `strategy.matrix`, `if:` conditionals, cross-step/job `outputs`, and the **PGMQ/PGLite** tiers. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md).
+
+```bash
+npm install
+./pi-workflows ./test/e2e/hello-world-local/workflow.yaml
+npm test
+```
+
+Full detail and the Phase 2 upgrade path: **[`docs/phase-1.md`](docs/phase-1.md)**.
 
 ---
 
@@ -176,27 +199,38 @@ jobs:
 
 How it compiles: `build`, `test`, `review` become Absurd child tasks on the jobs queue; the orchestrator enforces `needs` by awaiting results; the `matrix.node` expands into three `test` children with deterministic names; `if:` becomes a conditional inside the step; the `agent` step opens a Pi session pointed at LiteLLM, running inside the job's Gondolin VM.
 
+> **Phase 1 reality check:** per-job `runs-on`, `env`, `needs`, and `run` steps are implemented; `on:`, `strategy.matrix`, `if:`, `uses:`/agentic steps, and `$OUTPUT`/cross-step outputs are **not yet** — they illustrate the target experience. See [`docs/phase-1.md`](docs/phase-1.md) for the current subset and [`test/e2e/`](test/e2e/) for runnable examples.
+
 ---
 
-## Suggested package layout
+## Package layout
 
 ```
 pi-workflows/
 ├── README.md                       ← this file (architecture / thesis)
+├── pi-workflows                    ← CLI launcher (runs src/cli.ts on Node's native TS)
+├── eslint.config.js  tsconfig.json
 ├── docs/
+│   ├── phase-1.md                   ← what's actually built + the Phase 2 upgrade path
 │   ├── pi-coding-agent-sdk.md       ← Pi SDK reference (agent/model layer)
 │   ├── absurd-durable-workflows.md  ← Absurd reference + YAML→Absurd mapping
 │   ├── gondolin-secure-execution.md ← Gondolin reference + ExecutionTarget design
+│   ├── gondolin-custom-images.md    ← custom guest images (toolchains) + runs-on: gondolin:<variant>
 │   ├── pgmq-message-queues.md       ← PGMQ reference + dispatch/transport design
 │   └── pglite-wasm-postgres-database.md ← PGLite reference + provider-tier fit
-└── src/                             ← (future)
-    ├── spec/        # YAML schema + parser + validation
-    ├── compiler/    # spec -> Absurd task graph
-    ├── runtime/     # Absurd worker wiring, queues
-    ├── targets/     # ExecutionTarget: GondolinTarget, LocalTarget
-    ├── agent/       # Pi wrapper: session/RPC, LiteLLM provider registration
-    ├── queue/       # PGMQ wrappers: dispatcher, runner pool, results/signals
-    └── core/        # the small functional library steps compose from
+├── src/
+│   ├── spec/        # YAML schema + parser + validation
+│   ├── compiler/    # spec -> runtime-agnostic ExecutionPlan
+│   ├── runtime/     # Runtime interface + DirectRuntime  (Absurd runtime: future)
+│   ├── targets/     # ExecutionTarget: LocalTarget, GondolinTarget
+│   ├── errors.ts    # UserFacingError (clean CLI messages vs. stack traces)
+│   └── cli.ts       # read -> parse -> compile -> run
+├── test/
+│   ├── *.test.ts    # unit + integration (node --test)
+│   └── e2e/<name>/  # runnable examples = e2e fixtures (workflow.yaml + companion files)
+└── .github/workflows/ci.yml         # lint + typecheck + full suite (incl. gondolin)
+
+# future: src/agent/ (Pi), src/queue/ (PGMQ), src/core/, images/ (custom guest images)
 ```
 
 ---

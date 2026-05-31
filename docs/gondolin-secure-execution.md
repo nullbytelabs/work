@@ -727,7 +727,10 @@ try {
   compilers require building a custom image (`gondolin build`, Alpine-only) and
   pointing `sandbox.imagePath` at it. For `runs-on: gondolin` to be useful for
   arbitrary CI steps, the engine likely needs a curated base image per
-  language/toolchain — analogous to GitHub Actions runner images.
+  language/toolchain — analogous to GitHub Actions runner images. **See
+  [`gondolin-custom-images.md`](gondolin-custom-images.md)** for the verified
+  build-config format, the CI build/cache approach, and a proposed
+  `runs-on: gondolin:<variant>` design.
 - **Secrets must flow through `createHttpHooks`,** not `env`, to keep the "secret
   never in guest" guarantee. The engine's secret store should map to the
   `secrets: { NAME: { hosts, value } }` shape with explicit per-secret host
