@@ -53,6 +53,7 @@ function compileStep(
     env[k] = interpolate(v, { inputs });
   }
   const planned: PlannedStep = { name: `${jobId}/${stepKey}`, env };
+  if (step.name !== undefined) planned.title = step.name;
   if (step.id !== undefined) planned.id = step.id;
   if (step.run !== undefined) planned.run = interpolate(step.run, { inputs });
   if (step.uses !== undefined) planned.uses = step.uses;

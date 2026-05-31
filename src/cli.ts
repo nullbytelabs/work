@@ -19,6 +19,8 @@ import { AbsurdRuntime } from "./runtime/index.ts";
 import { loadConfig, type PiWorkflowsConfig } from "./config/index.ts";
 import { createAgentUsesHandler } from "./agent/index.ts";
 import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "./project.ts";
+import { selectPresenter, detectCI } from "./tui/index.ts";
+import { emitGraph, isGraphFormat, GRAPH_FORMATS, type GraphFormat } from "./graph/index.ts";
 import { UserFacingError } from "./errors.ts";
 
 const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
@@ -34,6 +36,12 @@ interface CliArgs {
   quiet: boolean;
   inputs: Record<string, unknown>;
   config?: string;
+  /** `graph` subcommand: emit the DAG instead of running. */
+  graph?: boolean;
+  /** Graph output format (defaults to mermaid). */
+  format?: GraphFormat;
+  /** `graph --steps`: expand each job to its ordered steps. */
+  steps?: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -43,12 +51,21 @@ function parseArgs(argv: string[]): CliArgs {
   let quiet = false;
   let inputs: Record<string, unknown> = {};
   let config: string | undefined;
+  let format: GraphFormat | undefined;
+  let steps = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--workspace") {
       workspace = argv[++i];
       if (!workspace) fail("--workspace requires a directory path");
+    } else if (arg === "--format") {
+      const fmt = argv[++i];
+      if (!fmt) fail("--format requires a value");
+      if (!isGraphFormat(fmt)) fail(`--format must be one of: ${GRAPH_FORMATS.join(", ")}`);
+      format = fmt;
+    } else if (arg === "--steps") {
+      steps = true;
     } else if (arg === "--workdir") {
       workdir = argv[++i];
       if (!workdir) fail("--workdir requires a directory path");
@@ -82,6 +99,18 @@ function parseArgs(argv: string[]): CliArgs {
 
   const common = { workdir, quiet, inputs, ...(workspace ? { workspace } : {}), ...(config ? { config } : {}) };
 
+  // `graph <file|name>` — emit the DAG instead of running. By-name when
+  // `--workspace` is given (like `run`), else treat the target as a file path.
+  if (positionals[0] === "graph") {
+    const target = positionals[1];
+    if (!target) fail("graph requires a workflow file or name, e.g. `pi-workflows graph ci.yaml`");
+    if (positionals.length > 2) fail(`unexpected argument: ${positionals[2]}`);
+    const fmt = format ?? "mermaid";
+    return workspace
+      ? { graph: true, format: fmt, steps, name: target, ...common }
+      : { graph: true, format: fmt, steps, file: target, ...common };
+  }
+
   // `run <name>` (by-name) vs. a bare `<workflow.yaml>` path (ad-hoc).
   if (positionals[0] === "run") {
     const name = positionals[1];
@@ -89,7 +118,9 @@ function parseArgs(argv: string[]): CliArgs {
     if (positionals.length > 2) fail(`unexpected argument: ${positionals[2]}`);
     return { name, ...common };
   }
-  if (workspace) fail("--workspace only applies to `run <name>`; pass a file path directly instead");
+  if (workspace) fail("--workspace only applies to `run <name>` / `graph <name>`; pass a file path directly instead");
+  if (format) fail("--format only applies to `graph`");
+  if (steps) fail("--steps only applies to `graph`");
   if (positionals.length === 0) {
     printUsage();
     process.exit(2);
@@ -102,7 +133,9 @@ function printUsage(): void {
   process.stderr.write(
     "Usage:\n" +
       "  pi-workflows <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n" +
-      "  pi-workflows [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n",
+      "  pi-workflows [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n" +
+      "  pi-workflows graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n" +
+      "  pi-workflows [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n",
   );
 }
 
@@ -152,6 +185,13 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  // `graph` is inspection-only: emit the compiled DAG and exit before any
+  // runtime/config/work-dir setup.
+  if (args.graph) {
+    process.stdout.write(emitGraph(plan, args.format ?? "mermaid", { steps: args.steps ?? false }));
+    process.exit(0);
+  }
+
   // Load provider/model config (for agent steps). Absent config is fine until an
   // agent step actually needs a model.
   let config: PiWorkflowsConfig | undefined;
@@ -162,21 +202,17 @@ async function main(): Promise<void> {
     ? resolve(args.workdir)
     : await mkdtemp(join(tmpdir(), "pi-workflows-"));
 
+  // Pick how to present the run: quiet (silent), a live DAG-aware board on an
+  // interactive TTY, or the buffered per-job-block output everywhere else (CI,
+  // pipes). The presenter is a pure consumer of the runtime's hooks.
   const out = process.stdout;
-  if (!args.quiet) out.write(`workflow: ${plan.name}\n`);
-
-  // Jobs run in parallel, so buffer each job's lines and flush the whole block
-  // atomically on completion — keeps per-job output contiguous instead of
-  // interleaved. Blocks print in job-completion order.
-  const buffers = new Map<string, string[]>();
-  const lines = (jobId: string) => {
-    let b = buffers.get(jobId);
-    if (!b) {
-      b = [`[job: ${jobId}]`];
-      buffers.set(jobId, b);
-    }
-    return b;
-  };
+  const presenter = selectPresenter({
+    out,
+    quiet: args.quiet,
+    isTTY: Boolean(out.isTTY),
+    isCI: detectCI(),
+  });
+  presenter.start(plan);
 
   // Compose the agent uses-handler into the (agent-agnostic) runtime.
   const runtime = new AbsurdRuntime({ usesHandlers: [createAgentUsesHandler({ config })] });
@@ -186,35 +222,13 @@ async function main(): Promise<void> {
       workRoot,
       workspaceSource: layout.workspaceSource,
       workflowDir: layout.workflowDir,
-      hooks: args.quiet
-        ? undefined
-        : {
-            onJobStart: (jobId) => void lines(jobId),
-            onStepStart: (jobId, stepName) => lines(jobId).push(`  > ${stepName}`),
-            onOutput: (jobId, _stepName, chunk) => {
-              const prefix = chunk.stream === "stderr" ? "    ! " : "    ";
-              for (const line of chunk.text.replace(/\n$/, "").split("\n")) {
-                lines(jobId).push(`${prefix}${line}`);
-              }
-            },
-            onStepEnd: (jobId, step) => {
-              const mark = step.status === "success" ? "ok" : step.status;
-              lines(jobId).push(`    (${mark}, exit ${step.exitCode})`);
-            },
-            onJobEnd: (jobId) => {
-              const b = buffers.get(jobId);
-              if (b) {
-                out.write(`\n${b.join("\n")}\n`);
-                buffers.delete(jobId);
-              }
-            },
-          },
+      hooks: presenter.hooks,
     });
   } finally {
     await runtime.close();
   }
 
-  if (!args.quiet) out.write(`\nresult: ${result.status}\n`);
+  presenter.finish(result);
   process.exit(result.status === "success" ? 0 : 1);
 }
 

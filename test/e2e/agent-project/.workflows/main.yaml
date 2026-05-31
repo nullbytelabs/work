@@ -17,7 +17,6 @@ name: ci
 
 jobs:
   verify:
-    runs-on: local
     outputs:
       source: ${{ steps.read.outputs.source }}
     steps:
@@ -41,7 +40,6 @@ jobs:
 
   review:
     needs: [verify]
-    runs-on: local
     outputs:
       review: ${{ steps.summary.outputs.summary }}
     steps:

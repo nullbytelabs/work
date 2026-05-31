@@ -16,6 +16,8 @@
 export interface PlannedStep {
   /** Stable, unique-within-job name: `<jobId>/<stepId-or-index>`. */
   name: string;
+  /** Author-given human-readable `name:`, for display (falls back to the id/index). */
+  title?: string;
   /** Author-given step id (for `steps.<id>.outputs.*` references), if any. */
   id?: string;
   /** The shell command to run, if this is a `run` step. */
