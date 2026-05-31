@@ -49,8 +49,6 @@ jobs:
         with:
           path: ~/.cache/gondolin/images
           key: gondolin-images-${{ runner.os }}-${{ runner.arch }}
-      # Full install (with optional deps) so @earendil-works/gondolin is present,
-      # then run the whole suite once with the Gondolin VM tests enabled.
       - run: npm ci
       - name: Run full suite (gondolin enabled)
         run: PI_WF_TEST_GONDOLIN=1 npm test

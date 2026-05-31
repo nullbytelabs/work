@@ -140,6 +140,8 @@ Engine gotchas surfaced by the research: **one exec at a time per VM**, so paral
 
 When a step is agentic, the target runs a Pi agent. Pi exposes a clean SDK (`createAgentSession()` → `session.prompt()` → resolves on completion) and an RPC subprocess mode — the latter is the natural fit for running the agent **inside** a Gondolin VM with crash isolation.
 
+Agents are referenced as **named, versioned packages** — `uses: agent/<name>@<ref>` — that own their system prompt, tool allowlist, and Pi configuration, so the workflow step supplies only the model and declared inputs. Pi has no native single-name "agent" object; the package is a pi-workflows composition over Pi's per-resource primitives (`systemPromptOverride`, `tools`, extensions, skills). The full interface design — grammar, manifest schema, input validation, tool/target intersection, and how it lowers onto `parse`/`compile`/`runtime` — is in [`docs/agent-uses-interface.md`](docs/agent-uses-interface.md).
+
 The model-reference layer is the payoff for "one API key for several providers": register **one Pi custom provider** named `litellm` with `api: "openai-completions"`, `baseUrl` pointed at the LiteLLM proxy's `/v1`, and a single `apiKey`. Its `models[]` list mirrors the names in LiteLLM's `config.yaml`. A workflow step then just says `model: litellm/claude-sonnet-4` and the engine resolves it via `modelRegistry.find("litellm", "claude-sonnet-4")`. Full config (file-based and programmatic) in [`docs/pi-coding-agent-sdk.md`](docs/pi-coding-agent-sdk.md).
 
 Pi's durability lives at the **session-tree** granularity (JSONL, branch/fork/label/checkpoint), which slots in below Absurd's step-level checkpointing — but note there is **no mid-LLM-turn suspend/resume**, so an agentic step is the durable unit, not a point inside one.
@@ -189,15 +191,15 @@ jobs:
     steps:
       - name: ai-review
         if: ${{ github.event_name == 'manual' }}   # lightweight conditional
-        uses: agent                 # agentic step -> Pi
+        uses: agent/review@v2       # named, versioned Pi agent package
         with:
-          model: litellm/claude-sonnet-4            # model ref via LiteLLM
-          prompt: |
-            Review the diff in /workspace for regressions and summarize risks.
-          tools: [read, grep, bash]
+          model: litellm/claude-sonnet-4            # ops override of the agent's default
+          target: /workspace                        # a declared, typed input
 ```
 
-How it compiles: `build`, `test`, `review` become Absurd child tasks on the jobs queue; the orchestrator enforces `needs` by awaiting results; the `matrix.node` expands into three `test` children with deterministic names; `if:` becomes a conditional inside the step; the `agent` step opens a Pi session pointed at LiteLLM, running inside the job's Gondolin VM.
+The agent's behavior (system prompt, tool allowlist, defaults) lives in the **agent package** (`.pi/agents/review/`), not inline at the call site — so `with` carries only the model override and declared inputs. Full grammar, manifest schema, and resolution rules: [`docs/agent-uses-interface.md`](docs/agent-uses-interface.md).
+
+How it compiles: `build`, `test`, `review` become Absurd child tasks on the jobs queue; the orchestrator enforces `needs` by awaiting results; the `matrix.node` expands into three `test` children with deterministic names; `if:` becomes a conditional inside the step; the `agent/review` step resolves its package, validates `with` against the manifest's declared inputs, then builds a Pi session (system prompt + tools from the package, model via LiteLLM) running inside the job's Gondolin VM.
 
 > **Phase 1 reality check:** per-job `runs-on`, `env`, `needs`, and `run` steps are implemented; `on:`, `strategy.matrix`, `if:`, `uses:`/agentic steps, and `$OUTPUT`/cross-step outputs are **not yet** — they illustrate the target experience. See [`docs/phase-1.md`](docs/phase-1.md) for the current subset and [`test/e2e/`](test/e2e/) for runnable examples.
 
@@ -212,6 +214,7 @@ pi-workflows/
 ├── eslint.config.js  tsconfig.json
 ├── docs/
 │   ├── phase-1.md                   ← what's actually built + the Phase 2 upgrade path
+│   ├── agent-uses-interface.md      ← agentic `uses:` design (agent/<name>@<ref> packages)
 │   ├── pi-coding-agent-sdk.md       ← Pi SDK reference (agent/model layer)
 │   ├── absurd-durable-workflows.md  ← Absurd reference + YAML→Absurd mapping
 │   ├── gondolin-secure-execution.md ← Gondolin reference + ExecutionTarget design
@@ -243,4 +246,5 @@ pi-workflows/
 4. **LiteLLM `compat` flags** — some OpenAI-compatible proxies need `supportsDeveloperRole:false` / `supportsReasoningEffort:false`. Test against the actual proxy.
 5. **VM resource sizing** — explicit CPU/RAM/disk options in `VM.create` aren't documented; no full resource governance exists yet.
 6. **Pi version/API stability** — pin and re-verify signatures.
+7. **Agent-package interface** — user-scope directory naming, built-in agent set, lockfile/hash-pinning format, `inputs` type depth, and the outputs contract are still open. See [`docs/agent-uses-interface.md`](docs/agent-uses-interface.md) §10.
 ```

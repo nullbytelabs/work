@@ -119,8 +119,14 @@ rewrite:
   in `targets/factory.ts`. Remaining Gondolin work: a curated guest image with
   language runtimes (default Alpine is minimal), workspace artifact persistence
   across steps, and per-job VM resource sizing. (See `docs/gondolin-secure-execution.md`.)
-- **Agentic steps:** `uses` steps route into Pi from inside a step body.
-  (See `docs/pi-coding-agent-sdk.md`.)
+- **Agentic steps:** `uses: agent/<name>@<ref>` resolves a named, versioned
+  agent package (system prompt + tools + model default), validates `with`
+  against its declared inputs at compile time, and routes into a Pi session from
+  inside a step body. The parse layer gains `AgentRef` syntax validation, the
+  compiler resolves the package and emits an `AgentStep`, and `direct.ts` gains
+  the branch that currently rejects `uses`. (See
+  `docs/agent-uses-interface.md` for the interface, `docs/pi-coding-agent-sdk.md`
+  for the Pi surface.)
 - **`needs` DAG / matrix / `if`:** the spec and plan already model these; the
   runtime gains the logic to await dependencies and expand matrices.
 

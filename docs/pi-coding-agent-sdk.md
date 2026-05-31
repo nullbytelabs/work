@@ -407,6 +407,8 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 Overrides available: `systemPromptOverride`, `skillsOverride` (`Skill` type), `promptsOverride` (`PromptTemplate`), `agentsFilesOverride` (virtual `AGENTS.md`). Extensions can share an event bus via `createEventBus()`.
 
+> **This `ResourceLoader` surface is what the engine's agent packages compile down to.** Pi has **no native single-name "agent" object** that bundles a system prompt + tools + model + extensions + skills — those are separate resource types assembled here. pi-workflows layers a named, versioned **agent package** (`uses: agent/<name>@<ref>`) over these primitives: the package's `instructions.md` → `systemPromptOverride`, `extensions` → `additionalExtensionPaths`, bundled `skills` → `skillsOverride`, `tools` → `createAgentSession({ tools })`, and its `model.default` → `modelRegistry.find("litellm", id)`. Spec for that composition: [`agent-uses-interface.md`](agent-uses-interface.md). Note the input-binding caveat documented there: Pi's file-based prompt templates take **positional** args (`$1`/`$@`, see https://pi.dev/docs/latest/prompt-templates), so the engine interpolates **named** `inputs` itself and calls `session.prompt(text, { expandPromptTemplates: false })` rather than relying on Pi template expansion.
+
 ---
 
 ## 8. Concurrency, cancellation, timeouts, durability/checkpoints

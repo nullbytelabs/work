@@ -561,10 +561,12 @@ await ctx.step(`${jobId}/run-build`, async () => {
   return { stdout, exitCode };
 });
 
-// agentic step (calling an agent) — see the official agent-loop example
+// agentic step (calling an agent) — see the official agent-loop example.
+// `agentStep` here is the resolved agent package (system prompt + tools + model
+// default), not inline `with.prompt` — see docs/agent-uses-interface.md.
 await ctx.step(`${jobId}/agent`, async () => {
-  const result = await runAgent({ prompt: step.with.prompt, tools });
-  return { output: result.text };
+  const result = await runAgent({ agent: agentStep, inputs: step.with });
+  return { output: result.text };   // becomes the step's memoized output
 });
 ```
 

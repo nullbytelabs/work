@@ -170,6 +170,45 @@ Think of the Postgres provider as a tier the engine selects, mirroring the `runs
 
 PGLite's specific wins for the embedded tier: zero-setup (no server to run), **in-memory mode** for ephemeral CI runs, **disk mode** (`NodeFS`) for a persistent single-node install, **prepopulated FS** to ship the engine's schema (Absurd + pgmq SQL pre-seeded) so a fresh instance skips `initdb` and migrations, and a clean Drizzle integration for the engine's own tables. A workflow author running `runs-on: local` on a laptop pairs naturally with a PGLite-on-disk backend — the whole engine + one worker in a single Node process.
 
+## Spike result — Absurd on PGLite (VERIFIED 2026-05-31)
+
+A throwaway spike proved the core bet end-to-end on Node 22: **`absurd-sdk` runs
+against PGLite** over the Postgres wire protocol, with durable-step memoization
+holding. Recipe that worked:
+
+```js
+import { PGlite } from "@electric-sql/pglite";
+import { uuid_ossp } from "@electric-sql/pglite/contrib/uuid_ossp"; // REQUIRED
+import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import pg from "pg";
+import { Absurd } from "absurd-sdk";
+
+const db = await PGlite.create({ extensions: { uuid_ossp } });
+await db.exec(absurdSql);                       // absurd.sql @ a release tag = full schema
+const server = new PGLiteSocketServer({ db, host: "127.0.0.1", port, maxConnections: 1 });
+await server.start();
+const pool = new pg.Pool({ host: "127.0.0.1", port, database: "postgres", user: "postgres", max: 1 });
+const app  = new Absurd({ db: pool, queueName: "default" });
+// registerTask + ctx.step → spawn → workBatch → fetchTaskResult → {a:11,b:22}, side-effects ran once
+```
+
+Confirmed gotchas (drive the `AbsurdRuntime` design):
+
+- **Register `uuid_ossp`** before `db.exec(absurd.sql)`, or the schema fails on
+  its first statement (`create extension "uuid-ossp"`). PGLite is PG17.5, so
+  Absurd's `portable_uuidv7()` takes the uuid-ossp path (PG18's native `uuidv7()`
+  isn't available).
+- **`pool.max: 1` is mandatory** — PGLite is single-connection. Worker
+  concurrency is therefore effectively 1: correctness/durability hold, but there
+  is **no real parallelism** on PGLite (matches the single-tenant tier). `needs`
+  fan-out still works via spawn + `awaitTaskResult` (cross-queue), just serialized.
+- **No `pg_cron`** — the cron-guarded maintenance functions install fine (guarded
+  by `to_regclass('cron.job')`) but won't run. Use **unpartitioned** queues
+  (default) and drive cleanup/partition upkeep from a JS timer if needed.
+- **Apply a release-tagged `absurd.sql`** (e.g. `0.4.0`) — it's the complete
+  schema for that version (no migrations needed on a fresh DB). Vendor it into
+  the repo and pin it; don't fetch at runtime.
+
 ## Integration gotchas specific to PGLite
 
 - **Singleton discipline:** create exactly one PGLite instance per process and never point two processes at the same dataDir. If the engine ever forks workers, they must **not** share a dataDir — give each its own, or use a real server.
