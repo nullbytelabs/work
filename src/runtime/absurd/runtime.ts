@@ -24,11 +24,9 @@ import { mkdir, cp, readFile, rm } from "node:fs/promises";
 import type { TaskContext } from "absurd-sdk";
 import { makeTarget } from "../../targets/index.ts";
 import { interpolate, type OutputBag } from "../../compiler/index.ts";
-import { resolveModel, type PiWorkflowsConfig } from "../../config/index.ts";
-import { PiAgentRunner, parseAgentUses, loadAgent, buildAgentPrompt, agentOutputs, type AgentRunner } from "../../agent/index.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
-import type { JobResult, RunContext, Runtime, StepResult, WorkflowResult } from "../types.ts";
+import type { JobResult, RunContext, Runtime, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
 
 const QUEUE = "default";
 const DEFAULT_MAX_CONCURRENCY = 16;
@@ -43,17 +41,15 @@ export interface AbsurdRuntimeOptions {
   engine?: AbsurdEngine;
   /** Max jobs to execute concurrently (default min(jobs, 16)). */
   maxConcurrency?: number;
-  /** Provider/model config for agent steps (omit if no agent steps run). */
-  config?: PiWorkflowsConfig;
-  /** Agent runner for `uses: agent/*` steps (default: Pi SDK; OpenAiAgentRunner is a lighter fallback). */
-  agentRunner?: AgentRunner;
+  /** Handlers for `uses:` steps, keyed by scheme (e.g. an agent handler). The
+   *  core is agent-agnostic; the composition root registers handlers. */
+  usesHandlers?: UsesHandler[];
 }
 
 /** Side dependencies captured by the per-job task handler (not serialized). */
 interface JobDeps {
   ctx: RunContext;
-  agentRunner: AgentRunner;
-  config?: PiWorkflowsConfig;
+  usesHandlers: UsesHandler[];
 }
 
 export class AbsurdRuntime implements Runtime {
@@ -62,16 +58,14 @@ export class AbsurdRuntime implements Runtime {
   private readonly ownsEngine: boolean;
   private readonly dataDir: string | undefined;
   private readonly maxConcurrency: number | undefined;
-  private readonly config: PiWorkflowsConfig | undefined;
-  private readonly agentRunner: AgentRunner;
+  private readonly usesHandlers: UsesHandler[];
 
   constructor(opts: AbsurdRuntimeOptions = {}) {
     this.engine = opts.engine ?? null;
     this.ownsEngine = opts.engine === undefined;
     this.dataDir = opts.dataDir;
     this.maxConcurrency = opts.maxConcurrency;
-    this.config = opts.config;
-    this.agentRunner = opts.agentRunner ?? new PiAgentRunner();
+    this.usesHandlers = opts.usesHandlers ?? [];
   }
 
   private async ensureEngine(): Promise<AbsurdEngine> {
@@ -82,7 +76,7 @@ export class AbsurdRuntime implements Runtime {
   async run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult> {
     const { app } = await this.ensureEngine();
     const runId = randomUUID();
-    const deps: JobDeps = { ctx, agentRunner: this.agentRunner, config: this.config };
+    const deps: JobDeps = { ctx, usesHandlers: this.usesHandlers };
 
     const jobTaskName = `job:${plan.name}:${runId}`;
     app.registerTask(
@@ -224,7 +218,7 @@ async function runJobInTask(
 
       const result = await taskCtx.step<StepResult>(step.name, async () => {
         if (step.uses !== undefined) {
-          return runAgentStep(step, deps, exprCtx());
+          return runUsesStep(step, job, workdir, deps, exprCtx());
         }
         return runShellStep(step, job, target!, workdir, ctx, exprCtx());
       });
@@ -295,59 +289,51 @@ async function runShellStep(
   return result;
 }
 
-/** A `uses: agent/<name>` step — bind inputs, call the AgentRunner, map outputs. */
-async function runAgentStep(
+/**
+ * A `uses:` step — dispatch to the registered handler for its scheme. The core
+ * resolves expressions in `with` (needs/steps) but knows nothing about what the
+ * handler does (agents, etc. are composed in from outside).
+ */
+async function runUsesStep(
   step: PlannedStep,
+  job: PlannedJob,
+  workdir: string,
   deps: JobDeps,
   expr: { needs: NeedsContext; steps: Record<string, OutputBag> },
 ): Promise<StepResult> {
+  const emit = (chunk: { stream: "stdout" | "stderr"; text: string }) =>
+    deps.ctx.hooks?.onOutput?.(job.id, step.name, chunk);
+  const fail = (message: string): StepResult => {
+    emit({ stream: "stderr", text: message });
+    return { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: message };
+  };
+
+  const uses = step.uses!;
+  const scheme = uses.split("/", 1)[0]!;
+  const handler = deps.usesHandlers.find((h) => h.scheme === scheme);
+  if (!handler) {
+    return fail(`no handler registered for uses: "${uses}" (scheme "${scheme}")`);
+  }
+
+  // Resolve ${{ needs.* }} / ${{ steps.* }} in string `with` values; the handler
+  // receives concrete values and never touches the expression engine.
+  const resolvedWith: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(step.with ?? {})) {
+    resolvedWith[k] = typeof v === "string" ? interpolate(v, expr) : v;
+  }
+
   try {
-    const { name } = parseAgentUses(step.uses!);
-    const agent = await loadAgent(name);
-
-    // Interpolate `with` string values (needs/steps) and split off `model`.
-    const withRaw = step.with ?? {};
-    let modelAlias: string | undefined;
-    const inputs: Record<string, string> = {};
-    for (const [k, v] of Object.entries(withRaw)) {
-      const val = typeof v === "string" ? interpolate(v, expr) : String(v);
-      if (k === "model") modelAlias = val;
-      else inputs[k] = val;
-    }
-    // Validate declared inputs.
-    for (const [key, spec] of Object.entries(agent.inputs)) {
-      if (spec.required && !(key in inputs)) {
-        throw new Error(`agent "${name}" requires input "${key}"`);
-      }
-    }
-
-    const model = deps.config ? resolveModel(deps.config, modelAlias) : undefined;
-    const res = await deps.agentRunner.run({
-      system: agent.instructions,
-      prompt: buildAgentPrompt(agent, inputs),
-      ...(model ? { model } : {}),
-    });
-
-    // A "length" finish means the model hit max_tokens — the output is truncated.
-    // Surface it (don't hide a partial answer as a clean success).
-    const truncated = res.finishReason === "length";
+    const res = await handler.run({ uses, with: resolvedWith, workdir, runsOn: job.runsOn, emit });
     return {
       name: step.name,
-      status: "success",
-      exitCode: 0,
-      stdout: res.text,
-      stderr: truncated
-        ? `warning: agent output was truncated (finish_reason=length) — raise the model's maxTokens in config`
-        : "",
-      outputs: agentOutputs(agent, res.text),
+      status: res.status,
+      exitCode: res.status === "success" ? 0 : 1,
+      stdout: res.stdout ?? "",
+      stderr: res.stderr ?? "",
+      ...(res.outputs ? { outputs: res.outputs } : {}),
     };
   } catch (err) {
-    return {
-      name: step.name,
-      status: "failure",
-      exitCode: 1,
-      stdout: "",
-      stderr: (err as Error).message,
-    };
+    // Handlers shouldn't throw, but never let one crash the job task.
+    return fail(`uses handler "${scheme}" threw: ${(err as Error).message}`);
   }
 }

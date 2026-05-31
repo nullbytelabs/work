@@ -188,6 +188,33 @@ jobs:
     assert.match(s.stderr, /truncated \(finish_reason=length\)/);
   });
 
+  it("surfaces an agent-step failure (error reaches both stderr and streamed output)", async () => {
+    const boom = { run: async () => { throw new Error("kaboom from runner"); } };
+    const plan = compile(parseWorkflow(`
+name: f
+jobs:
+  go:
+    runs-on: local
+    steps:
+      - id: s
+        uses: agent/summarize
+        with: { input: "x" }
+`));
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-aerr-"));
+    let result: WorkflowResult;
+    let output = "";
+    try {
+      result = await runtime.run(plan, { workRoot, hooks: { onOutput: (_j, _s, c) => (output += c.text) } }, boom);
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
+    const s = result.jobs[0]!.steps[0]!;
+    assert.equal(result.status, "failure");
+    assert.equal(s.status, "failure");
+    assert.match(s.stderr, /kaboom from runner/);
+    assert.match(output, /kaboom from runner/); // streamed so the CLI shows it
+  });
+
   it("runs an agent step (mock runner) and exposes its summary output", async () => {
     const { result, output } = await runWorkflow(`
 name: agent

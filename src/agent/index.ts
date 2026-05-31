@@ -44,6 +44,8 @@ export interface AgentRunner {
 
 // The Pi-SDK-backed runner (default; full run + retries via session.prompt).
 export { PiAgentRunner } from "./pi-runner.ts";
+// The agent uses-handler — register this with the runtime (composition root).
+export { createAgentUsesHandler, type AgentUsesHandlerOptions } from "./uses-handler.ts";
 
 /** Calls an OpenAI-compatible `/chat/completions` endpoint (Fireworks/LiteLLM/etc.). */
 export class OpenAiAgentRunner implements AgentRunner {

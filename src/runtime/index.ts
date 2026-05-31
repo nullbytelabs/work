@@ -5,6 +5,9 @@ export type {
   WorkflowResult,
   JobResult,
   StepResult,
+  UsesHandler,
+  UsesContext,
+  UsesResult,
 } from "./types.ts";
 export { AbsurdRuntime, type AbsurdRuntimeOptions } from "./absurd/runtime.ts";
 export {

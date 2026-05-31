@@ -175,15 +175,18 @@ export class PiAgentRunner implements AgentRunner {
       );
     }
 
-    // In-memory auth + registry; runtime (non-persisted) API key for our provider.
+    // In-memory auth + registry (nothing persisted to disk).
     const authStorage = pi.AuthStorage.inMemory();
-    authStorage.setRuntimeApiKey(PROVIDER_NAME, model.apiKey);
     const modelRegistry = pi.ModelRegistry.inMemory(authStorage);
 
-    // Custom OpenAI-compatible provider built from the resolved model.
+    // Custom OpenAI-compatible provider built from the resolved model. The
+    // registry requires `apiKey` when `models` are defined; our config loader
+    // already expanded any $ENV, so model.apiKey is the literal secret. (Pi
+    // would interpret a leading `$`/`!` as env/command — fine for fw_/sk_ keys.)
     const providerConfig: PiProviderConfig = {
       name: PROVIDER_NAME,
       baseUrl: model.baseUrl,
+      apiKey: model.apiKey,
       api: "openai-completions",
       authHeader: true,
       models: [
@@ -257,10 +260,19 @@ export class PiAgentRunner implements AgentRunner {
         .map((block) => block.text)
         .join("");
 
-      const result: AgentResult = { text };
-      if (typeof lastAssistant.stopReason === "string") {
-        result.finishReason = lastAssistant.stopReason;
+      const stop = typeof lastAssistant.stopReason === "string" ? lastAssistant.stopReason : undefined;
+      // Pi resolves prompt() even on failure, signalling via stopReason rather
+      // than throwing. Treat error/aborted as a hard failure (don't return an
+      // empty "success").
+      if (stop === "error" || stop === "aborted") {
+        throw new UserFacingError(
+          `agent run did not complete (stopReason=${stop})` +
+            (text ? `: ${text.slice(0, 200)}` : " — check the model id, endpoint, and API key"),
+        );
       }
+
+      const result: AgentResult = { text };
+      if (stop) result.finishReason = stop;
       return result;
     } finally {
       session.dispose();

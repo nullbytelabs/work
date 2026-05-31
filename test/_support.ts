@@ -4,7 +4,7 @@
 import { before, after } from "node:test";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunContext, type WorkflowResult } from "../src/runtime/index.ts";
 import type { ExecutionPlan } from "../src/compiler/index.ts";
-import type { AgentRunner, AgentRequest } from "../src/agent/index.ts";
+import { createAgentUsesHandler, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
 
 /** Deterministic agent runner for tests — no network. Echoes a canned summary. */
 export const mockAgentRunner: AgentRunner = {
@@ -29,10 +29,12 @@ export function useSharedRuntime(): SharedRuntime {
     if (engine) await engine.close();
   });
   return {
-    // Agent steps use the mock runner (no inference) unless a test passes its own.
+    // Register the agent uses-handler with the mock runner (no inference) unless
+    // a test passes its own runner.
     run(plan, ctx, agentRunner = mockAgentRunner) {
       if (!engine) throw new Error("engine not started");
-      return new AbsurdRuntime({ engine, agentRunner }).run(plan, ctx);
+      const usesHandlers = [createAgentUsesHandler({ runner: agentRunner })];
+      return new AbsurdRuntime({ engine, usesHandlers }).run(plan, ctx);
     },
   };
 }

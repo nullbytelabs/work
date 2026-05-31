@@ -60,3 +60,37 @@ export interface Runtime {
   readonly kind: string;
   run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult>;
 }
+
+/**
+ * The contract for `uses:` steps. The durable core stays agent-agnostic: it
+ * dispatches a step whose `uses:` is `<scheme>/<…>` to the registered handler
+ * for that scheme and maps the result into a step result. Agents are just one
+ * handler (`scheme: "agent"`), composed in at the CLI/test layer — the runtime
+ * imports none of the agent/Pi/config code.
+ */
+export interface UsesContext {
+  /** The raw `uses:` value, e.g. "agent/summarize@v2". */
+  uses: string;
+  /** The step's `with:` — string values are already interpolated by the core. */
+  with: Record<string, unknown>;
+  /** The job's working directory (staged workspace). */
+  workdir: string;
+  /** The job's `runs-on` target key. */
+  runsOn: string;
+  /** Stream output live (shown by the CLI, captured by hooks). */
+  emit(chunk: { stream: "stdout" | "stderr"; text: string }): void;
+}
+
+export interface UsesResult {
+  status: "success" | "failure";
+  stdout?: string;
+  stderr?: string;
+  outputs?: Record<string, string>;
+}
+
+export interface UsesHandler {
+  /** The `uses:` scheme this handles (the segment before the first `/`), e.g. "agent". */
+  readonly scheme: string;
+  /** Should not throw — return a failure result (and `emit` the reason) instead. */
+  run(ctx: UsesContext): Promise<UsesResult>;
+}

@@ -14,6 +14,7 @@ import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { AbsurdRuntime } from "./runtime/index.ts";
 import { loadConfig, type PiWorkflowsConfig } from "./config/index.ts";
+import { createAgentUsesHandler } from "./agent/index.ts";
 import { UserFacingError } from "./errors.ts";
 
 const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
@@ -146,7 +147,8 @@ async function main(): Promise<void> {
     return b;
   };
 
-  const runtime = new AbsurdRuntime(config ? { config } : {});
+  // Compose the agent uses-handler into the (agent-agnostic) runtime.
+  const runtime = new AbsurdRuntime({ usesHandlers: [createAgentUsesHandler({ config })] });
   let result;
   try {
     result = await runtime.run(plan, {

@@ -11,7 +11,6 @@ name: agent-summarize
 
 jobs:
   produce:
-    runs-on: local
     outputs:
       report: ${{ steps.gen.outputs.report }}
     steps:
@@ -21,7 +20,6 @@ jobs:
           printf 'report=%s\n' "Q3 revenue rose 12 percent to 4.2M dollars; churn fell to 3 percent; headcount grew by 8 across engineering and sales." >> "$PI_OUTPUT"
 
   summarize:
-    runs-on: local
     needs: [produce]
     steps:
       - id: sum

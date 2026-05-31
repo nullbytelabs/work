@@ -163,6 +163,14 @@ src/agents/summarize/
   # skills/, extension.ts — reserved for the future Pi-SDK (tool-using) runner
 ```
 
+**The durable core is agent-agnostic.** It dispatches a `uses:` step to a
+registered handler by **scheme** (`<scheme>/<…>`) via a small `UsesHandler`
+contract (`src/runtime/types.ts`) and imports none of the agent/LLM/config code;
+an unregistered scheme fails with `no handler registered for uses: …`. The
+`agent` handler (`src/agent/uses-handler.ts`, `createAgentUsesHandler`) is
+composed into the runtime at the edge (the CLI, or tests). So "what runs
+durably" stays cleanly separated from "what a step happens to do."
+
 The step's `with:` binds the package's declared inputs into `task.md`; the
 package is loaded from disk through an `AgentRunner` seam. The **default runner
 is the Pi coding-agent SDK** (`@earendil-works/pi-coding-agent`, an optional
