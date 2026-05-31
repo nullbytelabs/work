@@ -25,7 +25,7 @@ Everything here uses only Phase 1 capabilities: `name`, workflow/job/step `env`,
 | `fan-out-fan-in.yaml` | a diamond DAG: one job fans out to three, which fan back into one | `needs` as fan-out / fan-in |
 | `matrix-style.yaml` | sibling jobs per parameter → an aggregate job (the manual stand-in for a future `strategy.matrix`) | parameterized fan-out |
 | `inline-polyglot.yaml` | bash + Node + Python steps sharing files and cross-checking results | polyglot `run` steps |
-| `generated-script.yaml` | one step authors a multi-function shell script, a later step runs it over data | scripting + persisted workspace |
+| `generated-script.yaml` | one step authors a POSIX `sh` script, a later step runs it over data — inside a Gondolin VM | scripting + persisted workspace on `gondolin` |
 
 ## Notes on current behavior
 
@@ -38,5 +38,8 @@ Everything here uses only Phase 1 capabilities: `name`, workflow/job/step `env`,
   directories; there is no cross-job artifact passing yet.
 - **`local` vs `gondolin`.** `local` runs steps as host child processes and
   inherits the host `PATH` (so `node`/`python3`/etc. are available). The
-  Gondolin guest is a minimal Alpine image — no `node`/`python`/`bash` — so
-  `inline-polyglot.yaml` and `generated-script.yaml` are `local` examples.
+  Gondolin guest is a minimal Alpine image — no `node`/`python`/`bash`, but it
+  does have BusyBox `/bin/sh`. So `inline-polyglot.yaml` (needs node + python)
+  is a `local` example, while `generated-script.yaml` runs on `gondolin` by
+  keeping its script POSIX-`sh`. Gondolin examples in the test suite are gated
+  behind `PI_WF_TEST_GONDOLIN=1` (they need Node ≥ 23.6 + QEMU).

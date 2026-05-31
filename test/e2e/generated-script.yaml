@@ -3,25 +3,26 @@
 #              workspace; a later step makes it executable and runs it over input
 #              data. shows the per-job workspace persisting across steps plus a
 #              script with a loop + conditional that reads a workflow env var.
+# note: the script targets POSIX /bin/sh (not bash) so it runs in the minimal
+#       Gondolin Alpine guest as well as on `local`.
 # usage: ./pi-workflows ./test/e2e/generated-script.yaml
 ---
 name: generated-script
-
-runs-on: local
 
 env:
   THRESHOLD: "100"
 
 jobs:
   scripted:
+    runs-on: gondolin
     steps:
       - name: write-script
         run: |
           # quoted heredoc ('SCRIPT'): the body is written verbatim — $vars are
           # NOT expanded now; the script expands them itself at run time.
           cat > analyze.sh <<'SCRIPT'
-          #!/usr/bin/env bash
-          set -euo pipefail
+          #!/bin/sh
+          set -eu
           # sum the numbers on stdin and flag if the total exceeds THRESHOLD
           total=0
           count=0

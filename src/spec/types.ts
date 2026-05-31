@@ -49,8 +49,6 @@ export interface WorkflowSpec {
   on?: unknown;
   /** Workflow-level env, the base layer for all jobs/steps. */
   env?: EnvMap;
-  /** Default execution target for jobs that don't declare their own `runs-on`. */
-  runsOn?: string;
   /** Named jobs. */
   jobs: Record<string, JobSpec>;
 }

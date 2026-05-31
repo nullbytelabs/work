@@ -46,16 +46,11 @@ function compileStep(
   return planned;
 }
 
-function compileJob(
-  jobId: string,
-  job: JobSpec,
-  workflowEnv: Record<string, string>,
-  defaultRunsOn: string,
-): PlannedJob {
+function compileJob(jobId: string, job: JobSpec, workflowEnv: Record<string, string>): PlannedJob {
   const jobEnv = mergeEnv(workflowEnv, job.env);
   return {
     id: jobId,
-    runsOn: job.runsOn ?? defaultRunsOn,
+    runsOn: job.runsOn ?? DEFAULT_RUNS_ON,
     needs: job.needs ?? [],
     steps: job.steps.map((s, i) => compileStep(s, jobId, i, jobEnv)),
   };
@@ -103,10 +98,9 @@ function topoSort(jobs: Record<string, PlannedJob>): string[] {
 /** Compile a validated spec into an execution plan. */
 export function compile(spec: WorkflowSpec): ExecutionPlan {
   const workflowEnv = spec.env ?? {};
-  const defaultRunsOn = spec.runsOn ?? DEFAULT_RUNS_ON;
   const jobs: Record<string, PlannedJob> = {};
   for (const [jobId, job] of Object.entries(spec.jobs)) {
-    jobs[jobId] = compileJob(jobId, job, workflowEnv, defaultRunsOn);
+    jobs[jobId] = compileJob(jobId, job, workflowEnv);
   }
   return { name: spec.name, jobs, jobOrder: topoSort(jobs) };
 }

@@ -112,14 +112,21 @@ export function parseWorkflow(yamlText: string): WorkflowSpec {
     throw new WorkflowParseError('missing required field "jobs" (must have at least one job)', "jobs");
   }
 
+  // `runs-on` is per-job only — there is no workflow-level default.
+  if (doc.runsOn !== undefined || doc["runs-on"] !== undefined) {
+    throw new WorkflowParseError(
+      "runs-on is defined per job, not at the workflow level — move it under each job",
+      "runs-on",
+    );
+  }
+
   const jobs: Record<string, JobSpec> = {};
   for (const [jobId, rawJob] of Object.entries(doc.jobs)) {
-    // Common authoring slip: a default `runs-on` placed inside `jobs:` instead
-    // of at the workflow level. Detect it and point at the right spot.
+    // Common authoring slip: `runs-on` placed as a key inside `jobs:` instead of
+    // on a job. Detect it and point at the right spot.
     if ((jobId === "runs-on" || jobId === "runsOn") && typeof rawJob === "string") {
       throw new WorkflowParseError(
-        'a default execution target goes at the workflow level (top-level "runs-on"), ' +
-          "not inside the jobs map; or set runs-on on each individual job",
+        "runs-on belongs on an individual job, not directly under the jobs map",
         `jobs.${jobId}`,
       );
     }
@@ -139,14 +146,6 @@ export function parseWorkflow(yamlText: string): WorkflowSpec {
   if (doc.on !== undefined) spec.on = doc.on;
   const env = parseEnv(doc.env, "env");
   if (env) spec.env = env;
-
-  const runsOn = doc.runsOn ?? doc["runs-on"];
-  if (runsOn !== undefined) {
-    if (typeof runsOn !== "string") {
-      throw new WorkflowParseError("runs-on must be a string", "runs-on");
-    }
-    spec.runsOn = runsOn;
-  }
 
   return spec;
 }

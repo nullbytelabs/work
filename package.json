@@ -11,7 +11,8 @@
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",
     "hello": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts ./test/e2e/hello-world-local.yaml",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "yaml": "^2.5.1"
@@ -20,8 +21,12 @@
     "@earendil-works/gondolin": "^0.12.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.7.5",
+    "eslint": "^10.4.1",
+    "globals": "^16.0.0",
     "typescript": "^5.8.0",
-    "@types/node": "^22.7.5"
+    "typescript-eslint": "^8.60.0"
   },
   "engines": {
     "node": ">=22.6"

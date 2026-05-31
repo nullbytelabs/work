@@ -1,5 +1,7 @@
 # pi-workflows
 
+[![CI](https://github.com/nullbytelabs/pi-workflows/actions/workflows/ci.yml/badge.svg)](https://github.com/nullbytelabs/pi-workflows/actions/workflows/ci.yml)
+
 A **GitHub-Actions-style workflow engine with durable execution**, built in TypeScript on three pillars:
 
 | Pillar | Role | Reference |

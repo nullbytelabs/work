@@ -1,7 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { readFileSync, readdirSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,11 +14,17 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = resolve(HERE, "e2e");
 
 const hasPython3 = spawnSync("python3", ["--version"]).status === 0;
+const RUN_VM = process.env["PI_WF_TEST_GONDOLIN"] === "1";
 
-/** Run an example file end-to-end on the local target; return its result. */
+// Examples needing a runtime not guaranteed in the local/CI environment.
+const NEEDS_PYTHON = new Set(["inline-polyglot.yaml"]);
+
+function compilePlan(file: string) {
+  return compile(parseWorkflow(readFileSync(join(EXAMPLES, file), "utf-8")));
+}
+
 async function runExample(file: string) {
-  const yaml = await readFile(join(EXAMPLES, file), "utf-8");
-  const plan = compile(parseWorkflow(yaml));
+  const plan = compilePlan(file);
   const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-ex-"));
   try {
     return await new DirectRuntime().run(plan, { workRoot });
@@ -26,36 +33,40 @@ async function runExample(file: string) {
   }
 }
 
-// Local-only examples (those without a gondolin job) should run green here.
-const LOCAL_EXAMPLES: { file: string; needsPython?: boolean }[] = [
-  { file: "hello-world-local.yaml" },
-  { file: "pipeline-steps.yaml" },
-  { file: "fan-out-fan-in.yaml" },
-  { file: "matrix-style.yaml" },
-  { file: "generated-script.yaml" },
-  { file: "inline-polyglot.yaml", needsPython: true },
-];
+const files = readdirSync(EXAMPLES)
+  .filter((f) => f.endsWith(".yaml"))
+  .sort();
 
-describe("examples — local runs succeed", () => {
-  for (const ex of LOCAL_EXAMPLES) {
-    const skip = ex.needsPython && !hasPython3 ? "python3 not on PATH" : false;
-    it(`runs ${ex.file}`, { skip }, async () => {
-      const result = await runExample(ex.file);
-      assert.equal(result.status, "success", `${ex.file} should succeed`);
+// Each example is classified by its compiled `runs-on`: any job on gondolin
+// gates the whole example behind PI_WF_TEST_GONDOLIN (needs Node >= 23.6 + QEMU).
+// This adapts automatically as examples move between local and gondolin.
+describe("examples — every workflow runs to success", () => {
+  for (const file of files) {
+    const plan = compilePlan(file);
+    const usesGondolin = Object.values(plan.jobs).some((j) => j.runsOn === "gondolin");
+    const skip = usesGondolin
+      ? RUN_VM
+        ? false
+        : "set PI_WF_TEST_GONDOLIN=1 (needs Node >= 23.6 + QEMU)"
+      : NEEDS_PYTHON.has(file) && !hasPython3
+        ? "python3 not on PATH"
+        : false;
+
+    it(`runs ${file}`, { skip }, async () => {
+      const result = await runExample(file);
+      assert.equal(result.status, "success", `${file} should succeed`);
     });
   }
 });
 
 describe("examples — DAG shape", () => {
-  it("fan-out-fan-in compiles to the expected topological order", async () => {
-    const yaml = await readFile(join(EXAMPLES, "fan-out-fan-in.yaml"), "utf-8");
-    const plan = compile(parseWorkflow(yaml));
+  it("fan-out-fan-in compiles to the expected topological order", () => {
+    const plan = compilePlan("fan-out-fan-in.yaml");
     assert.deepEqual(plan.jobOrder, ["prepare", "lint", "typecheck", "unit", "report"]);
   });
 
-  it("matrix-style runs every build-* sibling before aggregate", async () => {
-    const yaml = await readFile(join(EXAMPLES, "matrix-style.yaml"), "utf-8");
-    const plan = compile(parseWorkflow(yaml));
+  it("matrix-style runs every build-* sibling before aggregate", () => {
+    const plan = compilePlan("matrix-style.yaml");
     const aggregateIdx = plan.jobOrder.indexOf("aggregate");
     for (const j of ["build-node18", "build-node20", "build-node22"]) {
       assert.ok(plan.jobOrder.indexOf(j) < aggregateIdx, `${j} must precede aggregate`);

@@ -8,18 +8,18 @@
 ---
 name: matrix-style
 
-runs-on: local
-
 env:
   APP: "demo"
 
 jobs:
   setup:
+    runs-on: local
     steps:
       - name: setup
         run: echo "resolved dependencies for ${APP}"
 
   build-node18:
+    runs-on: local
     needs: [setup]
     env:
       NODE_MAJOR: "18"
@@ -28,6 +28,7 @@ jobs:
         run: echo "building ${APP} against node ${NODE_MAJOR}"
 
   build-node20:
+    runs-on: local
     needs: [setup]
     env:
       NODE_MAJOR: "20"
@@ -36,6 +37,7 @@ jobs:
         run: echo "building ${APP} against node ${NODE_MAJOR}"
 
   build-node22:
+    runs-on: local
     needs: [setup]
     env:
       NODE_MAJOR: "22"
@@ -44,6 +46,7 @@ jobs:
         run: echo "building ${APP} against node ${NODE_MAJOR}"
 
   aggregate:
+    runs-on: local
     needs: [build-node18, build-node20, build-node22]
     steps:
       - name: aggregate

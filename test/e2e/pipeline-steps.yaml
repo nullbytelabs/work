@@ -6,13 +6,12 @@
 ---
 name: pipeline-steps
 
-runs-on: local
-
 env:
   GREETING: "hello"
 
 jobs:
   pipeline:
+    runs-on: local
     steps:
       - name: generate
         run: |

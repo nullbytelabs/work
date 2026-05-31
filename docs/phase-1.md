@@ -56,8 +56,9 @@ Exit code is `0` on success, `1` on workflow failure, `2` on bad input.
 
 ## `runs-on`
 
-A job declares `runs-on`; a workflow-level `runs-on` sets the default for jobs
-that omit their own. Two targets are supported:
+Each job declares its own `runs-on` (there is no workflow-level default — a
+top-level `runs-on` is rejected). A job that omits it falls back to `local`. Two
+targets are supported:
 
 - **`local`** — runs each step as a host `/bin/bash -lc` child process. Fast, no
   isolation. No extra dependencies. (`test/e2e/hello-world-local.yaml`)

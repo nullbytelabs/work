@@ -35,19 +35,18 @@ describe("compile — defaults and naming", () => {
     assert.equal(DEFAULT_RUNS_ON, "local");
   });
 
-  it("uses the workflow-level runs-on as the default, with per-job override", () => {
+  it("takes runs-on from each job, falling back to the default when omitted", () => {
     const p = plan(`
 name: w
-runs-on: gondolin
 jobs:
-  inherits:
+  uses-default:
     steps: [{ run: "true" }]
-  overrides:
-    runs-on: local
+  explicit:
+    runs-on: gondolin
     steps: [{ run: "true" }]
 `);
-    assert.equal(p.jobs["inherits"]!.runsOn, "gondolin");
-    assert.equal(p.jobs["overrides"]!.runsOn, "local");
+    assert.equal(p.jobs["uses-default"]!.runsOn, DEFAULT_RUNS_ON);
+    assert.equal(p.jobs["explicit"]!.runsOn, "gondolin");
   });
 
   it("names steps <job>/<index> by default and <job>/<id> when id is set", () => {
