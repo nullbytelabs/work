@@ -152,11 +152,28 @@ resolve at runtime. Unknown roots still error. See `test/e2e/agent-summarize/`.
 
 ## Agent steps (`uses: agent/<name>`)
 
-`uses: agent/summarize` runs a **built-in** agent (fixed system prompt + a task
-built from `with:` inputs) through an `AgentRunner` seam. The default runner makes
-one OpenAI-compatible chat-completion call (Node `fetch`) to a provider from the
-config JSON; the result is exposed as `steps.<id>.outputs.summary`. The runner is
-injectable, so tests use a mock and never call inference.
+`uses: agent/summarize` runs an agent **package** — a directory under
+`src/agents/<name>/`:
+
+```
+src/agents/summarize/
+  agent.yaml        # manifest: description, declared inputs/outputs
+  instructions.md   # system prompt (standing persona/policy)
+  task.md           # task template; {{ input }} placeholders bound from `with`
+  # skills/, extension.ts — reserved for the future Pi-SDK (tool-using) runner
+```
+
+The step's `with:` binds the package's declared inputs into `task.md`; the
+package is loaded from disk through an `AgentRunner` seam. The **default runner
+is the Pi coding-agent SDK** (`@earendil-works/pi-coding-agent`, an optional
+dependency loaded lazily; needs Node ≥ 22.19): it registers an OpenAI-compatible
+provider in memory and drives `session.prompt()`, which resolves only after the
+full run **including retries**. A dependency-free `OpenAiAgentRunner` (one
+`fetch`) is a lighter fallback behind the same seam. The result is exposed as
+`steps.<id>.outputs.summary`; a `length` finish adds a truncation warning. The
+runner is injectable, so tests use a mock and never call inference. (Tool-using
+agents, `runs-on` tool∩target enforcement, and `@ref`/override paths are next —
+see `docs/agent-uses-interface.md`.)
 
 **Config** (`--config <file>`, `$PI_WORKFLOWS_CONFIG`, or `./pi-workflows.config.json`):
 

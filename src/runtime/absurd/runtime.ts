@@ -25,7 +25,7 @@ import type { TaskContext } from "absurd-sdk";
 import { makeTarget } from "../../targets/index.ts";
 import { interpolate, type OutputBag } from "../../compiler/index.ts";
 import { resolveModel, type PiWorkflowsConfig } from "../../config/index.ts";
-import { OpenAiAgentRunner, parseAgentUses, resolveAgent, type AgentRunner } from "../../agent/index.ts";
+import { PiAgentRunner, parseAgentUses, loadAgent, buildAgentPrompt, agentOutputs, type AgentRunner } from "../../agent/index.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
 import type { JobResult, RunContext, Runtime, StepResult, WorkflowResult } from "../types.ts";
@@ -45,7 +45,7 @@ export interface AbsurdRuntimeOptions {
   maxConcurrency?: number;
   /** Provider/model config for agent steps (omit if no agent steps run). */
   config?: PiWorkflowsConfig;
-  /** Agent runner for `uses: agent/*` steps (default: OpenAI-compatible HTTP). */
+  /** Agent runner for `uses: agent/*` steps (default: Pi SDK; OpenAiAgentRunner is a lighter fallback). */
   agentRunner?: AgentRunner;
 }
 
@@ -71,7 +71,7 @@ export class AbsurdRuntime implements Runtime {
     this.dataDir = opts.dataDir;
     this.maxConcurrency = opts.maxConcurrency;
     this.config = opts.config;
-    this.agentRunner = opts.agentRunner ?? new OpenAiAgentRunner();
+    this.agentRunner = opts.agentRunner ?? new PiAgentRunner();
   }
 
   private async ensureEngine(): Promise<AbsurdEngine> {
@@ -303,7 +303,7 @@ async function runAgentStep(
 ): Promise<StepResult> {
   try {
     const { name } = parseAgentUses(step.uses!);
-    const agent = resolveAgent(name);
+    const agent = await loadAgent(name);
 
     // Interpolate `with` string values (needs/steps) and split off `model`.
     const withRaw = step.with ?? {};
@@ -324,17 +324,22 @@ async function runAgentStep(
     const model = deps.config ? resolveModel(deps.config, modelAlias) : undefined;
     const res = await deps.agentRunner.run({
       system: agent.instructions,
-      prompt: agent.buildPrompt(inputs),
+      prompt: buildAgentPrompt(agent, inputs),
       ...(model ? { model } : {}),
     });
 
+    // A "length" finish means the model hit max_tokens — the output is truncated.
+    // Surface it (don't hide a partial answer as a clean success).
+    const truncated = res.finishReason === "length";
     return {
       name: step.name,
       status: "success",
       exitCode: 0,
       stdout: res.text,
-      stderr: "",
-      outputs: agent.toOutputs(res.text),
+      stderr: truncated
+        ? `warning: agent output was truncated (finish_reason=length) — raise the model's maxTokens in config`
+        : "",
+      outputs: agentOutputs(agent, res.text),
     };
   } catch (err) {
     return {

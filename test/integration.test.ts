@@ -164,6 +164,30 @@ jobs:
     assert.match(output, /got=hello-from-upstream/);
   });
 
+  it("warns (but succeeds) when the agent output is truncated at max_tokens", async () => {
+    const truncating = { run: async () => ({ text: "partial sum", finishReason: "length" }) };
+    const plan = compile(parseWorkflow(`
+name: trunc
+jobs:
+  go:
+    runs-on: local
+    steps:
+      - id: sum
+        uses: agent/summarize
+        with: { input: "x" }
+`));
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-trunc-"));
+    let result: WorkflowResult;
+    try {
+      result = await runtime.run(plan, { workRoot }, truncating);
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
+    const s = result.jobs[0]!.steps[0]!;
+    assert.equal(s.status, "success");
+    assert.match(s.stderr, /truncated \(finish_reason=length\)/);
+  });
+
   it("runs an agent step (mock runner) and exposes its summary output", async () => {
     const { result, output } = await runWorkflow(`
 name: agent

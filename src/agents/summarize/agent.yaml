@@ -1,0 +1,15 @@
+# Agent package manifest (the action.yml analog).
+# See docs/agent-uses-interface.md for the full design (skills/extensions are
+# future; today's runner uses instructions + task + inputs/outputs).
+name: summarize
+description: Summarize a block of text into one concise sentence.
+
+inputs:
+  input:
+    type: string
+    required: true
+    description: The text to summarize.
+
+outputs:
+  summary:
+    description: The one-sentence summary (the agent's final message).

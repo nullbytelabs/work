@@ -7,11 +7,19 @@
  * full Pi-SDK runner later). Tests inject a stub runner, so the whole pipeline
  * is exercisable without inference.
  *
- * A built-in agent is a small composition: a fixed system prompt (instructions),
- * a task-prompt builder over its declared inputs, and an outputs mapping. This is
- * the pragmatic core of the agent-package design in docs/agent-uses-interface.md
- * (no tools, no manifest dirs yet).
+ * An agent is a **directory package** under `src/agents/<name>/`:
+ *   agent.yaml       — manifest (inputs/outputs, description; model/tools later)
+ *   instructions.md  — the system prompt (standing persona/policy)
+ *   task.md          — the task prompt template; `{{ <input> }}` placeholders
+ *                      bound from the step's `with`
+ * (skills/, extension.ts are reserved for the future Pi-SDK runner.) This is the
+ * package shape from docs/agent-uses-interface.md; project/user override paths
+ * come later — for now we load the built-in packages shipped here.
  */
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { UserFacingError } from "../errors.ts";
 import type { ResolvedModel } from "../config/index.ts";
 
@@ -26,11 +34,16 @@ export interface AgentRequest {
 
 export interface AgentResult {
   text: string;
+  /** Why the model stopped — "stop" (complete) or "length" (truncated at max_tokens), etc. */
+  finishReason?: string;
 }
 
 export interface AgentRunner {
   run(req: AgentRequest): Promise<AgentResult>;
 }
+
+// The Pi-SDK-backed runner (default; full run + retries via session.prompt).
+export { PiAgentRunner } from "./pi-runner.ts";
 
 /** Calls an OpenAI-compatible `/chat/completions` endpoint (Fireworks/LiteLLM/etc.). */
 export class OpenAiAgentRunner implements AgentRunner {
@@ -67,41 +80,37 @@ export class OpenAiAgentRunner implements AgentRunner {
       const detail = await res.text().catch(() => "");
       throw new UserFacingError(`agent model request failed (${res.status}): ${detail.slice(0, 300)}`);
     }
-    const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const text = json.choices?.[0]?.message?.content;
+    // stream:false → this single response is the COMPLETE result; nothing to await further.
+    const json = (await res.json()) as {
+      choices?: { message?: { content?: string }; finish_reason?: string }[];
+    };
+    const choice = json.choices?.[0];
+    const text = choice?.message?.content;
     if (typeof text !== "string") {
       throw new UserFacingError("agent model response had no choices[0].message.content");
     }
-    return { text };
+    const result: AgentResult = { text };
+    if (choice?.finish_reason) result.finishReason = choice.finish_reason;
+    return result;
   }
 }
 
-/** A built-in agent: fixed instructions + a task builder + an outputs mapping. */
-export interface BuiltinAgent {
+/** A loaded agent package. */
+export interface LoadedAgent {
   name: string;
-  /** System prompt. */
+  /** System prompt (from instructions.md). */
   instructions: string;
+  /** Task prompt template (from task.md); `{{ name }}` placeholders, or "". */
+  task: string;
   /** Declared inputs (bound from the step's `with`). */
-  inputs: Record<string, { required?: boolean }>;
-  /** Output keys this agent produces. */
+  inputs: Record<string, { required: boolean }>;
+  /** Declared output keys (the final message fills the first). */
   outputs: string[];
-  /** Build the task prompt from validated inputs. */
-  buildPrompt(inputs: Record<string, string>): string;
-  /** Map the final assistant text to declared outputs. */
-  toOutputs(text: string): Record<string, string>;
 }
 
-const summarize: BuiltinAgent = {
-  name: "summarize",
-  instructions:
-    "You are a precise summarizer. Given a block of text, reply with a single concise sentence that captures its key point. Output only the summary — no preamble, labels, or quotes.",
-  inputs: { input: { required: true } },
-  outputs: ["summary"],
-  buildPrompt: (i) => `Summarize the following:\n\n${i.input ?? ""}`,
-  toOutputs: (text) => ({ summary: text.trim() }),
-};
-
-export const BUILTIN_AGENTS: Record<string, BuiltinAgent> = { summarize };
+/** Where built-in agent packages live (sibling `src/agents/`). */
+const AGENTS_DIR = fileURLToPath(new URL("../agents/", import.meta.url));
+const cache = new Map<string, LoadedAgent>();
 
 /** Parse a `uses:` value into an agent name. Only the `agent/<name>[@ref]` scheme today. */
 export function parseAgentUses(uses: string): { name: string; ref?: string } {
@@ -114,11 +123,48 @@ export function parseAgentUses(uses: string): { name: string; ref?: string } {
   return out;
 }
 
-/** Resolve a built-in agent by name. */
-export function resolveAgent(name: string): BuiltinAgent {
-  const agent = BUILTIN_AGENTS[name];
-  if (!agent) {
-    throw new UserFacingError(`unknown agent "${name}" (built-in agents: ${Object.keys(BUILTIN_AGENTS).join(", ")})`);
+/** Load an agent package by name from `src/agents/<name>/` (cached). */
+export async function loadAgent(name: string): Promise<LoadedAgent> {
+  const cached = cache.get(name);
+  if (cached) return cached;
+
+  const dir = join(AGENTS_DIR, name);
+  let manifestText: string;
+  try {
+    manifestText = await readFile(join(dir, "agent.yaml"), "utf-8");
+  } catch {
+    throw new UserFacingError(`unknown agent "${name}" (no package at src/agents/${name}/)`);
   }
+
+  const manifest = (parseYaml(manifestText) ?? {}) as {
+    inputs?: Record<string, { required?: boolean } | null>;
+    outputs?: string[] | Record<string, unknown>;
+  };
+  const instructions = (await readFile(join(dir, "instructions.md"), "utf-8").catch(() => "")).trim();
+  if (!instructions) throw new UserFacingError(`agent "${name}" is missing a non-empty instructions.md`);
+  const task = (await readFile(join(dir, "task.md"), "utf-8").catch(() => "")).trim();
+
+  const inputs: Record<string, { required: boolean }> = {};
+  for (const [k, v] of Object.entries(manifest.inputs ?? {})) {
+    inputs[k] = { required: Boolean(v && (v as { required?: boolean }).required) };
+  }
+  const outputs = Array.isArray(manifest.outputs)
+    ? manifest.outputs
+    : Object.keys(manifest.outputs ?? {});
+
+  const agent: LoadedAgent = { name, instructions, task, inputs, outputs };
+  cache.set(name, agent);
   return agent;
+}
+
+/** Build the task prompt by binding declared inputs into the `task.md` template. */
+export function buildAgentPrompt(agent: LoadedAgent, inputs: Record<string, string>): string {
+  if (!agent.task) return Object.values(inputs).join("\n");
+  return agent.task.replace(/\{\{\s*([A-Za-z_][\w-]*)\s*\}\}/g, (_m, key: string) => inputs[key] ?? "");
+}
+
+/** Map the final assistant text to the agent's declared outputs (first output). */
+export function agentOutputs(agent: LoadedAgent, text: string): Record<string, string> {
+  const key = agent.outputs[0] ?? "output";
+  return { [key]: text.trim() };
 }

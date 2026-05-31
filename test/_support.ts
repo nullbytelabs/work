@@ -16,7 +16,7 @@ export const mockAgentRunner: AgentRunner = {
 };
 
 export interface SharedRuntime {
-  run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult>;
+  run(plan: ExecutionPlan, ctx: RunContext, agentRunner?: AgentRunner): Promise<WorkflowResult>;
 }
 
 /** Call once at the top of a test file; registers before/after for the engine. */
@@ -29,10 +29,10 @@ export function useSharedRuntime(): SharedRuntime {
     if (engine) await engine.close();
   });
   return {
-    run(plan, ctx) {
+    // Agent steps use the mock runner (no inference) unless a test passes its own.
+    run(plan, ctx, agentRunner = mockAgentRunner) {
       if (!engine) throw new Error("engine not started");
-      // Agent steps use the mock runner so tests never call inference.
-      return new AbsurdRuntime({ engine, agentRunner: mockAgentRunner }).run(plan, ctx);
+      return new AbsurdRuntime({ engine, agentRunner }).run(plan, ctx);
     },
   };
 }

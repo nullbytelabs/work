@@ -1,0 +1,3 @@
+Summarize the following:
+
+{{ input }}
