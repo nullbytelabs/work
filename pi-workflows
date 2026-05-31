@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# pi-workflows launcher — runs the TypeScript CLI on Node's native TS support.
+# No build step, no native deps. Usage: ./pi-workflows ./examples/hello-world-local.yaml
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ ! -d "$HERE/node_modules" ]; then
+  echo "pi-workflows: dependencies not installed. Run: npm install" >&2
+  exit 1
+fi
+
+# Node >=23.6 strips types by default; 22.6–23.5 needs the flag. Pass it on the
+# older line; silence the experimental warning everywhere it's emitted.
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+FLAGS=(--disable-warning=ExperimentalWarning)
+if [ "$NODE_MAJOR" -lt 23 ]; then
+  FLAGS+=(--experimental-strip-types)
+fi
+
+exec node "${FLAGS[@]}" "$HERE/src/cli.ts" "$@"

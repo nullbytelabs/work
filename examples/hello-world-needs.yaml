@@ -1,0 +1,25 @@
+# hello world
+# description: sequential jobs where `hello-name` depends on `hello-world` before it executes
+# usage: ./pi-workflows ./exmaples/hello-world-needs.yaml
+---
+name: hello-world
+
+env:
+  HELLO_WORLD: "hello world"
+  NAME: "josh"
+
+jobs:
+  hello-world:
+    runs-on: local
+    steps:
+      - name: hello-world
+        run: |
+          echo $HELLO_WORLD
+
+  hello-name:
+    runs-on: gondolin
+    needs: [hello-world]
+    steps:
+      - name: hello-name
+        run: |
+          echo "${HELLO_WORLD}, ${NAME}"

@@ -30,7 +30,7 @@ npm install @earendil-works/pi-coding-agent
 
 The SDK is bundled in the main package — no separate install. (Global CLI install is `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.)
 
-**Package version: UNVERIFIED — needs confirmation.** The docs don't pin a version; check `npm view @earendil-works/pi-coding-agent version` for the exact current release.
+**Package version (confirmed 2026-05-31):** latest on npm is **`@earendil-works/pi-coding-agent@0.75.5`** (MIT, author Mario Zechner, `engines.node >= 22.19.0`; source monorepo `earendil-works/pi-mono`, package dir `packages/coding-agent`). Source: npm registry `https://registry.npmjs.org/@earendil-works/pi-coding-agent`. Re-check before pinning, as this moves fast (the `0.x` line is pre-1.0).
 
 ### Minimal initialization (quick start, verbatim from docs)
 
@@ -267,7 +267,7 @@ Notes grounded in the docs:
 - `apiKey` resolution supports literal (`"sk-..."`), env interpolation (`"$LITELLM_API_KEY"` / `"${VAR}"`), and shell command (`"!op read 'op://...'"`). `$$` = literal `$`, `$!` = literal `!`.
 - The file reloads each time `/model` opens; editable mid-session without restart.
 
-**Compat flags for LiteLLM (likely needed):** Many OpenAI-compatible servers/proxies don't understand the `developer` role or `reasoning_effort`. Whether your specific LiteLLM deployment needs these is **UNVERIFIED — needs confirmation** (test it), but the knobs are:
+**Compat flags for LiteLLM (DECISION 2026-05-31: not needed for our usage).** We use LiteLLM Proxy only as an OpenAI-API-compatible front for the underlying provider models — it passes the dialect through and "just works," so no `compat` overrides are required for the baseline integration. The flags below are documented only as an escape hatch if a future model/route exhibits dialect quirks (e.g. a proxy that rejects the `developer` role or `reasoning_effort`); leave them unset otherwise:
 
 ```json
 {
@@ -324,7 +324,7 @@ The factory may be `async` — useful to **discover LiteLLM's model list dynamic
 
 One `litellm` provider (base URL + LiteLLM key, `api: "openai-completions"`, `authHeader: true`) registered programmatically via an inline extension factory, with its model list either hard-configured or fetched from `/v1/models`. Workflow steps then select with `modelRegistry.find("litellm", "<id>")`.
 
-> **UNVERIFIED:** docs imply only `modelRegistry.find()` returns custom (non-built-in) provider models; `getModel()` is documented as finding *built-in* models only. Use `find()` for the `litellm` provider.
+> **CONFIRMED 2026-05-31 (SDK doc):** `getModel()` finds **built-in** models only; `modelRegistry.find(provider, id)` finds **any** model by provider/id "including custom models from models.json." So use `modelRegistry.find("litellm", "<id>")` for the LiteLLM provider — `getModel` won't see it. Source: https://pi.dev/docs/latest/sdk (Model section).
 
 ### API key precedence (for injecting the LiteLLM key)
 
@@ -383,7 +383,7 @@ This is the natural integration point for exposing **workflow-engine-native oper
 
 ### MCP
 
-**UNVERIFIED — needs confirmation.** The pages fetched (SDK, Providers, Custom Models/Providers, Settings, index) don't mention MCP directly. If present, it's most likely under **Extensions** (`/docs/latest/extensions`). Check that doc.
+**No built-in MCP — by design (confirmed 2026-05-31).** Pi deliberately ships *no* native MCP support. The pi.dev homepage lists "No MCP" under "What we didn't build": "Build CLI tools with READMEs (see Skills), or build an extension that adds MCP support." So the two supported paths are (a) expose capabilities as CLI tools + skills, or (b) add MCP yourself via an extension (the `customTools` / `pi.registerTool` surface in §6 is the integration point). Source: https://pi.dev/ ("What we didn't build" → "No MCP"); rationale post: https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/.
 
 ---
 
@@ -457,7 +457,7 @@ Pi's **session tree** is the built-in durability/checkpoint mechanism:
 
 **Mapping to the engine:** treat the JSONL session file as the durable record for an agent-backed step. Use `appendLabelChange(id, "...")` to mark step boundaries, `getLeafEntry()`/`getPath()` to read current state, and `fork(entryId, { position: "at" })` to replay/branch deterministically from a checkpoint after a crash/restart.
 
-> **No documented mid-LLM-turn suspend/resume.** A `prompt()` runs to completion (incl. tool calls + retries) then resolves. Durability lives at the session/message-tree granularity, between prompts. Read `/docs/latest/session-format` for exact JSONL entry schemas before building checkpoint logic. **Mid-run suspend/resume: UNVERIFIED / likely unsupported.**
+> **CONFIRMED 2026-05-31 (SDK doc): no mid-LLM-turn suspend/resume.** The documented `prompt()` contract is that it resolves *only after the full accepted run finishes, including tool calls and retries* — there is no API to suspend partway through a turn. Durability therefore lives at the session/message-tree granularity, **between** prompts (JSONL session file + `appendLabelChange`/`fork`), not inside a turn. This is a design fact, not a gap to confirm. (Still read `/docs/latest/session-format` for the exact JSONL entry schemas before building checkpoint logic — that schema detail is the only remaining unread piece.) Source: https://pi.dev/docs/latest/sdk (AgentSession / Prompting).
 
 ---
 
@@ -641,10 +641,10 @@ await session.prompt("Hello via LiteLLM.");
 
 ## 14. Open questions to confirm before building
 
-1. **Current package version** and API stability across releases.
+1. ~~**Current package version**~~ — RESOLVED: `@earendil-works/pi-coding-agent@0.75.5` (npm, 2026-05-31). Still re-pin per release since this is pre-1.0.
 2. **`getModel` vs `modelRegistry.find` for custom providers** — use `find()` for `litellm`.
-3. **MCP support** — check `/docs/latest/extensions`.
-4. **Whether your LiteLLM deployment needs `compat.supportsDeveloperRole:false` / `supportsReasoningEffort:false`** — test.
+3. ~~**MCP support**~~ — RESOLVED: no built-in MCP by design; add via extension or use skills/CLI tools.
+4. ~~**LiteLLM `compat` flags**~~ — RESOLVED (DECISION): not needed. We use LiteLLM Proxy purely as an OpenAI-compatible front for provider models; no `compat` overrides for the baseline. Only revisit if a specific route shows dialect quirks.
 5. **Concurrency contract** — sharing one `AuthStorage`/`ModelRegistry` across many simultaneous sessions.
 6. **Mid-run durable suspend/resume** — appears unsupported; confirm via Session Format doc.
 7. **Exact session JSONL entry schemas** — `/docs/latest/session-format`.

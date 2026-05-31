@@ -81,8 +81,10 @@ persistence. The guest is treated as adversarial.
 - Install: `npm install @earendil-works/gondolin`
 - **Node.js >= 23.6 required.**
 - The guest internals are Zig; the host krun runner build also touches Rust/Zig,
-  but **as an SDK consumer you only write TypeScript.** There is no Python or
-  Rust SDK surfaced in the docs (**UNVERIFIED** that none exists elsewhere).
+  but **as an SDK consumer you only write TypeScript.** CONFIRMED 2026-05-31: the
+  only published package is the TypeScript `@earendil-works/gondolin` (the repo is
+  TypeScript 75.7% / JavaScript 11.8% / Zig 10.0%, with no Python/Rust SDK package
+  in the org). Treat TypeScript as the sole SDK surface.
 
 ### Core API surface (verified from docs)
 
@@ -367,11 +369,12 @@ flow as HTTP / TLS / SSH (or denies it). `HTTP CONNECT` is explicitly denied.
   can still burn CPU and allocate memory inside the VM. There are buffer caps
   (HTTP header/body limits, virtio queue caps, `MAX_RPC_DATA = 60 KiB` for VFS
   RPC payloads, default 256 KiB exec streaming window).
-- **UNVERIFIED:** whether `VM.create` exposes explicit CPU/memory/disk-size
-  caps (vCPU count, RAM MB). The docs mention qemu knobs `machineType`, `accel`,
-  `cpu`, `qemuPath` exist (rejected under krun) but do not document memory/vCPU
-  sizing options. **Needs confirmation** by reading `host/src/sandbox/controller.ts`
-  or the create-options type.
+- **CONFIRMED 2026-05-31 (via [docs/backends.md](https://github.com/earendil-works/gondolin/blob/main/docs/backends.md)):** `VM.create` *does* expose explicit sizing knobs under `sandbox`/`rootfs`, supported on **both** backends:
+  - `sandbox.cpus` — high-level CPU count (qemu ✓, krun ✓).
+  - `sandbox.memory` — RAM (qemu ✓, krun ✓; krun parses it and passes MiB to libkrun).
+  - `rootfs.size` — ensures the writable root disk is at least the requested size before boot and runs `resize2fs` in the guest (requires `resize2fs` in the image).
+  - `sandbox.rootDiskPath` / `rootDiskFormat` / `rootDiskReadOnly` — supported on both.
+  The qemu-only knobs `machineType`, `accel`, `cpu`, `qemuPath` exist but are **rejected when `vmm=krun`**. So vCPU/RAM/disk caps *are* available; only the low-level qemu tuning is qemu-specific.
 
 ### Secrets handling (summary)
 
@@ -387,9 +390,11 @@ and (by default) query params are not substituted; use high-entropy placeholders
 - Node.js >= 23.6.
 - QEMU installed:
   - macOS: `brew install qemu`
-  - Debian/Ubuntu: `sudo apt install qemu-system-arm` (aarch64) — adjust package
-    for x86_64 (**UNVERIFIED** exact package name for x86_64; the README shows
-    the ARM package).
+  - Debian/Ubuntu: `sudo apt install qemu-system-arm` (aarch64). For x86_64 the
+    required binary is `qemu-system-x86_64` (Debian/Ubuntu package `qemu-system-x86`).
+    Confirmed 2026-05-31: [backends.md](https://github.com/earendil-works/gondolin/blob/main/docs/backends.md)
+    states "Guest architecture must match the selected QEMU binary
+    (`qemu-system-aarch64` vs `qemu-system-x86_64`)".
 - Optional krun backend: `make krun-runner` (needs Rust toolchain w/ edition2024,
   Zig 0.16.0, and several `-dev` libs on Linux). Published npm package also ships
   platform-specific optional runner packages (`darwin-arm64`, `linux-x64`).
@@ -751,4 +756,4 @@ try {
 - Security Design: https://earendil-works.github.io/gondolin/security/
 - Workloads & Lifecycle (boot time, persistence table): https://earendil-works.github.io/gondolin/workloads/
 - Limitations: https://earendil-works.github.io/gondolin/limitations/
-- VM Backends (QEMU vs krun): https://github.com/earendil-works/gondolin/blob/main/docs/backends.md (referenced; not separately fetched — **UNVERIFIED** details beyond what other pages cite)
+- VM Backends (QEMU vs krun): https://github.com/earendil-works/gondolin/blob/main/docs/backends.md (fetched & reviewed 2026-05-31). Key points: `qemu` is the default with broader feature support; `krun` is experimental (libkrun, host-arch-only, needs libkrunfw-compatible kernel + manifest krun boot assets). Shared sizing knobs `sandbox.cpus` / `sandbox.memory` / `rootfs.size` work on both; `machineType`/`accel`/`cpu`/`qemuPath` are qemu-only and rejected under krun. `rootfs.mode="memory"` is true snapshot mode on qemu but a temp on-disk qcow2 overlay (not RAM-backed) on krun. Cross-backend checkpoint resume needs `manifest.assets.krunKernel`.

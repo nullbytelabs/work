@@ -1,0 +1,131 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { parseWorkflow, WorkflowParseError } from "../src/spec/index.ts";
+
+describe("parseWorkflow — valid input", () => {
+  it("parses the minimal hello-world shape", () => {
+    const spec = parseWorkflow(`
+name: hello-world
+env:
+  HELLO_WORLD: "hello world"
+jobs:
+  hello-world:
+    steps:
+      - name: hello-world
+        run: echo $HELLO_WORLD
+`);
+    assert.equal(spec.name, "hello-world");
+    assert.deepEqual(spec.env, { HELLO_WORLD: "hello world" });
+    assert.deepEqual(Object.keys(spec.jobs), ["hello-world"]);
+    const job = spec.jobs["hello-world"]!;
+    assert.equal(job.steps.length, 1);
+    assert.equal(job.steps[0]!.run, "echo $HELLO_WORLD");
+  });
+
+  it("coerces scalar env values to strings", () => {
+    const spec = parseWorkflow(`
+name: w
+env:
+  PORT: 8080
+  DEBUG: true
+jobs:
+  a:
+    steps:
+      - run: "true"
+`);
+    assert.deepEqual(spec.env, { PORT: "8080", DEBUG: "true" });
+  });
+
+  it("accepts both runsOn and runs-on spellings", () => {
+    const spec = parseWorkflow(`
+name: w
+jobs:
+  a:
+    runs-on: local
+    steps:
+      - run: "true"
+`);
+    assert.equal(spec.jobs["a"]!.runsOn, "local");
+  });
+
+  it("parses a workflow-level default runs-on", () => {
+    const spec = parseWorkflow(`
+name: w
+runs-on: local
+jobs:
+  a:
+    steps: [{ run: "true" }]
+`);
+    assert.equal(spec.runsOn, "local");
+  });
+
+  it("normalizes a scalar needs into an array", () => {
+    const spec = parseWorkflow(`
+name: w
+jobs:
+  a:
+    steps: [{ run: "true" }]
+  b:
+    needs: a
+    steps: [{ run: "true" }]
+`);
+    assert.deepEqual(spec.jobs["b"]!.needs, ["a"]);
+  });
+});
+
+describe("parseWorkflow — validation", () => {
+  function err(yaml: string): WorkflowParseError {
+    try {
+      parseWorkflow(yaml);
+    } catch (e) {
+      assert.ok(e instanceof WorkflowParseError, `expected WorkflowParseError, got ${e}`);
+      return e;
+    }
+    throw new Error("expected parseWorkflow to throw");
+  }
+
+  it("rejects missing name", () => {
+    assert.match(err(`jobs:\n  a:\n    steps: [{ run: x }]`).message, /name/);
+  });
+
+  it("rejects missing jobs", () => {
+    assert.match(err(`name: w`).message, /jobs/);
+  });
+
+  it("rejects a job with no steps", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps: []`);
+    assert.equal(e.path, "jobs.a.steps");
+  });
+
+  it("rejects a step that has neither run nor uses", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - name: noop`);
+    assert.equal(e.path, "jobs.a.steps[0]");
+    assert.match(e.message, /run.*uses/);
+  });
+
+  it("rejects a step that has both run and uses", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        uses: y`);
+    assert.match(e.message, /cannot define both/);
+  });
+
+  it("rejects needs that points at an unknown job", () => {
+    const e = err(`name: w\njobs:\n  a:\n    needs: ghost\n    steps: [{ run: x }]`);
+    assert.equal(e.path, "jobs.a.needs");
+    assert.match(e.message, /ghost/);
+  });
+
+  it("gives a helpful error when runs-on is misplaced inside the jobs map", () => {
+    const e = err(`name: w\njobs:\n  runs-on: local\n  a:\n    steps: [{ run: x }]`);
+    assert.equal(e.path, "jobs.runs-on");
+    assert.match(e.message, /workflow level/);
+  });
+
+  it("rejects invalid YAML with a clear message", () => {
+    assert.match(err(`name: : :`).message, /invalid YAML/);
+  });
+
+  it("includes a path on nested errors", () => {
+    const e = err(`name: w\njobs:\n  build:\n    steps:\n      - run: ok\n      - name: bad`);
+    assert.equal(e.path, "jobs.build.steps[1]");
+  });
+});

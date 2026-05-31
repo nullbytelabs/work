@@ -388,9 +388,13 @@ app.registerTask({ name: "matrix-parent", queue: "default" }, async (params, ctx
 - `ctx.emitEvent(name, payload?)` / `app.emitEvent(name, payload?, queue?)` — emit events (first-emit-wins).
 
 > There is **no** `ctx.parallel([...])`, `ctx.all(...)`, `ctx.race(...)`, or
-> matrix/expansion construct in the SDK. UNVERIFIED whether any such helper
-> exists outside `sdks/typescript/src/index.ts` — I reviewed the full single-file
-> source and found none.
+> matrix/expansion construct in the SDK. CONFIRMED 2026-05-31: cross-checked the
+> full single-file SDK source (`sdks/typescript/src/index.ts`) AND the official
+> [Concepts page](https://earendil-works.github.io/absurd/concepts/), which
+> enumerates the complete `ctx.*` surface (`step`, `beginStep`/`completeStep`,
+> `sleepFor`/`sleepUntil`, `awaitEvent`, `awaitTaskResult`, `heartbeat`,
+> `emitEvent`) — none is a parallel/matrix primitive. Concurrency comes only from
+> worker `concurrency` + spawning child tasks. Treat this as settled, not open.
 
 ---
 
@@ -512,7 +516,7 @@ recommended Absurd construct.
 | **`needs:` (job dependency / DAG)** | Run upstream first; for child-task jobs, `await ctx.awaitTaskResult(upstreamTaskID, { queue: "jobs" })` before spawning/continuing downstream. | Build a topological order from `needs`; await all predecessors before a job. Pass upstream outputs forward (see outputs row). |
 | **parallel jobs / parallel steps** (independent `needs`) | **Fan-out by spawning child tasks** on a dedicated queue, then converge with `awaitTaskResult`/events. For short in-job parallelism, `Promise.all` inside one step. | Worker `concurrency` and multiple workers provide the actual parallelism. No built-in `parallel()` primitive — you orchestrate. |
 | **`strategy.matrix`** | Programmatic **fan-out**: expand the matrix in JS, then `spawn` one child task per cell (give each a deterministic `idempotencyKey = \`${ctx.taskID}:${cellKey}\``), then `awaitTaskResult` each. | Matrix expansion is your code. The idempotency key makes re-spawns on replay safe. Use unique step/task names per cell (avoid relying on `#2` auto-numbering). |
-| **`matrix` `max-parallel`** | Cap fan-out yourself (batch spawns) and/or set worker `concurrency` / a dedicated queue. | UNVERIFIED — no native concurrency cap per spawn group; enforce in orchestration code. |
+| **`matrix` `max-parallel`** | Cap fan-out yourself (batch spawns) and/or set worker `concurrency` / a dedicated queue. | CONFIRMED — no native per-spawn-group concurrency cap (full SDK source + Concepts reviewed); enforce in orchestration code. |
 | **convergence / "join" after fan-out** | Loop `await ctx.awaitTaskResult(childID, { queue, timeout })` over child IDs, OR await a `done:<id>` event per child. | The await is itself checkpointed, so the join survives crashes. |
 | **`if:` / `when:` conditionals** | Plain `if` in the handler around the `ctx.step(...)` call — skip the step (don't call it) when the condition is false. | Evaluate the condition from prior step outputs (which are durable). Optionally record a `{ skipped: true }` checkpoint for observability. |
 | **step `outputs` / passing data** | Step return values (cached JSON). For cross-task (job→job) outputs, the child's **task result** (`awaitTaskResult().result`) or an **emitted event payload**. | Within a task: closure variables fed from step returns. Across tasks: result snapshot or event. |
@@ -521,7 +525,7 @@ recommended Absurd construct.
 | **`timeout-minutes`** | `awaitEvent`/`awaitTaskResult` `timeout`, plus `cancellation.maxDuration` at spawn. | `maxDuration` is the closest to a hard job timeout. |
 | **scheduled (`on: schedule` / cron)** | External `pg_cron` (or your scheduler) calls `spawn` with a deterministic `idempotencyKey` per time window. | See the Cron Jobs pattern; Absurd dedups duplicate triggers. |
 | **manual cancel** | `app.cancelTask(taskID)` (root) — cascade to children in orchestration code. | Children detect cancellation at next checkpoint; cancel them explicitly too. |
-| **concurrency groups** | UNVERIFIED — no native "concurrency group/cancel-in-progress." Emulate with `idempotencyKey` (dedup) + cancel-previous logic in your orchestrator. | Flag for design discussion. |
+| **concurrency groups** | CONFIRMED — no native "concurrency group/cancel-in-progress" (full SDK source + Concepts reviewed). Emulate with `idempotencyKey` (dedup) + cancel-previous logic in your orchestrator. | Design decision, not a verification gap. |
 
 ### Recommended architecture sketch
 
@@ -577,15 +581,20 @@ Notes:
 
 ## 14. Open items to confirm before building
 
-- `UNVERIFIED` — no native `max-parallel` / concurrency-group / cancel-in-progress
-  equivalents; must be emulated in the orchestrator.
-- `UNVERIFIED` — exact replay/determinism guarantees for control flow *between*
-  steps (the docs say "code outside steps may run multiple times"; the safe
-  reading is: keep orchestration decisions inside checkpointed steps). Worth a
-  small prototype to confirm fan-out/join behavior under induced crashes.
-- `UNVERIFIED` — whether `awaitTaskResult` polling has meaningful overhead at high
-  fan-out (it polls with backoff + heartbeats per the source). For very wide
-  matrices, an event-based join (one event per child) may scale better.
+- ~~no native `max-parallel` / concurrency-group~~ — RESOLVED (confirmed absent via
+  full SDK source + Concepts); must be emulated in the orchestrator. Not an open
+  question, just a design constraint.
+- **replay/determinism contract** — RESOLVED in principle: the
+  [Concepts page](https://earendil-works.github.io/absurd/concepts/) documents it
+  explicitly — "Code **outside** steps may execute multiple times across retries.
+  Keep side-effects inside steps"; retries are task-level and replay completed
+  checkpoints. The *contract* is settled (keep orchestration decisions inside
+  checkpointed steps). What remains is purely an **engineering validation**: a
+  small prototype to observe fan-out/join behavior under induced crashes — not a
+  doc-verification gap.
+- **`awaitTaskResult` polling overhead at high fan-out** — genuinely open
+  (runtime/perf characteristic, not documented). It polls with backoff +
+  heartbeats per the source; for very wide matrices an event-based join (one event
+  per child) may scale better. Confirm by benchmarking.
 - Verify partitioned-queue setup + `pg_cron` if you need retention at scale
   (Storage / Cleanup docs).
-```

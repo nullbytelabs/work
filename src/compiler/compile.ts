@@ -1,0 +1,112 @@
+/**
+ * spec -> ExecutionPlan.
+ *
+ * Responsibilities (all runtime-agnostic):
+ *  - layer env (workflow <- job <- step)
+ *  - apply the default `runs-on`
+ *  - assign stable, unique step names
+ *  - compute a deterministic topological job order from `needs`, detecting cycles
+ */
+import type { JobSpec, StepSpec, WorkflowSpec } from "../spec/index.ts";
+import type { ExecutionPlan, PlannedJob, PlannedStep } from "./plan.ts";
+
+export class WorkflowCompileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkflowCompileError";
+  }
+}
+
+/**
+ * Default execution target. The README treats `gondolin` as the eventual
+ * default, but Phase 1 only ships LocalTarget, so we default to "local" here.
+ * Phase 2 can flip this once GondolinTarget is wired in.
+ */
+export const DEFAULT_RUNS_ON = "local";
+
+function mergeEnv(...layers: (Record<string, string> | undefined)[]): Record<string, string> {
+  return Object.assign({}, ...layers.filter(Boolean));
+}
+
+function compileStep(
+  step: StepSpec,
+  jobId: string,
+  index: number,
+  baseEnv: Record<string, string>,
+): PlannedStep {
+  const stepKey = step.id ?? String(index);
+  const planned: PlannedStep = {
+    name: `${jobId}/${stepKey}`,
+    env: mergeEnv(baseEnv, step.env),
+  };
+  if (step.run !== undefined) planned.run = step.run;
+  if (step.uses !== undefined) planned.uses = step.uses;
+  if (step.with !== undefined) planned.with = step.with;
+  if (step.if !== undefined) planned.if = step.if;
+  return planned;
+}
+
+function compileJob(
+  jobId: string,
+  job: JobSpec,
+  workflowEnv: Record<string, string>,
+  defaultRunsOn: string,
+): PlannedJob {
+  const jobEnv = mergeEnv(workflowEnv, job.env);
+  return {
+    id: jobId,
+    runsOn: job.runsOn ?? defaultRunsOn,
+    needs: job.needs ?? [],
+    steps: job.steps.map((s, i) => compileStep(s, jobId, i, jobEnv)),
+  };
+}
+
+/**
+ * Kahn's algorithm with deterministic tie-breaking (alphabetical) so the same
+ * spec always produces the same order — important for a durable runtime where
+ * orchestration must be replay-stable.
+ */
+function topoSort(jobs: Record<string, PlannedJob>): string[] {
+  const ids = Object.keys(jobs).sort();
+  const indegree = new Map<string, number>(ids.map((id) => [id, 0]));
+  const dependents = new Map<string, string[]>(ids.map((id) => [id, []]));
+
+  for (const id of ids) {
+    for (const dep of jobs[id]!.needs) {
+      indegree.set(id, (indegree.get(id) ?? 0) + 1);
+      dependents.get(dep)!.push(id);
+    }
+  }
+
+  const ready = ids.filter((id) => (indegree.get(id) ?? 0) === 0).sort();
+  const order: string[] = [];
+  while (ready.length > 0) {
+    const id = ready.shift()!;
+    order.push(id);
+    for (const next of dependents.get(id)!.sort()) {
+      const d = (indegree.get(next) ?? 0) - 1;
+      indegree.set(next, d);
+      if (d === 0) {
+        ready.push(next);
+        ready.sort();
+      }
+    }
+  }
+
+  if (order.length !== ids.length) {
+    const unresolved = ids.filter((id) => !order.includes(id));
+    throw new WorkflowCompileError(`cycle detected in job dependencies among: ${unresolved.join(", ")}`);
+  }
+  return order;
+}
+
+/** Compile a validated spec into an execution plan. */
+export function compile(spec: WorkflowSpec): ExecutionPlan {
+  const workflowEnv = spec.env ?? {};
+  const defaultRunsOn = spec.runsOn ?? DEFAULT_RUNS_ON;
+  const jobs: Record<string, PlannedJob> = {};
+  for (const [jobId, job] of Object.entries(spec.jobs)) {
+    jobs[jobId] = compileJob(jobId, job, workflowEnv, defaultRunsOn);
+  }
+  return { name: spec.name, jobs, jobOrder: topoSort(jobs) };
+}

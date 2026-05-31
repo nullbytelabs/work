@@ -11,7 +11,7 @@
 PGMQ is a lightweight message queue **implemented entirely inside PostgreSQL** — "Like AWS SQS and RSMQ but on Postgres." It is just a set of SQL objects (tables, types, functions) in a `pgmq` schema; there is **no background worker and no external dependencies** (except `pg_partman`, and only for partitioned queues). It provides SQS/RSMQ-like semantics: visibility timeouts, message archiving, batch operations, long-polling, and (newer) FIFO message groups and topic routing.
 
 - **Source / maintainer:** Created by **Tembo** (`tembo-io`); now lives at **github.com/pgmq/pgmq**. Tembo and Supabase are the primary backers/users.
-- **License:** PostgreSQL License. *(UNVERIFIED exact SPDX — confirm against the LICENSE file.)*
+- **License:** PostgreSQL License — SPDX `PostgreSQL`, © 2023 Tembo. CONFIRMED 2026-05-31 against the repo [LICENSE](https://github.com/pgmq/pgmq/blob/main/LICENSE).
 - **Current version:** Docker images published as `ghcr.io/pgmq/pg18-pgmq:v1.10.0` (**v1.10.x** current as of this research, 2026). A `v2.0` is referenced as future — several functions are marked deprecated "will be removed in PGMQ v2.0".
 - **Supported Postgres:** **14–18** (prose authoritative; a badge also shows 13–18).
 
@@ -319,4 +319,4 @@ Notes: `vt` per queue ≈ that work class's max runtime + margin; runners heartb
 - Supabase Queues / pgmq: https://supabase.com/docs/guides/queues/pgmq
 - Engine context: see [`absurd-durable-workflows.md`](absurd-durable-workflows.md), [`gondolin-secure-execution.md`](gondolin-secure-execution.md), [`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md), and [`../README.md`](../README.md)
 
-**UNVERIFIED items:** exact LICENSE SPDX; current Tembo Cloud status; minimum `pg_partman` version; full list of managed providers offering `pgmq` one-click; current PyPI name for the official Python client.
+**UNVERIFIED items (remaining, all low-value / external-status):** current Tembo Cloud product status; minimum `pg_partman` version; full list of managed providers offering `pgmq` one-click; current PyPI name for the official Python client. *(LICENSE SPDX resolved: `PostgreSQL`, © 2023 Tembo.)* These are third-party operational details, not blockers for the engine design.

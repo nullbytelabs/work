@@ -1,0 +1,29 @@
+{
+  "name": "pi-workflows",
+  "version": "0.0.1",
+  "private": true,
+  "description": "GitHub-Actions-style workflow engine with durable execution. Phase 1: parse + compile + direct in-process runner on a local execution target.",
+  "type": "module",
+  "bin": {
+    "pi-workflows": "./bin/pi-workflows.mjs"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",
+    "hello": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts ./examples/hello-world-local.yaml",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.5.1"
+  },
+  "optionalDependencies": {
+    "@earendil-works/gondolin": "^0.12.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/node": "^22.7.5"
+  },
+  "engines": {
+    "node": ">=22.6"
+  }
+}
