@@ -34,10 +34,17 @@ dependencies, so the same `node_modules` works across platforms.
 
 ```bash
 npm install
-./pi-workflows ./test/e2e/hello-world-local/workflow.yaml
+./pi-workflows ./test/e2e/hello-world-local/workflow.yaml          # ad-hoc: a file anywhere
+./pi-workflows --workspace ./test/e2e/agent-project run ci         # by name (the workflow whose name: is ci)
 npm test        # unit + integration suite (Node's built-in test runner)
 npm run typecheck
 ```
+
+Two launch styles: a bare `<workflow.yaml>` path (ad-hoc — run a file wherever it
+lives), or `[--workspace <dir>] run <name>`, which resolves the `.workflows/*.yaml`
+whose `name:` field matches (workspace defaults to the current directory, so from
+inside a project it's just `pi-workflows run ci`). Both converge on the same
+`{ workflowDir, workspaceSource }` layout (see "Project layout" below).
 
 Flags: `--inputs '<json>'` (workflow inputs), `--workdir <dir>` (default: a temp
 dir), `--quiet` (suppress streaming). Exit code is `0` on success, `1` on
@@ -169,7 +176,11 @@ analog of `.github/workflows/`. The CLI's `resolveWorkflowLayout` then treats th
 **parent** of `.workflows/` as the project root — the checkout staged into each
 job — so `npm install`, `npm start`, and source files are present, while agent
 packages resolve from `.workflows/agents/`. A standalone `workflow.yaml` not in a
-`.workflows/` folder uses its own directory as both. The checkout is staged like
+`.workflows/` folder uses its own directory as both. This convention also powers
+`run <name>`: `findWorkflowByName` scans `<workspace>/.workflows/*.yaml` and
+selects the one whose `name:` matches, then feeds it through the same resolver —
+so name-based and path-based launches are the same code path, just a different
+front door. The checkout is staged like
 a fresh `git checkout`: `node_modules/` and `.git/` are never copied (each job
 installs its own deps — copying a foreign `node_modules` breaks native binaries).
 `test/e2e/agent-project/` is the worked example: `npm install` → `tsc` validity →

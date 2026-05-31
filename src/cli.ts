@@ -1,9 +1,12 @@
 /**
- * pi-workflows CLI (Phase 1).
+ * pi-workflows CLI (Phase 1). Two ways to launch a workflow:
  *
- *   pi-workflows <workflow.yaml> [--workdir <dir>] [--quiet]
+ *   pi-workflows <workflow.yaml>            # ad-hoc: run a file wherever it is
+ *   pi-workflows [--workspace <dir>] run <name>
+ *                                           # by name: the `.workflows/*.yaml`
+ *                                           #   whose `name:` is <name>
  *
- * Pipeline: read file -> parseWorkflow -> compile -> AbsurdRuntime.run.
+ * Pipeline: resolve -> read -> parseWorkflow -> compile -> AbsurdRuntime.run.
  * Streams step output live and exits non-zero if any job fails.
  */
 import { readFile, mkdtemp } from "node:fs/promises";
@@ -15,13 +18,18 @@ import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { AbsurdRuntime } from "./runtime/index.ts";
 import { loadConfig, type PiWorkflowsConfig } from "./config/index.ts";
 import { createAgentUsesHandler } from "./agent/index.ts";
-import { resolveWorkflowLayout } from "./project.ts";
+import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "./project.ts";
 import { UserFacingError } from "./errors.ts";
 
 const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
 
 interface CliArgs {
-  file: string;
+  /** Ad-hoc: a path to a workflow file. */
+  file?: string;
+  /** By-name: the workflow's declared `name:` (via the `run <name>` subcommand). */
+  name?: string;
+  /** Project root to resolve a named workflow against (defaults to cwd). */
+  workspace?: string;
   workdir?: string;
   quiet: boolean;
   inputs: Record<string, unknown>;
@@ -29,7 +37,8 @@ interface CliArgs {
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  let file: string | undefined;
+  const positionals: string[] = [];
+  let workspace: string | undefined;
   let workdir: string | undefined;
   let quiet = false;
   let inputs: Record<string, unknown> = {};
@@ -37,7 +46,10 @@ function parseArgs(argv: string[]): CliArgs {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === "--workdir") {
+    if (arg === "--workspace") {
+      workspace = argv[++i];
+      if (!workspace) fail("--workspace requires a directory path");
+    } else if (arg === "--workdir") {
       workdir = argv[++i];
       if (!workdir) fail("--workdir requires a directory path");
     } else if (arg === "--config") {
@@ -63,23 +75,34 @@ function parseArgs(argv: string[]): CliArgs {
       process.exit(0);
     } else if (arg.startsWith("-")) {
       fail(`unknown flag: ${arg}`);
-    } else if (!file) {
-      file = arg;
     } else {
-      fail(`unexpected argument: ${arg}`);
+      positionals.push(arg);
     }
   }
 
-  if (!file) {
+  const common = { workdir, quiet, inputs, ...(workspace ? { workspace } : {}), ...(config ? { config } : {}) };
+
+  // `run <name>` (by-name) vs. a bare `<workflow.yaml>` path (ad-hoc).
+  if (positionals[0] === "run") {
+    const name = positionals[1];
+    if (!name) fail("run requires a workflow name, e.g. `pi-workflows run ci`");
+    if (positionals.length > 2) fail(`unexpected argument: ${positionals[2]}`);
+    return { name, ...common };
+  }
+  if (workspace) fail("--workspace only applies to `run <name>`; pass a file path directly instead");
+  if (positionals.length === 0) {
     printUsage();
     process.exit(2);
   }
-  return { file, workdir, quiet, inputs, ...(config ? { config } : {}) };
+  if (positionals.length > 1) fail(`unexpected argument: ${positionals[1]}`);
+  return { file: positionals[0]!, ...common };
 }
 
 function printUsage(): void {
   process.stderr.write(
-    "Usage: pi-workflows <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n",
+    "Usage:\n" +
+      "  pi-workflows <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n" +
+      "  pi-workflows [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n",
   );
 }
 
@@ -100,16 +123,22 @@ function fail(msg: string): never {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  // Resolve where the workflow lives and what its checkout is: a workflow inside
-  // a `.workflows/` folder operates on the project root (parent), with agents in
-  // `.workflows/agents/`; otherwise its own folder is both.
-  const layout = resolveWorkflowLayout(args.file);
+  // Resolve where the workflow lives and what its checkout is. By name:
+  // `<workspace>/.workflows/*.yaml` whose `name:` matches (workspace defaults to
+  // cwd). Ad-hoc: the given path — and if it sits in a `.workflows/` folder the
+  // checkout is the project root (parent); otherwise its own folder.
+  let layout: WorkflowLayout;
+  if (args.name !== undefined) {
+    layout = await findWorkflowByName(args.workspace ?? process.cwd(), args.name);
+  } else {
+    layout = resolveWorkflowLayout(args.file!);
+  }
 
   let yamlText: string;
   try {
     yamlText = await readFile(layout.file, "utf-8");
   } catch {
-    fail(`cannot read workflow file: ${args.file}`);
+    fail(`cannot read workflow file: ${layout.file}`);
   }
 
   let plan;

@@ -22,11 +22,13 @@ The `main.yaml` pipeline:
    smoke-run `npm start`; then capture the source for review.
 2. **review** — an agent reviews/summarizes the captured source.
 
-Run it:
+Run it (the workflow's `name:` is `ci`):
 
 ```bash
-# from the engine repo root
-./pi-workflows ./test/e2e/agent-project/.workflows/main.yaml                       # mock-free needs a model
+# by name, from anywhere (workspace defaults to cwd; --workspace points elsewhere)
+./pi-workflows --workspace ./test/e2e/agent-project run ci --config pi-workflows.config.json
+
+# or ad-hoc by path
 ./pi-workflows ./test/e2e/agent-project/.workflows/main.yaml --config pi-workflows.config.json
 ```
 
