@@ -1,0 +1,36 @@
+# pipeline steps
+# description: one job, several sequential steps that pass data through the shared
+#              per-job workspace — a file written by one step is read by the next.
+#              also shows step-level env overriding workflow-level env.
+# usage: ./pi-workflows ./test/e2e/pipeline-steps.yaml
+---
+name: pipeline-steps
+
+runs-on: local
+
+env:
+  GREETING: "hello"
+
+jobs:
+  pipeline:
+    steps:
+      - name: generate
+        run: |
+          # every job gets its own working directory; steps within the job share it
+          printf "alice\nbob\ncarol\n" > names.txt
+          echo "generate: wrote $(wc -l < names.txt | tr -d ' ') names"
+
+      - name: transform
+        run: |
+          # read the file the previous step wrote; capitalize each name (portably)
+          awk '{ print toupper(substr($0,1,1)) substr($0,2) }' names.txt > greeted.txt
+          echo "transform:"
+          cat greeted.txt
+
+      - name: summarize
+        env:
+          GREETING: "hi" # overrides the workflow-level GREETING for this step only
+        run: |
+          while read -r name; do
+            echo "$GREETING, $name!"
+          done < greeted.txt

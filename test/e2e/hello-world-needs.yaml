@@ -1,6 +1,6 @@
 # hello world
-# description: simplest possible workflow. uses the workflow engine to simply set an env var `HELLO_WORLD` and then echos it back out
-# usage: ./pi-workflows ./exmaples/hello-world-local.yaml
+# description: sequential jobs where `hello-name` depends on `hello-world` before it executes
+# usage: ./pi-workflows ./test/e2e/hello-world-needs.yaml
 ---
 name: hello-world
 
@@ -17,7 +17,8 @@ jobs:
           echo $HELLO_WORLD
 
   hello-name:
-    runs-on: local
+    runs-on: gondolin
+    needs: [hello-world]
     steps:
       - name: hello-name
         run: |

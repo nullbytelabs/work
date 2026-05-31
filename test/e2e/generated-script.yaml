@@ -1,0 +1,46 @@
+# generated script
+# description: one step authors a real, multi-line shell script into the shared
+#              workspace; a later step makes it executable and runs it over input
+#              data. shows the per-job workspace persisting across steps plus a
+#              script with a loop + conditional that reads a workflow env var.
+# usage: ./pi-workflows ./test/e2e/generated-script.yaml
+---
+name: generated-script
+
+runs-on: local
+
+env:
+  THRESHOLD: "100"
+
+jobs:
+  scripted:
+    steps:
+      - name: write-script
+        run: |
+          # quoted heredoc ('SCRIPT'): the body is written verbatim — $vars are
+          # NOT expanded now; the script expands them itself at run time.
+          cat > analyze.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # sum the numbers on stdin and flag if the total exceeds THRESHOLD
+          total=0
+          count=0
+          while read -r n; do
+            total=$((total + n))
+            count=$((count + 1))
+          done
+          echo "count=$count total=$total"
+          if [ "$total" -gt "${THRESHOLD:-0}" ]; then
+            echo "ALERT: total $total exceeds threshold ${THRESHOLD:-0}"
+          else
+            echo "ok: total $total within threshold ${THRESHOLD:-0}"
+          fi
+          SCRIPT
+          chmod +x analyze.sh
+          echo "authored analyze.sh ($(wc -l < analyze.sh | tr -d ' ') lines)"
+
+      - name: run-script
+        run: |
+          # THRESHOLD (workflow env) is in this step's environment, so the script
+          # inherits it. total = 20+50+40+30 = 140, which exceeds 100 -> ALERT.
+          printf "20\n50\n40\n30\n" | ./analyze.sh

@@ -36,8 +36,8 @@ describe("GondolinTarget — unit (no VM)", () => {
 const RUN_VM = process.env["PI_WF_TEST_GONDOLIN"] === "1";
 
 describe("GondolinTarget — VM smoke (opt-in)", { skip: !RUN_VM }, () => {
-  it("runs the examples/hello-world-gondolin.yaml workflow in a VM", async () => {
-    const yaml = await readFile(resolve(HERE, "..", "examples", "hello-world-gondolin.yaml"), "utf-8");
+  it("runs the test/e2e/hello-world-gondolin.yaml workflow in a VM", async () => {
+    const yaml = await readFile(resolve(HERE, "e2e", "hello-world-gondolin.yaml"), "utf-8");
     const plan = compile(parseWorkflow(yaml));
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-gondolin-"));
     let output = "";

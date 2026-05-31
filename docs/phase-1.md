@@ -34,7 +34,7 @@ dependencies, so the same `node_modules` works across platforms.
 
 ```bash
 npm install
-./pi-workflows ./examples/hello-world-local.yaml
+./pi-workflows ./test/e2e/hello-world-local.yaml
 npm test        # unit + integration suite (Node's built-in test runner)
 npm run typecheck
 ```
@@ -58,10 +58,10 @@ A job declares `runs-on`; a workflow-level `runs-on` sets the default for jobs
 that omit their own. Two targets are supported:
 
 - **`local`** — runs each step as a host `/bin/bash -lc` child process. Fast, no
-  isolation. No extra dependencies. (`examples/hello-world-local.yaml`)
+  isolation. No extra dependencies. (`test/e2e/hello-world-local.yaml`)
 - **`gondolin`** — runs each step inside a hardware-virtualized Alpine micro-VM
   via `@earendil-works/gondolin` (QEMU). Secure, deny-by-default networking.
-  (`examples/hello-world-gondolin.yaml`)
+  (`test/e2e/hello-world-gondolin.yaml`)
 
 ### Running the Gondolin example
 
@@ -74,7 +74,7 @@ it unless a workflow uses `runs-on: gondolin`. It requires:
   `npm install` pulls it; if it can't install on a platform, the rest still works.
 
 ```bash
-./pi-workflows ./examples/hello-world-gondolin.yaml
+./pi-workflows ./test/e2e/hello-world-gondolin.yaml
 ```
 
 If the package isn't available, the engine fails fast with an actionable message

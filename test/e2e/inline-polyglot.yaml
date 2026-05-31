@@ -1,0 +1,43 @@
+# inline polyglot
+# description: steps written in different languages (bash, Node, Python) that
+#              share the per-job workspace and cross-check each other's results.
+#              bash splits a dataset to a file, Node sums it and writes sum.txt,
+#              Python independently re-sums and asserts the two agree.
+# note: runs-on MUST be `local` here — the minimal Gondolin Alpine guest ships
+#       no node/python. on `local`, steps inherit the host PATH.
+# prerequisites: node and python3 on PATH.
+# usage: ./pi-workflows ./test/e2e/inline-polyglot.yaml
+---
+name: inline-polyglot
+
+runs-on: local
+
+env:
+  DATASET: "3,1,4,1,5,9,2,6"
+
+jobs:
+  polyglot:
+    steps:
+      - name: bash-prepare
+        run: |
+          echo "$DATASET" | tr ',' '\n' > numbers.txt
+          echo "bash: wrote $(wc -l < numbers.txt | tr -d ' ') numbers"
+
+      - name: node-sum
+        run: |
+          node -e '
+            const fs = require("fs");
+            const nums = fs.readFileSync("numbers.txt", "utf8").trim().split("\n").map(Number);
+            const sum = nums.reduce((a, b) => a + b, 0);
+            console.log(`node: sum=${sum} max=${Math.max(...nums)}`);
+            fs.writeFileSync("sum.txt", String(sum));
+          '
+
+      - name: python-verify
+        run: |
+          python3 -c '
+          nums = [int(x) for x in open("numbers.txt").read().split()]
+          node_sum = int(open("sum.txt").read())
+          assert sum(nums) == node_sum, f"mismatch: python={sum(nums)} node={node_sum}"
+          print(f"python: verified sum={node_sum} over {len(nums)} numbers, mean={node_sum/len(nums):.2f}")
+          '

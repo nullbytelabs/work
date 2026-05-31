@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",
-    "hello": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts ./examples/hello-world-local.yaml",
+    "hello": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts ./test/e2e/hello-world-local.yaml",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

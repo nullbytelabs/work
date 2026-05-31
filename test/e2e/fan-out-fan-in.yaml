@@ -1,0 +1,47 @@
+# fan-out / fan-in
+# description: a diamond DAG. `prepare` fans out to three independent jobs
+#              (lint, unit, typecheck); they fan back in to `report`, which only
+#              runs once all three are done. `needs` encodes the shape.
+# note: today jobs run in deterministic topological order (alphabetical among
+#       ready jobs); true parallel execution of the middle tier is a planned
+#       runtime enhancement — the DAG is already expressed correctly.
+# usage: ./pi-workflows ./test/e2e/fan-out-fan-in.yaml
+---
+name: fan-out-fan-in
+
+runs-on: local
+
+jobs:
+  prepare:
+    steps:
+      - name: prepare
+        run: |
+          echo "prepared build inputs"
+
+  lint:
+    needs: [prepare]
+    steps:
+      - name: lint
+        run: |
+          echo "lint: 0 problems"
+
+  unit:
+    needs: [prepare]
+    steps:
+      - name: unit
+        run: |
+          echo "unit: 12 passed"
+
+  typecheck:
+    needs: [prepare]
+    steps:
+      - name: typecheck
+        run: |
+          echo "typecheck: clean"
+
+  report:
+    needs: [lint, unit, typecheck]
+    steps:
+      - name: report
+        run: |
+          echo "all checks converged — ready to ship"

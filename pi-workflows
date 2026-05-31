@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pi-workflows launcher — runs the TypeScript CLI on Node's native TS support.
-# No build step, no native deps. Usage: ./pi-workflows ./examples/hello-world-local.yaml
+# No build step, no native deps. Usage: ./pi-workflows ./test/e2e/hello-world-local.yaml
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
