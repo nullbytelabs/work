@@ -34,7 +34,7 @@ dependencies, so the same `node_modules` works across platforms.
 
 ```bash
 npm install
-./pi-workflows ./test/e2e/hello-world-local.yaml
+./pi-workflows ./test/e2e/hello-world-local/workflow.yaml
 npm test        # unit + integration suite (Node's built-in test runner)
 npm run typecheck
 ```
@@ -61,10 +61,10 @@ top-level `runs-on` is rejected). A job that omits it falls back to `local`. Two
 targets are supported:
 
 - **`local`** — runs each step as a host `/bin/bash -lc` child process. Fast, no
-  isolation. No extra dependencies. (`test/e2e/hello-world-local.yaml`)
+  isolation. No extra dependencies. (`test/e2e/hello-world-local/workflow.yaml`)
 - **`gondolin`** — runs each step inside a hardware-virtualized Alpine micro-VM
   via `@earendil-works/gondolin` (QEMU). Secure, deny-by-default networking.
-  (`test/e2e/hello-world-gondolin.yaml`)
+  (`test/e2e/hello-world-gondolin/workflow.yaml`)
 
 ### Running the Gondolin example
 
@@ -77,7 +77,7 @@ it unless a workflow uses `runs-on: gondolin`. It requires:
   `npm install` pulls it; if it can't install on a platform, the rest still works.
 
 ```bash
-./pi-workflows ./test/e2e/hello-world-gondolin.yaml
+./pi-workflows ./test/e2e/hello-world-gondolin/workflow.yaml
 ```
 
 If the package isn't available, the engine fails fast with an actionable message
@@ -87,9 +87,9 @@ If the package isn't available, the engine fails fast with an actionable message
 PI_WF_TEST_GONDOLIN=1 npm test
 ```
 
-CI runs these too, in a dedicated `gondolin` job that installs QEMU and enables
-`/dev/kvm` on the x86_64 runner (Gondolin ships x86_64 guest images). It's marked
-`continue-on-error` until proven reliable, so it can't block merges.
+CI runs the full suite with these enabled: the `test` job (Node 25) installs
+QEMU and enables `/dev/kvm` on the x86_64 runner (Gondolin ships x86_64 guest
+images), then runs `PI_WF_TEST_GONDOLIN=1 npm test`.
 
 Steps run via `/bin/sh -lc` (the minimal Alpine guest has no bash), the per-job
 working directory is mounted at `/workspace`, and the VM is always torn down
