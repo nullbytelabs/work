@@ -8,10 +8,11 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
-import { DirectRuntime } from "../src/runtime/index.ts";
+import { useSharedRuntime } from "./_support.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = resolve(HERE, "e2e");
+const runtime = useSharedRuntime();
 
 const hasPython3 = spawnSync("python3", ["--version"]).status === 0;
 const RUN_VM = process.env["PI_WF_TEST_GONDOLIN"] === "1";
@@ -34,7 +35,7 @@ async function runExample(name: string) {
   const plan = compilePlan(name);
   const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-ex-"));
   try {
-    return await new DirectRuntime().run(plan, {
+    return await runtime.run(plan, {
       workRoot,
       workspaceSource: join(EXAMPLES, name),
     });

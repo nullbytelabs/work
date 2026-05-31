@@ -6,18 +6,19 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
-import { DirectRuntime } from "../src/runtime/index.ts";
 import type { WorkflowResult, StepResult } from "../src/runtime/index.ts";
+import { useSharedRuntime } from "./_support.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const runtime = useSharedRuntime();
 
-/** Run a YAML string through the whole pipeline, collecting streamed output. */
+/** Run a YAML string through the whole pipeline (durably), collecting output. */
 async function runWorkflow(yaml: string): Promise<{ result: WorkflowResult; output: string }> {
   const plan = compile(parseWorkflow(yaml));
   const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-int-"));
   let output = "";
   try {
-    const result = await new DirectRuntime().run(plan, {
+    const result = await runtime.run(plan, {
       workRoot,
       hooks: { onOutput: (_j, _s, c) => (output += c.text) },
     });

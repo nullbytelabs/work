@@ -6,4 +6,5 @@ export type {
   JobResult,
   StepResult,
 } from "./types.ts";
-export { DirectRuntime } from "./direct.ts";
+export { AbsurdRuntime, type AbsurdRuntimeOptions } from "./absurd/runtime.ts";
+export { createAbsurdEngine, type AbsurdEngine, ABSURD_SCHEMA_VERSION } from "./absurd/engine.ts";

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
-import { DirectRuntime } from "./runtime/index.ts";
+import { AbsurdRuntime } from "./runtime/index.ts";
 import { UserFacingError } from "./errors.ts";
 
 interface CliArgs {
@@ -95,27 +95,32 @@ async function main(): Promise<void> {
   const out = process.stdout;
   if (!args.quiet) out.write(`workflow: ${plan.name}\n`);
 
-  const runtime = new DirectRuntime();
-  const result = await runtime.run(plan, {
-    workRoot,
-    workspaceSource,
-    hooks: args.quiet
-      ? undefined
-      : {
-          onJobStart: (jobId) => out.write(`\n[job: ${jobId}]\n`),
-          onStepStart: (_jobId, stepName) => out.write(`  > ${stepName}\n`),
-          onOutput: (_jobId, _stepName, chunk) => {
-            const prefix = chunk.stream === "stderr" ? "    ! " : "    ";
-            for (const line of chunk.text.replace(/\n$/, "").split("\n")) {
-              out.write(`${prefix}${line}\n`);
-            }
+  const runtime = new AbsurdRuntime();
+  let result;
+  try {
+    result = await runtime.run(plan, {
+      workRoot,
+      workspaceSource,
+      hooks: args.quiet
+        ? undefined
+        : {
+            onJobStart: (jobId) => out.write(`\n[job: ${jobId}]\n`),
+            onStepStart: (_jobId, stepName) => out.write(`  > ${stepName}\n`),
+            onOutput: (_jobId, _stepName, chunk) => {
+              const prefix = chunk.stream === "stderr" ? "    ! " : "    ";
+              for (const line of chunk.text.replace(/\n$/, "").split("\n")) {
+                out.write(`${prefix}${line}\n`);
+              }
+            },
+            onStepEnd: (_jobId, step) => {
+              const mark = step.status === "success" ? "ok" : step.status;
+              out.write(`    (${mark}, exit ${step.exitCode})\n`);
+            },
           },
-          onStepEnd: (_jobId, step) => {
-            const mark = step.status === "success" ? "ok" : step.status;
-            out.write(`    (${mark}, exit ${step.exitCode})\n`);
-          },
-        },
-  });
+    });
+  } finally {
+    await runtime.close();
+  }
 
   if (!args.quiet) out.write(`\nresult: ${result.status}\n`);
   process.exit(result.status === "success" ? 0 : 1);

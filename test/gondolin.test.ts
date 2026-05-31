@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { GondolinTarget, buildExecArgs } from "../src/targets/index.ts";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
-import { DirectRuntime } from "../src/runtime/index.ts";
+import { AbsurdRuntime } from "../src/runtime/index.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -40,9 +40,10 @@ describe("GondolinTarget — VM smoke (opt-in)", { skip: !RUN_VM }, () => {
     const dir = resolve(HERE, "e2e", "hello-world-gondolin");
     const plan = compile(parseWorkflow(await readFile(resolve(dir, "workflow.yaml"), "utf-8")));
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-gondolin-"));
+    const runtime = new AbsurdRuntime();
     let output = "";
     try {
-      const result = await new DirectRuntime().run(plan, {
+      const result = await runtime.run(plan, {
         workRoot,
         workspaceSource: dir,
         hooks: { onOutput: (_j, _s, c) => (output += c.text) },
@@ -51,6 +52,7 @@ describe("GondolinTarget — VM smoke (opt-in)", { skip: !RUN_VM }, () => {
       assert.match(output, /hello world/);
       assert.match(output, /hello world, josh/);
     } finally {
+      await runtime.close();
       await rm(workRoot, { recursive: true, force: true });
     }
   });
