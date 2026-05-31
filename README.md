@@ -38,11 +38,13 @@ The engine runs end-to-end today: GHA-style YAML → validated spec → runtime-
 - **Spec + compiler** — `name`, workflow/job/step `env` layering, per-job `runs-on`, a `needs` DAG (deterministic topological order), and `run` steps; stable step naming; validation with path-aware errors.
 - **Inputs** — a workflow declares typed `inputs:` (`string`/`number`/`boolean`, with `required`/`default`/`description`, or a `name: 36` scalar shorthand) plus two validators: `options:` (enum) and `pattern:` (regex — the general validator; a UUID is just a pattern, so there's no named-`format` registry to maintain). Values come from `--inputs '<json>'`, are referenced with `${{ inputs.<name> }}` (in `run` and `env`), and are resolved + **strictly type-checked** (no coercion) + validated + interpolated at compile time, so the durable plan holds concrete values. Missing-required, unknown, wrong-type, out-of-options, pattern mismatches, and unsupported expressions all error clearly.
 - **Durable runtime** — `AbsurdRuntime` on **Absurd + PGLite**: each job is its own durable task, each step a checkpointed/memoized `ctx.step` (never recomputed on a retry). The runtime walks the `needs` DAG and runs a `concurrency`-driven worker, so **independent jobs run in parallel** (verified to overlap even on single-connection PGLite). A job is skipped only if one of its dependencies failed; independent jobs are unaffected.
+- **Outputs** — GitHub-Actions-style: a `run` step writes `key=value` lines to `$PI_OUTPUT`; a job exposes `outputs:` mapping `${{ steps.<id>.outputs.<key> }}`; a dependent reads `${{ needs.<job>.outputs.<name> }}`. These resolve at **runtime** (after the producing step/job finishes), unlike `inputs` which bind at compile time.
+- **Agent steps** — `uses: agent/summarize` runs a built-in agent via an `AgentRunner` seam. The default runner makes one OpenAI-compatible chat-completion call (Node `fetch`, no dependency) to a provider from a **config JSON** (`--config` / `pi-workflows.config.json`; providers + models, `$ENV` apiKey expansion). `with:` binds the agent's inputs; the result is exposed as `steps.<id>.outputs.summary`. The runner is injectable, so the whole pipeline is tested **without inference** (a mock runner).
 - **Execution targets** — `local` (host child process) and `gondolin` (hardware-virtualized Alpine micro-VM via `@earendil-works/gondolin`). Per-job **workspace staging**: the workflow's own folder is copied into each job's working directory, so committed companion files (e.g. a `script.sh`) are available.
 - **CLI** — `./pi-workflows <workflow.yaml>` streams step output and exits non-zero on failure.
-- **Quality** — unit + e2e tests (`node --test`, the `test/e2e/` examples double as fixtures, all run through the durable runtime), ESLint + `tsc`, and GitHub Actions CI including a Gondolin VM job (QEMU + KVM).
+- **Quality** — unit + e2e tests (`node --test`, the `test/e2e/` examples double as fixtures, all run through the durable runtime; agent steps use a mock runner), ESLint + `tsc`, and GitHub Actions CI including a Gondolin VM job (QEMU + KVM).
 
-**Not yet (design sketches):** agentic **`uses:`** steps via **Pi**, cross-process crash-resume (durability is in place; the resume UX — persistent dataDir + run id — is the next step), `strategy.matrix`, `if:` conditionals, and cross-step/job `outputs`. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md). **Out of scope:** PGMQ (single-host engine — no runner fleet to coordinate).
+**Not yet (design sketches):** the **full Pi SDK** agent path (tool-using/multi-turn agents, agent *packages* with manifests/lockfiles per [`docs/agent-uses-interface.md`](docs/agent-uses-interface.md) — today's `agent/summarize` is a built-in, no-tools composition behind the same seam), cross-process crash-resume (durability is in place; the resume UX — persistent dataDir + run id — is the next step), `strategy.matrix`, and `if:` conditionals. Per-toolchain custom Gondolin images (`runs-on: gondolin:node`, etc.) are researched in [`docs/gondolin-custom-images.md`](docs/gondolin-custom-images.md). **Out of scope:** PGMQ (single-host engine — no runner fleet to coordinate).
 
 ```bash
 npm install
@@ -204,7 +206,7 @@ The agent's behavior (system prompt, tool allowlist, defaults) lives in the **ag
 
 How it compiles: `build`, `test`, `review` become Absurd child tasks on the jobs queue; the orchestrator enforces `needs` by awaiting results; the `matrix.node` expands into three `test` children with deterministic names; `if:` becomes a conditional inside the step; the `agent/review` step resolves its package, validates `with` against the manifest's declared inputs, then builds a Pi session (system prompt + tools from the package, model via LiteLLM) running inside the job's Gondolin VM.
 
-> **Phase 1 reality check:** per-job `runs-on`, `env`, `needs`, `run` steps, `inputs:` and `${{ inputs.<name> }}` are implemented; `on:`, `strategy.matrix`, `if:`, `uses:`/agentic steps, other `${{ }}` contexts (`matrix`, `github`, …), and `$OUTPUT`/cross-step outputs are **not yet** — they illustrate the target experience. See [`docs/phase-1.md`](docs/phase-1.md) for the current subset and [`test/e2e/`](test/e2e/) for runnable examples.
+> **Phase 1 reality check:** per-job `runs-on`, `env`, `needs`, `run` steps, `inputs:`/`${{ inputs.* }}`, **`uses: agent/summarize`**, and **outputs** (`$PI_OUTPUT`, job `outputs:`, `${{ steps.*/needs.* }}`) are implemented; `on:`, `strategy.matrix`, `if:`, tool-using Pi agents, and other `${{ }}` contexts (`matrix`, `github`, …) are **not yet** — they illustrate the target experience. See [`docs/phase-1.md`](docs/phase-1.md) for the current subset and [`test/e2e/`](test/e2e/) for runnable examples.
 
 ---
 
@@ -226,18 +228,21 @@ pi-workflows/
 │   ├── pgmq-message-queues.md       ← PGMQ reference (OUT OF SCOPE — single host, kept for reference)
 │   └── pglite-wasm-postgres-database.md ← PGLite reference + provider-tier fit
 ├── src/
-│   ├── spec/        # YAML schema + parser + validation
-│   ├── compiler/    # spec -> runtime-agnostic ExecutionPlan
+│   ├── spec/        # YAML schema + parser + validation (inputs, outputs, uses, …)
+│   ├── compiler/    # spec -> ExecutionPlan; inputs (compile-time) + expr (two-phase)
 │   ├── runtime/     # Runtime interface + AbsurdRuntime (Absurd + PGLite, vendored schema)
 │   ├── targets/     # ExecutionTarget: LocalTarget, GondolinTarget
+│   ├── agent/       # AgentRunner seam + built-in agents (summarize) + OpenAI-compatible runner
+│   ├── config/      # provider/model config JSON loader + model resolution
 │   ├── errors.ts    # UserFacingError (clean CLI messages vs. stack traces)
 │   └── cli.ts       # read -> parse -> compile -> run
+├── pi-workflows.config.example.json    # provider/model config template (real one is gitignored)
 ├── test/
-│   ├── *.test.ts    # unit + integration (node --test)
+│   ├── *.test.ts    # unit + integration (node --test; agent steps use a mock runner)
 │   └── e2e/<name>/  # runnable examples = e2e fixtures (workflow.yaml + companion files)
 └── .github/workflows/ci.yml         # lint + typecheck + full suite (incl. gondolin)
 
-# future: src/agent/ (Pi), src/core/, images/ (custom guest images)
+# future: full Pi-SDK agents (tools/multi-turn), src/core/, images/ (custom guest images)
 ```
 
 ---

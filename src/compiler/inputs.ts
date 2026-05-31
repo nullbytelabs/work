@@ -1,9 +1,8 @@
 /**
  * Workflow inputs: resolve a provided JSON body against the declared `inputs:`
- * block, and interpolate `${{ inputs.<name> }}` expressions.
- *
- * Resolution + interpolation happen at COMPILE time, so the durable execution
- * plan contains concrete values — the runtime never sees an expression.
+ * block (validate types, defaults, options, pattern). `${{ inputs.<name> }}`
+ * interpolation itself lives in `./expr.ts` and runs at compile time, so the
+ * durable execution plan contains concrete input values.
  */
 import type { InputSpec } from "../spec/index.ts";
 import { WorkflowCompileError } from "./compile.ts";
@@ -86,34 +85,4 @@ function validateType(name: string, type: string, value: unknown): string | numb
   }
   if (typeof value === "string") return value;
   throw new WorkflowCompileError(`input "${name}" must be a string (got ${jsonType(value)})`);
-}
-
-// Matches `${{ ... }}`. The inner group can't contain `}`, which is fine for the
-// supported `inputs.<name>` form and keeps the close unambiguous.
-const EXPR = /\$\{\{\s*([^}]*?)\s*\}\}/g;
-
-/**
- * Replace every `${{ inputs.<name> }}` in `template` with the resolved value.
- * Throws on unsupported expressions or references to undeclared inputs — a
- * condition is never silently left in place.
- */
-export function interpolate(template: string, inputs: ResolvedInputs): string {
-  return template.replace(EXPR, (_match, expr: string) => {
-    const name = inputName(expr);
-    if (!Object.prototype.hasOwnProperty.call(inputs, name)) {
-      throw new WorkflowCompileError(`expression references undeclared input "${name}" (declare it under inputs:)`);
-    }
-    return String(inputs[name]);
-  });
-}
-
-function inputName(expr: string): string {
-  const e = expr.trim();
-  let m = /^inputs\.([A-Za-z_][A-Za-z0-9_-]*)$/.exec(e);
-  if (m) return m[1]!;
-  m = /^inputs\[\s*'([^']+)'\s*\]$/.exec(e) ?? /^inputs\[\s*"([^"]+)"\s*\]$/.exec(e);
-  if (m) return m[1]!;
-  throw new WorkflowCompileError(
-    `unsupported expression "\${{ ${e} }}" — only \${{ inputs.<name> }} is supported`,
-  );
 }

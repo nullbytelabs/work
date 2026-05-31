@@ -6,20 +6,24 @@
  * Pipeline: read file -> parseWorkflow -> compile -> AbsurdRuntime.run.
  * Streams step output live and exits non-zero if any job fails.
  */
-import { readFile } from "node:fs/promises";
-import { mkdtemp } from "node:fs/promises";
+import { readFile, mkdtemp } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { AbsurdRuntime } from "./runtime/index.ts";
+import { loadConfig, type PiWorkflowsConfig } from "./config/index.ts";
 import { UserFacingError } from "./errors.ts";
+
+const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
 
 interface CliArgs {
   file: string;
   workdir?: string;
   quiet: boolean;
   inputs: Record<string, unknown>;
+  config?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -27,12 +31,16 @@ function parseArgs(argv: string[]): CliArgs {
   let workdir: string | undefined;
   let quiet = false;
   let inputs: Record<string, unknown> = {};
+  let config: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--workdir") {
       workdir = argv[++i];
       if (!workdir) fail("--workdir requires a directory path");
+    } else if (arg === "--config") {
+      config = argv[++i];
+      if (!config) fail("--config requires a path");
     } else if (arg === "--inputs") {
       const json = argv[++i];
       if (!json) fail("--inputs requires a JSON object string");
@@ -64,13 +72,22 @@ function parseArgs(argv: string[]): CliArgs {
     printUsage();
     process.exit(2);
   }
-  return { file, workdir, quiet, inputs };
+  return { file, workdir, quiet, inputs, ...(config ? { config } : {}) };
 }
 
 function printUsage(): void {
   process.stderr.write(
-    "Usage: pi-workflows <workflow.yaml> [--inputs '<json>'] [--workdir <dir>] [--quiet]\n",
+    "Usage: pi-workflows <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n",
   );
+}
+
+/** Resolve which config file to load: --config, then $PI_WORKFLOWS_CONFIG, then the default if it exists. */
+function resolveConfigPath(cliPath?: string): string | undefined {
+  if (cliPath) return resolve(cliPath);
+  const env = process.env["PI_WORKFLOWS_CONFIG"];
+  if (env) return resolve(env);
+  const def = resolve(DEFAULT_CONFIG_PATH);
+  return existsSync(def) ? def : undefined;
 }
 
 function fail(msg: string): never {
@@ -99,6 +116,12 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  // Load provider/model config (for agent steps). Absent config is fine until an
+  // agent step actually needs a model.
+  let config: PiWorkflowsConfig | undefined;
+  const configPath = resolveConfigPath(args.config);
+  if (configPath) config = await loadConfig(configPath);
+
   const workRoot = args.workdir
     ? resolve(args.workdir)
     : await mkdtemp(join(tmpdir(), "pi-workflows-"));
@@ -123,7 +146,7 @@ async function main(): Promise<void> {
     return b;
   };
 
-  const runtime = new AbsurdRuntime();
+  const runtime = new AbsurdRuntime(config ? { config } : {});
   let result;
   try {
     result = await runtime.run(plan, {

@@ -101,27 +101,37 @@ describe("inputs — required / options / pattern / format", () => {
 
 describe("inputs — interpolate", () => {
   it("substitutes ${{ inputs.x }} (dot and bracket forms)", () => {
-    const r = { name: "josh" };
-    assert.equal(interpolate("hi ${{ inputs.name }}", r), "hi josh");
-    assert.equal(interpolate("hi ${{ inputs['name'] }}", r), "hi josh");
+    const inputs = { name: "josh" };
+    assert.equal(interpolate("hi ${{ inputs.name }}", { inputs }), "hi josh");
+    assert.equal(interpolate("hi ${{ inputs['name'] }}", { inputs }), "hi josh");
   });
 
   it("throws on an undeclared input reference", () => {
     assert.throws(
-      () => interpolate("${{ inputs.ghost }}", { name: "x" }),
+      () => interpolate("${{ inputs.ghost }}", { inputs: { name: "x" } }),
       (e) => e instanceof WorkflowCompileError && /undeclared input "ghost"/.test(e.message),
     );
   });
 
   it("throws on an unsupported expression", () => {
     assert.throws(
-      () => interpolate("${{ matrix.node }}", {}),
+      () => interpolate("${{ matrix.node }}", { inputs: {} }),
       (e) => e instanceof WorkflowCompileError && /unsupported expression/.test(e.message),
     );
   });
 
+  it("leaves needs/steps expressions intact when that context is absent (deferred)", () => {
+    assert.equal(interpolate("${{ needs.a.outputs.x }}", { inputs: {} }), "${{ needs.a.outputs.x }}");
+    assert.equal(interpolate("${{ steps.s.outputs.y }}", { inputs: {} }), "${{ steps.s.outputs.y }}");
+  });
+
+  it("resolves needs/steps when that context is provided", () => {
+    assert.equal(interpolate("${{ needs.a.outputs.x }}", { needs: { a: { outputs: { x: "X" } } } }), "X");
+    assert.equal(interpolate("${{ steps.s.outputs.y }}", { steps: { s: { outputs: { y: "Y" } } } }), "Y");
+  });
+
   it("leaves shell ${VAR} and $(...) untouched", () => {
-    assert.equal(interpolate('echo "${HOME} $(date)"', {}), 'echo "${HOME} $(date)"');
+    assert.equal(interpolate('echo "${HOME} $(date)"', { inputs: {} }), 'echo "${HOME} $(date)"');
   });
 });
 

@@ -142,6 +142,47 @@ jobs:
     assert.ok(elapsed < 1000, `expected parallel (<1000ms), took ${elapsed}ms`);
   });
 
+  it("passes a job output to a dependent via needs.<job>.outputs", async () => {
+    const { output } = await runWorkflow(`
+name: outputs
+jobs:
+  produce:
+    runs-on: local
+    outputs:
+      msg: \${{ steps.gen.outputs.msg }}
+    steps:
+      - id: gen
+        run: printf 'msg=%s\\n' "hello-from-upstream" >> "$PI_OUTPUT"
+  consume:
+    runs-on: local
+    needs: [produce]
+    steps:
+      - env:
+          GOT: \${{ needs.produce.outputs.msg }}
+        run: echo "got=$GOT"
+`);
+    assert.match(output, /got=hello-from-upstream/);
+  });
+
+  it("runs an agent step (mock runner) and exposes its summary output", async () => {
+    const { result, output } = await runWorkflow(`
+name: agent
+jobs:
+  go:
+    runs-on: local
+    steps:
+      - id: sum
+        uses: agent/summarize
+        with:
+          input: "the text to summarize"
+      - env:
+          S: \${{ steps.sum.outputs.summary }}
+        run: echo "out=$S"
+`);
+    assert.equal(result.status, "success");
+    assert.match(output, /out=MOCK SUMMARY/);
+  });
+
   it("skips only the failed job's dependents — independent jobs still run", async () => {
     const { result } = await runWorkflow(`
 name: partial-failure

@@ -2,32 +2,39 @@
  * AbsurdRuntime — the engine's durable runtime (the only one).
  *
  * Each **job** is its own durable Absurd task; each `<job>/<step>` is a durable
- * `ctx.step(...)` checkpoint, so a completed step is never recomputed on a retry.
- * The runtime itself walks the `needs` DAG: it spawns a job's task once all the
- * job's dependencies have succeeded, and runs an Absurd worker with
- * `concurrency > 1` so independent jobs execute **in parallel** (verified to
- * overlap even on single-connection PGLite — only checkpoint writes serialize).
+ * `ctx.step(...)` checkpoint. The runtime walks the `needs` DAG (independent jobs
+ * run in parallel via worker `concurrency`) and threads outputs between jobs:
+ * a dependency's resolved `outputs` are passed to its dependents as the
+ * `needs.<job>.outputs.*` context, and a step's `${{ steps.<id>.outputs.* }}` /
+ * `${{ needs.* }}` expressions are resolved here at runtime (inputs were already
+ * bound at compile time).
  *
- * Failure/skip semantics (GitHub-Actions-like): a job runs only if every job in
- * its `needs` succeeded; if any dependency failed or was skipped, the job is
- * skipped. Independent jobs are unaffected by another job's failure.
+ * Step kinds: `run` (shell on the ExecutionTarget) and `uses: agent/<name>`
+ * (an LLM call via the injected AgentRunner). Both are memoized checkpoints.
  *
- * NOTE: cross-job orchestration lives in the runtime (JS), not in a durable
- * task, so whole-workflow crash-resume isn't covered yet (individual jobs/steps
- * ARE durable). Resume across a process restart is a later addition (persistent
- * dataDir + run id); see docs/phase-1.md.
+ * Failure/skip: a job runs only if every `needs` dependency succeeded; otherwise
+ * it's skipped. The workflow fails if any job failed.
+ *
+ * NOTE: cross-job orchestration lives in the runtime (JS), not a durable task,
+ * so whole-workflow crash-resume isn't covered yet. See docs/phase-1.md.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { mkdir, cp } from "node:fs/promises";
+import { mkdir, cp, readFile, rm } from "node:fs/promises";
 import type { TaskContext } from "absurd-sdk";
 import { makeTarget } from "../../targets/index.ts";
+import { interpolate, type OutputBag } from "../../compiler/index.ts";
+import { resolveModel, type PiWorkflowsConfig } from "../../config/index.ts";
+import { OpenAiAgentRunner, parseAgentUses, resolveAgent, type AgentRunner } from "../../agent/index.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "./engine.ts";
-import type { ExecutionPlan, PlannedJob } from "../../compiler/index.ts";
+import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
 import type { JobResult, RunContext, Runtime, StepResult, WorkflowResult } from "../types.ts";
 
 const QUEUE = "default";
 const DEFAULT_MAX_CONCURRENCY = 16;
+
+/** Upstream job outputs passed to a job's task (JSON-serializable). */
+type NeedsContext = Record<string, OutputBag>;
 
 export interface AbsurdRuntimeOptions {
   /** PGLite data dir for persistence; omit for ephemeral in-memory. */
@@ -36,6 +43,17 @@ export interface AbsurdRuntimeOptions {
   engine?: AbsurdEngine;
   /** Max jobs to execute concurrently (default min(jobs, 16)). */
   maxConcurrency?: number;
+  /** Provider/model config for agent steps (omit if no agent steps run). */
+  config?: PiWorkflowsConfig;
+  /** Agent runner for `uses: agent/*` steps (default: OpenAI-compatible HTTP). */
+  agentRunner?: AgentRunner;
+}
+
+/** Side dependencies captured by the per-job task handler (not serialized). */
+interface JobDeps {
+  ctx: RunContext;
+  agentRunner: AgentRunner;
+  config?: PiWorkflowsConfig;
 }
 
 export class AbsurdRuntime implements Runtime {
@@ -44,12 +62,16 @@ export class AbsurdRuntime implements Runtime {
   private readonly ownsEngine: boolean;
   private readonly dataDir: string | undefined;
   private readonly maxConcurrency: number | undefined;
+  private readonly config: PiWorkflowsConfig | undefined;
+  private readonly agentRunner: AgentRunner;
 
   constructor(opts: AbsurdRuntimeOptions = {}) {
     this.engine = opts.engine ?? null;
     this.ownsEngine = opts.engine === undefined;
     this.dataDir = opts.dataDir;
     this.maxConcurrency = opts.maxConcurrency;
+    this.config = opts.config;
+    this.agentRunner = opts.agentRunner ?? new OpenAiAgentRunner();
   }
 
   private async ensureEngine(): Promise<AbsurdEngine> {
@@ -60,15 +82,14 @@ export class AbsurdRuntime implements Runtime {
   async run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult> {
     const { app } = await this.ensureEngine();
     const runId = randomUUID();
+    const deps: JobDeps = { ctx, agentRunner: this.agentRunner, config: this.config };
 
-    // One durable task definition per run; each job is spawned as an instance of
-    // it (params carry the job id). Unique name so a shared engine hosts many runs.
     const jobTaskName = `job:${plan.name}:${runId}`;
     app.registerTask(
       { name: jobTaskName, queue: QUEUE, defaultMaxAttempts: 1 },
       async (params: unknown, taskCtx: TaskContext) => {
-        const jobId = (params as { jobId: string }).jobId;
-        return runJobInTask(plan.jobs[jobId]!, ctx, taskCtx);
+        const p = params as { jobId: string; needs: NeedsContext };
+        return runJobInTask(plan.jobs[p.jobId]!, deps, taskCtx, p.needs ?? {});
       },
     );
 
@@ -77,22 +98,23 @@ export class AbsurdRuntime implements Runtime {
     const worker = await app.startWorker({ concurrency, batchSize: concurrency, claimTimeout: 600, pollInterval: 0.05 });
 
     try {
-      // Walk the needs-DAG with memoized promises: each job awaits its deps, then
-      // (if they all succeeded) spawns its task and awaits the result. Independent
-      // jobs reach `spawn` concurrently and the worker runs them in parallel.
       const scheduled = new Map<string, Promise<JobResult>>();
       const schedule = (jobId: string): Promise<JobResult> => {
         const existing = scheduled.get(jobId);
         if (existing) return existing;
         const job = plan.jobs[jobId]!;
         const p = (async (): Promise<JobResult> => {
-          const deps = await Promise.all(job.needs.map((d) => schedule(d)));
-          if (deps.some((d) => d.status !== "success")) {
+          const depResults = await Promise.all(job.needs.map((d) => schedule(d)));
+          if (depResults.some((d) => d.status !== "success")) {
             return { id: jobId, status: "skipped", steps: [] };
           }
+          // Build the needs context from dependencies' resolved outputs.
+          const needs: NeedsContext = {};
+          for (const dep of depResults) needs[dep.id] = { outputs: dep.outputs ?? {} };
+
           const { taskID } = await app.spawn(
             jobTaskName,
-            { jobId },
+            { jobId, needs },
             { queue: QUEUE, idempotencyKey: `${runId}:${jobId}` },
           );
           const snap = await awaitTaskTerminal(app, taskID);
@@ -115,7 +137,6 @@ export class AbsurdRuntime implements Runtime {
         return p;
       };
 
-      // Stable output order = compiled topological order.
       const jobs = await Promise.all(plan.jobOrder.map((id) => schedule(id)));
       return {
         name: plan.name,
@@ -127,7 +148,6 @@ export class AbsurdRuntime implements Runtime {
     }
   }
 
-  /** Tear down the engine if this runtime owns it. */
   async close(): Promise<void> {
     if (this.ownsEngine && this.engine) {
       await this.engine.close();
@@ -136,7 +156,6 @@ export class AbsurdRuntime implements Runtime {
   }
 }
 
-/** Poll a task's result until it reaches a terminal state. */
 async function awaitTaskTerminal(app: AbsurdEngine["app"], taskID: string) {
   for (;;) {
     const snap = await app.fetchTaskResult(taskID);
@@ -147,19 +166,30 @@ async function awaitTaskTerminal(app: AbsurdEngine["app"], taskID: string) {
   }
 }
 
-/** Run a single job's steps as durable checkpoints inside its Absurd task. */
-async function runJobInTask(job: PlannedJob, ctx: RunContext, taskCtx: TaskContext): Promise<JobResult> {
+/** Parse `key=value` lines from a step's $PI_OUTPUT file. */
+function parseOutputFile(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    out[line.slice(0, eq).trim()] = line.slice(eq + 1);
+  }
+  return out;
+}
+
+async function runJobInTask(
+  job: PlannedJob,
+  deps: JobDeps,
+  taskCtx: TaskContext,
+  needs: NeedsContext,
+): Promise<JobResult> {
+  const { ctx } = deps;
   ctx.hooks?.onJobStart?.(job.id);
   const workdir = join(ctx.workRoot, job.id);
 
-  // Stage the workflow's directory into this job's isolated workspace.
   await mkdir(workdir, { recursive: true });
-  if (ctx.workspaceSource) {
-    await cp(ctx.workspaceSource, workdir, { recursive: true });
-  }
+  if (ctx.workspaceSource) await cp(ctx.workspaceSource, workdir, { recursive: true });
 
-  // Provisioning can fail for environmental reasons (e.g. gondolin not
-  // installed). Surface that as a failed step rather than crashing the task.
   let target;
   try {
     target = makeTarget(job.runsOn, { workdir });
@@ -179,46 +209,28 @@ async function runJobInTask(job: PlannedJob, ctx: RunContext, taskCtx: TaskConte
   }
 
   const steps: StepResult[] = [];
+  const stepOutputs: Record<string, OutputBag> = {}; // by step id, for steps.<id>.outputs
   let failed = false;
+
+  const exprCtx = () => ({ needs, steps: stepOutputs });
+
   try {
     for (const step of job.steps) {
       if (failed) {
         steps.push({ name: step.name, status: "skipped", exitCode: 0, stdout: "", stderr: "" });
         continue;
       }
-
-      // `uses` (agentic) steps are recognized but not executable yet.
-      if (step.run === undefined) {
-        const result: StepResult = {
-          name: step.name,
-          status: "failure",
-          exitCode: 1,
-          stdout: "",
-          stderr: `step "${step.name}" uses "${step.uses}" — "uses" steps are not supported yet`,
-        };
-        ctx.hooks?.onStepStart?.(job.id, step.name);
-        ctx.hooks?.onStepEnd?.(job.id, result);
-        steps.push(result);
-        failed = true;
-        continue;
-      }
-
       ctx.hooks?.onStepStart?.(job.id, step.name);
-      const command = step.run;
-      const stepEnv = step.env;
+
       const result = await taskCtx.step<StepResult>(step.name, async () => {
-        const run = await target.run(command, {
-          env: stepEnv,
-          onOutput: (chunk) => ctx.hooks?.onOutput?.(job.id, step.name, chunk),
-        });
-        return {
-          name: step.name,
-          status: run.ok ? "success" : "failure",
-          exitCode: run.exitCode,
-          stdout: run.stdout,
-          stderr: run.stderr,
-        };
+        if (step.uses !== undefined) {
+          return runAgentStep(step, deps, exprCtx());
+        }
+        return runShellStep(step, job, target!, workdir, ctx, exprCtx());
       });
+
+      // Capture declared outputs for steps with an id.
+      if (step.id && result.outputs) stepOutputs[step.id] = { outputs: result.outputs };
       ctx.hooks?.onStepEnd?.(job.id, result);
       steps.push(result);
       if (result.status === "failure") failed = true;
@@ -227,7 +239,110 @@ async function runJobInTask(job: PlannedJob, ctx: RunContext, taskCtx: TaskConte
     await target.dispose();
   }
 
+  // Resolve job outputs from collected step outputs (and needs).
+  let outputs: Record<string, string> | undefined;
+  if (job.outputs && !failed) {
+    outputs = {};
+    for (const [k, expr] of Object.entries(job.outputs)) {
+      outputs[k] = interpolate(expr, exprCtx());
+    }
+  }
+
   const jobResult: JobResult = { id: job.id, status: failed ? "failure" : "success", steps };
+  if (outputs) jobResult.outputs = outputs;
   ctx.hooks?.onJobEnd?.(job.id, jobResult);
   return jobResult;
+}
+
+/** A shell `run` step on the ExecutionTarget; captures $PI_OUTPUT (local only). */
+async function runShellStep(
+  step: PlannedStep,
+  job: PlannedJob,
+  target: NonNullable<Awaited<ReturnType<typeof makeTarget>>>,
+  workdir: string,
+  ctx: RunContext,
+  expr: { needs: NeedsContext; steps: Record<string, OutputBag> },
+): Promise<StepResult> {
+  const command = interpolate(step.run!, expr);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(step.env)) env[k] = interpolate(v, expr);
+
+  // Output capture via a $PI_OUTPUT file in the (host) workdir — local only,
+  // since the gondolin guest path differs from the host mount path.
+  const captureOutputs = job.runsOn === "local";
+  const outFile = join(workdir, `.pi-output-${step.name.replace(/[^\w-]/g, "_")}`);
+  if (captureOutputs) {
+    env["PI_OUTPUT"] = outFile;
+    await rm(outFile, { force: true });
+  }
+
+  const run = await target.run(command, {
+    env,
+    onOutput: (chunk) => ctx.hooks?.onOutput?.(job.id, step.name, chunk),
+  });
+
+  const result: StepResult = {
+    name: step.name,
+    status: run.ok ? "success" : "failure",
+    exitCode: run.exitCode,
+    stdout: run.stdout,
+    stderr: run.stderr,
+  };
+  if (captureOutputs && run.ok) {
+    const text = await readFile(outFile, "utf-8").catch(() => "");
+    if (text) result.outputs = parseOutputFile(text);
+  }
+  return result;
+}
+
+/** A `uses: agent/<name>` step — bind inputs, call the AgentRunner, map outputs. */
+async function runAgentStep(
+  step: PlannedStep,
+  deps: JobDeps,
+  expr: { needs: NeedsContext; steps: Record<string, OutputBag> },
+): Promise<StepResult> {
+  try {
+    const { name } = parseAgentUses(step.uses!);
+    const agent = resolveAgent(name);
+
+    // Interpolate `with` string values (needs/steps) and split off `model`.
+    const withRaw = step.with ?? {};
+    let modelAlias: string | undefined;
+    const inputs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(withRaw)) {
+      const val = typeof v === "string" ? interpolate(v, expr) : String(v);
+      if (k === "model") modelAlias = val;
+      else inputs[k] = val;
+    }
+    // Validate declared inputs.
+    for (const [key, spec] of Object.entries(agent.inputs)) {
+      if (spec.required && !(key in inputs)) {
+        throw new Error(`agent "${name}" requires input "${key}"`);
+      }
+    }
+
+    const model = deps.config ? resolveModel(deps.config, modelAlias) : undefined;
+    const res = await deps.agentRunner.run({
+      system: agent.instructions,
+      prompt: agent.buildPrompt(inputs),
+      ...(model ? { model } : {}),
+    });
+
+    return {
+      name: step.name,
+      status: "success",
+      exitCode: 0,
+      stdout: res.text,
+      stderr: "",
+      outputs: agent.toOutputs(res.text),
+    };
+  } catch (err) {
+    return {
+      name: step.name,
+      status: "failure",
+      exitCode: 1,
+      stdout: "",
+      stderr: (err as Error).message,
+    };
+  }
 }

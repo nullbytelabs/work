@@ -182,6 +182,18 @@ function parseJob(raw: unknown, path: string): JobSpec {
   const env = parseEnv(raw.env, `${path}.env`);
   if (env) job.env = env;
 
+  if (raw.outputs !== undefined) {
+    if (!isPlainObject(raw.outputs)) {
+      throw new WorkflowParseError("outputs must be a mapping of name -> expression", `${path}.outputs`);
+    }
+    const outputs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw.outputs)) {
+      if (typeof v !== "string") throw new WorkflowParseError(`output "${k}" must be a string expression`, `${path}.outputs`);
+      outputs[k] = v;
+    }
+    job.outputs = outputs;
+  }
+
   return job;
 }
 

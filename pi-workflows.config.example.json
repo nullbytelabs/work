@@ -1,0 +1,17 @@
+{
+  "providers": {
+    "fireworks": {
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "apiKey": "$FIREWORKS_API_KEY"
+    }
+  },
+  "models": {
+    "kimi": {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/kimi-k2p6",
+      "maxTokens": 512,
+      "temperature": 0.2
+    }
+  },
+  "defaultModel": "kimi"
+}

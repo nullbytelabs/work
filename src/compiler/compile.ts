@@ -17,9 +17,10 @@ export class WorkflowCompileError extends Error {
   }
 }
 
-// Imported after the error class so the (function-level) circular reference with
-// inputs.ts is resolved by the time these are called.
-import { resolveInputs, interpolate, type ResolvedInputs } from "./inputs.ts";
+// Imported after the error class so the (function-level) circular references
+// with inputs.ts / expr.ts are resolved by the time these are called.
+import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
+import { interpolate } from "./expr.ts";
 
 /** Options for compiling a workflow. */
 export interface CompileOptions {
@@ -46,15 +47,23 @@ function compileStep(
   inputs: ResolvedInputs,
 ): PlannedStep {
   const stepKey = step.id ?? String(index);
-  // Interpolate ${{ inputs.x }} in every env value (workflow <- job <- step).
+  // Resolve ${{ inputs.x }} now; leave ${{ needs.* }} / ${{ steps.* }} for runtime.
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(mergeEnv(baseEnv, step.env))) {
-    env[k] = interpolate(v, inputs);
+    env[k] = interpolate(v, { inputs });
   }
   const planned: PlannedStep = { name: `${jobId}/${stepKey}`, env };
-  if (step.run !== undefined) planned.run = interpolate(step.run, inputs);
+  if (step.id !== undefined) planned.id = step.id;
+  if (step.run !== undefined) planned.run = interpolate(step.run, { inputs });
   if (step.uses !== undefined) planned.uses = step.uses;
-  if (step.with !== undefined) planned.with = step.with;
+  if (step.with !== undefined) {
+    // Interpolate string `with` values now (inputs); defer needs/steps.
+    const w: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(step.with)) {
+      w[k] = typeof v === "string" ? interpolate(v, { inputs }) : v;
+    }
+    planned.with = w;
+  }
   if (step.if !== undefined) planned.if = step.if;
   return planned;
 }
@@ -66,12 +75,22 @@ function compileJob(
   inputs: ResolvedInputs,
 ): PlannedJob {
   const jobEnv = mergeEnv(workflowEnv, job.env);
-  return {
+  const planned: PlannedJob = {
     id: jobId,
     runsOn: job.runsOn ?? DEFAULT_RUNS_ON,
     needs: job.needs ?? [],
     steps: job.steps.map((s, i) => compileStep(s, jobId, i, jobEnv, inputs)),
   };
+  if (job.outputs !== undefined) {
+    // Job output expressions resolve at runtime (steps.*/needs.*); resolve any
+    // inputs.* now, defer the rest.
+    const outputs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(job.outputs)) {
+      outputs[k] = interpolate(v, { inputs });
+    }
+    planned.outputs = outputs;
+  }
+  return planned;
 }
 
 /**

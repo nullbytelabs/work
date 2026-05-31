@@ -136,7 +136,41 @@ for when steps need egress.
   dependencies failed or was skipped — independent jobs are unaffected. The
   workflow fails if any job failed.
 - Env layers `workflow ← job ← step`, the later layer winning.
-- `run` steps only. `uses` (agentic) steps are recognized and rejected.
+- Step kinds: `run` (shell on the target) and `uses: agent/<name>` (an LLM call).
+
+## Outputs
+
+GitHub-Actions-style, resolved at **runtime** (after the producing step/job runs):
+
+- A `run` step writes `key=value` lines to **`$PI_OUTPUT`** (a file the engine
+  reads back — `local` target only for now; the gondolin guest path differs).
+- A job exposes `outputs:` mapping names to `${{ steps.<id>.outputs.<key> }}`.
+- A dependent reads `${{ needs.<job>.outputs.<name> }}` (in `env`, `run`, `with`).
+
+So `${{ }}` is two-phase: `inputs.*` bind at compile time; `steps.*`/`needs.*`
+resolve at runtime. Unknown roots still error. See `test/e2e/agent-summarize/`.
+
+## Agent steps (`uses: agent/<name>`)
+
+`uses: agent/summarize` runs a **built-in** agent (fixed system prompt + a task
+built from `with:` inputs) through an `AgentRunner` seam. The default runner makes
+one OpenAI-compatible chat-completion call (Node `fetch`) to a provider from the
+config JSON; the result is exposed as `steps.<id>.outputs.summary`. The runner is
+injectable, so tests use a mock and never call inference.
+
+**Config** (`--config <file>`, `$PI_WORKFLOWS_CONFIG`, or `./pi-workflows.config.json`):
+
+```json
+{
+  "providers": { "fireworks": { "baseUrl": "https://api.fireworks.ai/inference/v1", "apiKey": "$FIREWORKS_API_KEY" } },
+  "models": { "kimi": { "provider": "fireworks", "model": "accounts/fireworks/models/kimi-k2p6" } },
+  "defaultModel": "kimi"
+}
+```
+
+`apiKey` supports `$VAR`/`${VAR}` expansion. Today's agent is a no-tools
+composition; the full Pi-SDK path (tools, multi-turn, agent packages with
+manifests/lockfiles) is designed in `docs/agent-uses-interface.md`.
 
 ## The Phase 2 upgrade path (deliberate boundaries)
 

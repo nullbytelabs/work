@@ -61,6 +61,8 @@ export interface JobSpec {
   needs?: string[];
   /** Job-level env, layered over workflow env. */
   env?: EnvMap;
+  /** Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. */
+  outputs?: Record<string, string>;
   /** Ordered steps. */
   steps: StepSpec[];
 }

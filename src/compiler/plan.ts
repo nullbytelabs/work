@@ -16,15 +16,17 @@
 export interface PlannedStep {
   /** Stable, unique-within-job name: `<jobId>/<stepId-or-index>`. */
   name: string;
+  /** Author-given step id (for `steps.<id>.outputs.*` references), if any. */
+  id?: string;
   /** The shell command to run, if this is a `run` step. */
   run?: string;
-  /** Action/agent reference, if this is a `uses` step (Phase 2+). */
+  /** Agent reference (`agent/<name>[@ref]`), if this is a `uses` step. */
   uses?: string;
-  /** Inputs for a `uses` step. */
+  /** Inputs for a `uses` step (string values may carry deferred expressions). */
   with?: Record<string, unknown>;
   /** Raw conditional expression (Phase 2+). */
   if?: string;
-  /** Fully-resolved env (workflow <- job <- step). */
+  /** Resolved env (workflow <- job <- step); may carry deferred needs/steps expressions. */
   env: Record<string, string>;
 }
 
@@ -36,6 +38,8 @@ export interface PlannedJob {
   /** Resolved dependencies (job ids). */
   needs: string[];
   steps: PlannedStep[];
+  /** Job outputs: name -> expression (resolved at runtime from step outputs). */
+  outputs?: Record<string, string>;
 }
 
 /** The whole compiled workflow. */

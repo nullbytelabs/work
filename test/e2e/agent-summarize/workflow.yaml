@@ -1,0 +1,36 @@
+# agent summarize
+# description: a `produce` job emits text as a job output; a `summarize` job
+#              consumes it via needs.<job>.outputs and runs the built-in
+#              `agent/summarize` agent, then echoes the summary (steps.<id>.outputs).
+# note: the agent step calls an LLM via the configured provider — supply a config
+#       (--config pi-workflows.config.json). The test suite injects a mock runner,
+#       so this runs without inference there.
+# usage: ./pi-workflows ./test/e2e/agent-summarize/workflow.yaml --config pi-workflows.config.json
+---
+name: agent-summarize
+
+jobs:
+  produce:
+    runs-on: local
+    outputs:
+      report: ${{ steps.gen.outputs.report }}
+    steps:
+      - id: gen
+        name: generate report
+        run: |
+          printf 'report=%s\n' "Q3 revenue rose 12 percent to 4.2M dollars; churn fell to 3 percent; headcount grew by 8 across engineering and sales." >> "$PI_OUTPUT"
+
+  summarize:
+    runs-on: local
+    needs: [produce]
+    steps:
+      - id: sum
+        name: summarize the report
+        uses: agent/summarize
+        with:
+          input: ${{ needs.produce.outputs.report }}
+      - name: show summary
+        env:
+          SUMMARY: ${{ steps.sum.outputs.summary }}
+        run: |
+          echo "SUMMARY: $SUMMARY"

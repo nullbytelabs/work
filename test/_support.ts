@@ -4,6 +4,16 @@
 import { before, after } from "node:test";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunContext, type WorkflowResult } from "../src/runtime/index.ts";
 import type { ExecutionPlan } from "../src/compiler/index.ts";
+import type { AgentRunner, AgentRequest } from "../src/agent/index.ts";
+
+/** Deterministic agent runner for tests — no network. Echoes a canned summary. */
+export const mockAgentRunner: AgentRunner = {
+  async run(req: AgentRequest) {
+    // Surface enough of the prompt to assert the wiring, but stay deterministic.
+    const firstLine = req.prompt.split("\n").find((l) => l.trim().length > 0) ?? "";
+    return { text: `MOCK SUMMARY: ${firstLine.slice(0, 60)}` };
+  },
+};
 
 export interface SharedRuntime {
   run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult>;
@@ -21,7 +31,8 @@ export function useSharedRuntime(): SharedRuntime {
   return {
     run(plan, ctx) {
       if (!engine) throw new Error("engine not started");
-      return new AbsurdRuntime({ engine }).run(plan, ctx);
+      // Agent steps use the mock runner so tests never call inference.
+      return new AbsurdRuntime({ engine, agentRunner: mockAgentRunner }).run(plan, ctx);
     },
   };
 }
