@@ -50,7 +50,9 @@ Exit code is `0` on success, `1` on workflow failure, `2` on bad input.
 - `spec.test.ts` — parse + validation (errors carry a path; env coercion; misplaced `runs-on`)
 - `compiler.test.ts` — env layering, default/override `runs-on`, step naming, topo order, cycle detection
 - `targets.test.ts` — LocalTarget exec/exit/env/streaming; factory target selection
-- `integration.test.ts` — parse→compile→run on inline + the real example; failure/skip semantics; needs ordering
+- `integration.test.ts` — parse→compile→run on inline workflows; failure/skip semantics; needs ordering
+- `examples.test.ts` — runs every local workflow in `test/e2e/` end-to-end (the examples double as e2e fixtures)
+- `gondolin.test.ts` — GondolinTarget unit checks + an opt-in VM smoke test
 
 ## `runs-on`
 
