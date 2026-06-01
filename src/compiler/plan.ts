@@ -59,4 +59,9 @@ export interface ExecutionPlan {
   jobOrder: string[];
   /** Resolved workflow inputs, so the runtime can evaluate `if:` against them. */
   inputs?: Record<string, string | number | boolean>;
+  /**
+   * Non-fatal authoring warnings raised at compile time (e.g. a deprecated or
+   * implicit `runs-on`). The CLI surfaces these on stderr; the run proceeds.
+   */
+  warnings?: string[];
 }

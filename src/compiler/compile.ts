@@ -32,6 +32,22 @@ export interface CompileOptions {
 
 export const DEFAULT_RUNS_ON = "gondolin";
 
+/**
+ * Warn when a job doesn't explicitly opt into the sandbox. `runs-on: local` is
+ * deprecated (host execution, no isolation); an omitted `runs-on` silently
+ * defaults to gondolin, which we'd rather have authors state outright. Returns a
+ * warning string for the job, or undefined when `runs-on: gondolin` is explicit.
+ */
+function runsOnWarning(jobId: string, runsOn: string | undefined): string | undefined {
+  if (runsOn === undefined) {
+    return `job "${jobId}": no "runs-on" set — defaulting to "${DEFAULT_RUNS_ON}". Set "runs-on: gondolin" explicitly.`;
+  }
+  if (runsOn === "local") {
+    return `job "${jobId}": "runs-on: local" is deprecated — use "runs-on: gondolin".`;
+  }
+  return undefined;
+}
+
 function mergeEnv(...layers: (Record<string, string> | undefined)[]): Record<string, string> {
   return Object.assign({}, ...layers.filter(Boolean));
 }
@@ -183,14 +199,20 @@ export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): Executio
   }
   const legsOf = (baseId: string): string[] => (expansions.get(baseId) ?? []).map((l) => l.id);
 
-  // Second pass: compile each leg, rewriting `needs` to concrete leg ids.
+  // Second pass: compile each leg, rewriting `needs` to concrete leg ids. Warn
+  // once per *base* job (not per matrix leg) about a deprecated/implicit runs-on.
   const jobs: Record<string, PlannedJob> = {};
+  const warnings: string[] = [];
   for (const [jobId, job] of Object.entries(spec.jobs)) {
+    const w = runsOnWarning(jobId, job.runsOn);
+    if (w) warnings.push(w);
     const needs = (job.needs ?? []).flatMap(legsOf);
     for (const leg of expansions.get(jobId)!) {
       jobs[leg.id] = compileLeg(leg.id, leg.title, job, needs, workflowEnv, inputs, leg.cell);
     }
   }
 
-  return { name: spec.name, jobs, jobOrder: topoSort(jobs), inputs };
+  const plan: ExecutionPlan = { name: spec.name, jobs, jobOrder: topoSort(jobs), inputs };
+  if (warnings.length > 0) plan.warnings = warnings;
+  return plan;
 }

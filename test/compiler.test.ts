@@ -48,6 +48,47 @@ jobs:
     assert.equal(p.jobs["explicit"]!.runsOn, "gondolin");
   });
 
+  it("warns on a deprecated runs-on: local and on an implicit (omitted) runs-on", () => {
+    const p = plan(`
+name: w
+jobs:
+  legacy:
+    runs-on: local
+    steps: [{ run: "true" }]
+  implicit:
+    steps: [{ run: "true" }]
+  explicit:
+    runs-on: gondolin
+    steps: [{ run: "true" }]
+`);
+    const warnings = p.warnings ?? [];
+    // One warning each for the local and the omitted job; the explicit gondolin
+    // job is silent.
+    assert.equal(warnings.length, 2);
+    assert.ok(warnings.some((w) => /"legacy".*"runs-on: local" is deprecated/.test(w)));
+    assert.ok(warnings.some((w) => /"implicit".*no "runs-on" set/.test(w)));
+    assert.ok(!warnings.some((w) => /"explicit"/.test(w)));
+  });
+
+  it("omits warnings entirely when every job sets runs-on: gondolin", () => {
+    const p = plan(`name: w\njobs:\n  a:\n    runs-on: gondolin\n    steps: [{ run: "true" }]`);
+    assert.equal(p.warnings, undefined);
+  });
+
+  it("warns once per base job, not once per matrix leg", () => {
+    const p = plan(`
+name: w
+jobs:
+  build:
+    runs-on: local
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps: [{ run: "true" }]
+`);
+    assert.equal((p.warnings ?? []).length, 1);
+  });
+
   it("names steps <job>/<index> by default and <job>/<id> when id is set", () => {
     const p = plan(`
 name: w

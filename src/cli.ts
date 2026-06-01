@@ -185,6 +185,10 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  // Surface non-fatal authoring warnings (e.g. deprecated/implicit runs-on) on
+  // stderr; the run still proceeds.
+  for (const w of plan.warnings ?? []) process.stderr.write(`pi-workflows: warning: ${w}\n`);
+
   // `graph` is inspection-only: emit the compiled DAG and exit before any
   // runtime/config/work-dir setup.
   if (args.graph) {
