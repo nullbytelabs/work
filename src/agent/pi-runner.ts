@@ -1,8 +1,10 @@
 /**
  * Pi-SDK-backed AgentRunner.
  *
- * Runs a SINGLE no-tools prompt through the `@earendil-works/pi-coding-agent`
- * SDK and returns the final assistant text. This is the "full Pi-SDK runner"
+ * Runs a SINGLE prompt through the `@earendil-works/pi-coding-agent`
+ * SDK and returns the final assistant text. The agent gets Pi's full default
+ * toolset rooted at the job workspace (`req.cwd`) — it reads/edits the real
+ * checkout itself; the runner does not restrict it. This is the "full Pi-SDK runner"
  * the `OpenAiAgentRunner` doc comment anticipated: same OpenAI-compatible
  * (`openai-completions`) dialect, but driven through Pi's agent session so the
  * model/provider config carries over.
@@ -161,6 +163,10 @@ export class PiAgentRunner implements AgentRunner {
       );
     }
     const model: ResolvedModel = req.model;
+    // The agent operates in the job's workspace (its checkout) with the full
+    // toolset rooted there. No tool is suppressed — core doesn't govern what an
+    // agent may do to its own workspace.
+    const cwd = req.cwd ?? process.cwd();
 
     // Lazy, non-literal dynamic import so `tsc` doesn't require the optional dep.
     const specifier = PI_PACKAGE;
@@ -215,8 +221,8 @@ export class PiAgentRunner implements AgentRunner {
     const sessionManager = pi.SessionManager.inMemory();
 
     const resourceLoader = new pi.DefaultResourceLoader({
-      cwd: process.cwd(),
-      agentDir: process.cwd(),
+      cwd,
+      agentDir: cwd,
       settingsManager,
       extensionFactories: [factory],
       // Force our system prompt regardless of any discovered context/AGENTS files.
@@ -232,11 +238,10 @@ export class PiAgentRunner implements AgentRunner {
     }
 
     const { session } = await pi.createAgentSession({
-      cwd: process.cwd(),
+      cwd,
       authStorage,
       modelRegistry,
       model: selected,
-      noTools: "all",
       resourceLoader,
       sessionManager,
       settingsManager,

@@ -21,8 +21,10 @@ describe("agent packages", () => {
     const a = await loadAgent("summarize", AGENTS_DIR);
     assert.equal(a.name, "summarize");
     assert.match(a.instructions, /summar/i);
-    assert.match(a.task, /\{\{\s*input\s*\}\}/);
-    assert.equal(a.inputs["input"]!.required, true);
+    // Workspace-aware: the agent reads the checkout itself, so it declares no
+    // inputs and its task carries no `{{ … }}` placeholders.
+    assert.deepEqual(a.inputs, {});
+    assert.doesNotMatch(a.task, /\{\{/);
     assert.deepEqual(a.outputs, ["summary"]);
   });
 
@@ -30,9 +32,10 @@ describe("agent packages", () => {
     await assert.rejects(() => loadAgent("does-not-exist", AGENTS_DIR), UserFacingError);
   });
 
-  it("binds inputs into the task template and maps the first output", async () => {
+  it("uses a placeholderless task verbatim and maps the first output", async () => {
     const a = await loadAgent("summarize", AGENTS_DIR);
-    assert.equal(buildAgentPrompt(a, { input: "hello world" }), "Summarize the following:\n\nhello world");
+    // No placeholders → the task prompt is the task.md text as-authored.
+    assert.equal(buildAgentPrompt(a, {}), a.task);
     assert.deepEqual(agentOutputs(a, "  a summary  "), { summary: "a summary" });
   });
 });

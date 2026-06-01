@@ -81,7 +81,7 @@ export interface StrategySpec {
 
 /** A job: an isolated execution unit containing ordered steps. */
 export interface JobSpec {
-  /** Where the job runs. Defaults handled by the compiler. Phase 1: "local". */
+  /** Where the job runs. Default applied by the compiler (`DEFAULT_RUNS_ON`, "gondolin"). */
   runsOn?: string;
   /** IDs of jobs that must complete before this one (Phase 2+ DAG). */
   needs?: string[];

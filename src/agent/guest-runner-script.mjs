@@ -7,11 +7,12 @@
  * `@earendil-works/pi-coding-agent` from the guest's own module path (installed
  * in-guest by `GuestPiRunner` before this runs). The logic mirrors the host
  * `PiAgentRunner` (src/agent/pi-runner.ts): register a custom OpenAI-compatible
- * provider, run one no-tools prompt, return the final assistant text.
+ * provider, run one prompt with Pi's full toolset rooted at the workspace
+ * (`cwd`), return the final assistant text.
  *
  * Contract (kept dead simple so the host side is testable without a VM):
- *   argv[2] = path to a request JSON  { system, prompt, model: { baseUrl, model,
- *             maxTokens?, temperature? }, keyEnv }
+ *   argv[2] = path to a request JSON  { system, prompt, cwd, model: { baseUrl,
+ *             model, maxTokens?, temperature? }, keyEnv }
  *   argv[3] = path to write a result JSON { text, finishReason } | { error }
  * The model API key is NEVER in the request file: it is read from `process.env[keyEnv]`,
  * which Gondolin populates with a placeholder and swaps into the outbound
@@ -44,6 +45,9 @@ async function main() {
   const req = JSON.parse(await readFile(requestPath, "utf-8"));
   const model = req.model ?? {};
   const apiKey = process.env[req.keyEnv ?? "PI_WF_MODEL_KEY"] ?? "";
+  // The agent operates in the job's workspace (the /workspace mount) with the
+  // full toolset rooted there — it reads/edits the real checkout directly.
+  const cwd = req.cwd ?? process.cwd();
 
   let pi;
   try {
@@ -82,8 +86,8 @@ async function main() {
   const settingsManager = pi.SettingsManager.inMemory();
   const sessionManager = pi.SessionManager.inMemory();
   const resourceLoader = new pi.DefaultResourceLoader({
-    cwd: process.cwd(),
-    agentDir: process.cwd(),
+    cwd,
+    agentDir: cwd,
     settingsManager,
     extensionFactories: [(api) => api.registerProvider(PROVIDER_NAME, providerConfig)],
     systemPromptOverride: () => req.system,
@@ -94,11 +98,10 @@ async function main() {
   if (!selected) throw new Error(`could not resolve model "${model.model}" from the registered provider`);
 
   const { session } = await pi.createAgentSession({
-    cwd: process.cwd(),
+    cwd,
     authStorage,
     modelRegistry,
     model: selected,
-    noTools: "all",
     resourceLoader,
     sessionManager,
     settingsManager,

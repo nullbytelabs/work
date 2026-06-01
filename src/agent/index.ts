@@ -33,6 +33,13 @@ export interface AgentRequest {
   prompt: string;
   /** Resolved model; optional so a stub runner can ignore it. */
   model?: ResolvedModel;
+  /**
+   * Working directory the agent runs in — the job's staged workspace (its
+   * checkout). The agent gets the full toolset rooted here, so it operates on
+   * the real files directly. The runner does not police what it does in there.
+   * Defaults to `process.cwd()` when omitted.
+   */
+  cwd?: string;
 }
 
 export interface AgentResult {

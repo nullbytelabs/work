@@ -81,10 +81,13 @@ export class GuestPiRunner implements AgentRunner {
     const hostRes = join(hostStage, `res-${id}.json`);
 
     // Request carries everything EXCEPT the key (which crosses via header injection).
+    // `cwd` is the guest-side workspace mount so the agent's tools operate on the
+    // real checkout (the handler passes it; default to the mount root).
     const request = {
       system: req.system,
       prompt: req.prompt,
       keyEnv: GUEST_MODEL_KEY_ENV,
+      cwd: req.cwd ?? guestDir,
       model: {
         baseUrl: req.model.baseUrl,
         model: req.model.model,

@@ -2,13 +2,10 @@
 # the engine. See docs/agent-uses-interface.md for the full design (skills/
 # extensions are future; today's runner uses instructions + task + inputs/outputs).
 name: summarize
-description: Summarize a block of text into one concise sentence.
+description: Read the project's source from the workspace and summarize it in one sentence.
 
-inputs:
-  input:
-    type: string
-    required: true
-    description: The text to summarize.
+# No inputs: the agent runs in the job's workspace (the checkout) and reads the
+# source itself, so there's nothing to thread in through step outputs.
 
 outputs:
   summary:

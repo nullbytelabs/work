@@ -6,9 +6,11 @@
 # `npm start` are all right there in each job's workspace. Agent packages live in
 # `.workflows/agents/` and are referenced as `uses: agent/<name>`.
 #
-#   verify: install deps -> check main.ts is valid -> smoke-run `npm start`,
-#           then capture the source so a later job can review it.
-#   review: an agent reviews/summarizes the captured source.
+#   verify: install deps -> check main.ts is valid -> smoke-run `npm start`.
+#   review: an agent reads the checked-out source and summarizes it.
+#
+# The agent runs against the job's workspace (the same checkout), so it reads
+# `main.ts` itself — no need to slurp the source into an output and thread it in.
 #
 # Tests inject a mock runner (no inference). For a real review against a model:
 #   ./pi-workflows ./test/e2e/agent-project/.workflows/main.yaml --config pi-workflows.config.json
@@ -17,8 +19,6 @@ name: ci
 
 jobs:
   verify:
-    outputs:
-      source: ${{ steps.read.outputs.source }}
     steps:
       - name: install dependencies
         run: npm install --no-audit --no-fund
@@ -29,15 +29,6 @@ jobs:
       - name: smoke test (npm start)
         run: npm start --silent
 
-      - id: read
-        name: capture source for review
-        run: |
-          {
-            echo "source<<__PI_EOF__"
-            printf '%s\n' "$(cat main.ts)"
-            echo "__PI_EOF__"
-          } >> "$PI_OUTPUT"
-
   review:
     needs: [verify]
     outputs:
@@ -46,8 +37,6 @@ jobs:
       - id: summary
         name: review the source with an agent
         uses: agent/summarize
-        with:
-          input: ${{ needs.verify.outputs.source }}
 
       - name: show review
         env:
