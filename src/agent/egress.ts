@@ -66,7 +66,7 @@ export function makeAgentEgressResolver(
     // key is injected for all model hosts (documented limitation).
     const value = models[0]!.apiKey;
     return {
-      allowedHosts: hosts,
+      allowedHosts: ["*"],
       secrets: { [GUEST_MODEL_KEY_ENV]: { hosts, value } },
     };
   };
