@@ -1,18 +1,38 @@
 {
-  "name": "pi-workflows",
-  "version": "0.0.1",
-  "private": true,
-  "description": "GitHub-Actions-style workflow engine with durable execution. Phase 1: parse + compile + direct in-process runner on a local execution target.",
+  "name": "@nullbytelabs/work",
+  "version": "0.1.0",
+  "description": "Run GitHub-Actions-style workflows locally — each job isolated in a secure gondolin micro-VM, with optional AI agent steps.",
+  "author": "dydx",
+  "license": "MIT",
   "type": "module",
   "bin": {
+    "work": "./bin/pi-workflows.mjs",
+    "workflow": "./bin/pi-workflows.mjs",
     "pi-workflows": "./bin/pi-workflows.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=23.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nullbytelabs/pi-workflows.git"
   },
   "scripts": {
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",
     "hello": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts ./test/e2e/hello-world-gondolin/workflow.yaml",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.4.6",
@@ -29,12 +49,10 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.7.5",
     "@types/pg": "^8.11.10",
+    "esbuild": "^0.25.0",
     "eslint": "^10.4.1",
     "globals": "^16.0.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.60.0"
-  },
-  "engines": {
-    "node": ">=22.6"
   }
 }

@@ -21,7 +21,7 @@ jobs:
 ```
 
 ```bash
-./pi-workflows --workspace . run ci
+work --workspace . run ci
 ```
 
 ---
@@ -36,26 +36,51 @@ jobs:
 
 ## Install
 
+Via npm — no clone, no build step:
+
+```bash
+# run it once, nothing installed (fetches on first use)
+npx @nullbytelabs/work --help
+
+# or put the `work` command on your PATH for good
+npm i -g @nullbytelabs/work
+work --help
+```
+
+This gives you `work` (and the alias `workflow`). Both still need **Node ≥ 23.6 and QEMU** — see [Requirements](#requirements).
+
+<details>
+<summary>From source (development)</summary>
+
 ```bash
 git clone https://github.com/nullbytelabs/pi-workflows
 cd pi-workflows
 npm install
-./pi-workflows --help
+./pi-workflows --help   # dev launcher: runs the TypeScript directly, no build
 ```
 
-`./pi-workflows` is a thin launcher that runs the engine on Node's native TypeScript — there's nothing to build.
+</details>
 
 ## Quickstart
 
-Run a single workflow file:
+Write a workflow and run it:
 
 ```bash
-./pi-workflows ./test/e2e/hello-world-gondolin/workflow.yaml
+cat > hello.yaml <<'EOF'
+name: hello
+jobs:
+  greet:
+    runs-on: gondolin
+    steps:
+      - run: echo "hello from the sandbox"
+EOF
+
+work hello.yaml
 ```
 
 On a terminal you get a live, dependency-aware status board; in CI or a pipe it prints buffered per-job output and exits non-zero on failure.
 
-The [`test/e2e/`](test/e2e/) folder is a gallery of runnable examples (matrix builds, fan-out/fan-in, conditionals, typed inputs, an agent project, …) — each is a real workflow you can run directly.
+The [`test/e2e/`](test/e2e/) folder is a gallery of runnable examples (matrix builds, fan-out/fan-in, conditionals, typed inputs, an agent project, …) — clone the repo to run them directly.
 
 ---
 
@@ -99,7 +124,7 @@ The building blocks:
 | **`runs-on`** | `gondolin` — every job runs in a micro-VM (the only target, and the default; state it explicitly per job). |
 | **`needs`** | `needs: [build]` — a job waits for its dependencies. Independent jobs run **in parallel**. |
 | **`env`** | declared at workflow, job, or step level; inner scopes override outer. |
-| **Inputs** | `inputs:` declares typed params (`string`/`number`/`boolean`, with `required`/`default`/`options`/`pattern`). Pass at run time with `--inputs '{"name":"josh"}'`, read via `${{ inputs.name }}`. |
+| **Inputs** | `inputs:` declares typed params (`string`/`number`/`boolean`, with `required`/`default`/`options`/`pattern`). Pass at run time with `--inputs '{"name":"ada"}'`, read via `${{ inputs.name }}`. |
 | **Outputs** | a step writes `key=value` to `$PI_OUTPUT`; a job re-exposes them via `outputs:`; downstream reads `${{ needs.<job>.outputs.<key> }}` or `${{ steps.<id>.outputs.<key> }}`. |
 | **Matrix** | `strategy.matrix:` fans a job out into one run per combination, with `include`/`exclude`; read the cell via `${{ matrix.<axis> }}`. |
 | **Conditionals** | `if:` (or `when:`) on a step or job — a false result skips it. Supports `inputs.*`, `matrix.*`, `needs.*`, `steps.*`, `==`/`!=`/`&&`/`||`/`!`, and `success()`/`failure()`/`always()`/`cancelled()`. |
@@ -128,7 +153,7 @@ my-project/
 Run a pipeline **by its `name:`**:
 
 ```bash
-./pi-workflows --workspace my-project run ci
+work --workspace my-project run ci
 ```
 
 When a workflow lives in `.workflows/`, the **project root** (the parent) is what gets checked out into each job's workspace — so `package.json`, your source, `npm install`, etc. are all there. Each job gets its own fresh copy (`.git/` and `node_modules/` are never staged, so jobs install their own deps). A standalone `workflow.yaml` outside `.workflows/` uses its own folder as the checkout instead.
@@ -188,13 +213,13 @@ The agent's final message becomes the step's declared output (e.g. `steps.summar
 
 ```bash
 # run a workflow file directly
-./pi-workflows <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]
+work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]
 
 # run a project pipeline by name (resolves .workflows/*.yaml whose `name:` matches)
-./pi-workflows [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--quiet]
+work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--quiet]
 
 # print the job DAG instead of running it
-./pi-workflows graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
+work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
 ```
 
 | Flag | Effect |

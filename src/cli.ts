@@ -82,7 +82,7 @@ function parseArgs(argv: string[]): CliArgs {
         fail("--inputs must be valid JSON");
       }
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        fail("--inputs must be a JSON object, e.g. '{\"name\":\"josh\"}'");
+        fail("--inputs must be a JSON object, e.g. '{\"name\":\"ada\"}'");
       }
       inputs = parsed as Record<string, unknown>;
     } else if (arg === "--quiet") {
@@ -130,12 +130,15 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 function printUsage(): void {
+  // The bin shim sets PI_WF_PROG to however the command was invoked (`work`,
+  // `workflow`, `pi-workflows`); fall back to the dev launcher's name.
+  const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
   process.stderr.write(
     "Usage:\n" +
-      "  pi-workflows <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n" +
-      "  pi-workflows [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n" +
-      "  pi-workflows graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n" +
-      "  pi-workflows [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n",
+      `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n` +
+      `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n` +
+      `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
+      `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n`,
   );
 }
 
