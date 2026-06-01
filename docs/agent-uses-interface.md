@@ -1,8 +1,10 @@
 # Agentic `uses:` Interface — Research + Design
 
 > Design note for the agent-step authoring surface. The **problem framing and
-> proposed schema are pi-workflows design decisions** (not yet implemented —
-> Phase 1 recognizes `uses` and rejects it). Every claim about *what Pi can do*
+> proposed schema are pi-workflows design decisions**. The engine already ships
+> `uses: agent/*` (single-turn agents with Pi's full default toolset); this note
+> designs the *fuller* package interface — manifests, `@ref` sourcing, tool∩target.
+> Every claim about *what Pi can do*
 > underneath is verified against the live Pi docs (SDK, Prompt Templates,
 > Extensions, Skills, Custom Providers) and flagged `UNVERIFIED — needs
 > confirmation` where the docs don't settle it. Companion reference for the Pi
@@ -296,8 +298,8 @@ directory via the §6 search path, load `agent.yaml`, then:
   carrying the resolved instructions, task+bound inputs, tools, model ref, and
   declared outputs.
 
-**Runtime (`src/runtime/direct.ts`) — execute.** The branch that currently
-returns *"uses steps are not supported in Phase 1"* instead builds a
+**Runtime — execute.** The shipped execution path (a registered `uses:` handler,
+not the originally-sketched `direct.ts`) builds a
 `DefaultResourceLoader` (`systemPromptOverride` from instructions, `extensions`,
 `skills`), resolves the model via `modelRegistry.find("litellm", id)`, calls
 `createAgentSession({ model, thinkingLevel, tools, resourceLoader })`, runs

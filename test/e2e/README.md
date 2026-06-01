@@ -18,7 +18,7 @@ own deps). The checkout is the workflow's own folder, or — when the workflow
 lives in a `.workflows/` directory — the **project root** (its parent), so
 `package.json`/source files are present. Other examples' files are not.
 
-Everything here uses only Phase 1 capabilities: `name`, workflow/job/step `env`,
+Everything here uses the engine's core capabilities: `name`, workflow/job/step `env`,
 per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
 `strategy.matrix`, and `if`/`when` conditionals.
 
@@ -49,9 +49,9 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
   folder. Each job gets its own copy, so jobs stay isolated; steps *within* a job
   share it (a file written by one step is visible to the next).
 - **Job ordering.** `needs` defines a DAG; jobs run in deterministic topological
-  order (alphabetical among ready jobs). Independent jobs do **not** yet run in
-  parallel — that's a planned runtime enhancement. The DAG shape is already
-  expressed and respected. There is no cross-job artifact passing yet.
+  order (alphabetical among ready jobs), and independent jobs run **in parallel**
+  via the Absurd worker's concurrency. There is no cross-job artifact passing
+  beyond job/step `outputs` yet.
 - **`runs-on`: always `gondolin`.** Every example runs in the Gondolin micro-VM.
   The guest is fully equipped — `sh`, `bash`, `node`, `npm`, and `python3` are all
   present — so even `inline-polyglot/` (bash + node + python) runs entirely in the

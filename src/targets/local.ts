@@ -1,8 +1,9 @@
 /**
  * LocalTarget — runs steps as host child processes.
  *
- * Fast, no isolation. Intended for trusted steps and local dev (and Phase 1,
- * where it is the only target). Commands run via `/bin/bash -lc` so that shell
+ * Fast, no isolation — for trusted steps and local dev. `runs-on: local` is
+ * deprecated (the compiler warns; prefer `gondolin`). Commands run via
+ * `/bin/bash -lc` so that shell
  * features used in workflows (`$VARS`, pipes, redirects) behave as authors
  * expect — matching the README's hello-world `echo $HELLO_WORLD`.
  */

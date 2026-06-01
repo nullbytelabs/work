@@ -160,8 +160,8 @@ for when steps need egress.
 
 GitHub-Actions-style, resolved at **runtime** (after the producing step/job runs):
 
-- A `run` step writes to **`$PI_OUTPUT`** (a file the engine reads back —
-  `local` target only for now; the gondolin guest path differs), using
+- A `run` step writes to **`$PI_OUTPUT`** (a file the engine reads back — it
+  lives in the shared job workspace, so capture works uniformly on both targets), using
   `$GITHUB_OUTPUT` syntax: `key=value` for single-line values, or a heredoc for
   multi-line values (e.g. a whole source file to hand an agent):
 
@@ -216,7 +216,7 @@ the full project shape that's `.workflows/agents/<name>/`:
         agent.yaml          # manifest: description, declared inputs/outputs
         instructions.md     # system prompt (standing persona/policy)
         task.md             # task template; {{ input }} placeholders bound from `with`
-        # skills/, extension.ts — reserved for the future Pi-SDK (tool-using) runner
+        # skills/, extension.ts — reserved for future multi-turn / skills support
 ```
 
 This is the boundary the user asked for: the engine ships the agent *handler*
@@ -257,9 +257,9 @@ see `docs/agent-uses-interface.md`.)
 }
 ```
 
-`apiKey` supports `$VAR`/`${VAR}` expansion. Today's agent is a no-tools
-composition; the full Pi-SDK path (tools, multi-turn, agent packages with
-manifests/lockfiles) is designed in `docs/agent-uses-interface.md`.
+`apiKey` supports `$VAR`/`${VAR}` expansion. Today's agent runs Pi's full
+default toolset over the job's checkout; **multi-turn** orchestration and agent
+packages with manifests/lockfiles are designed in `docs/agent-uses-interface.md`.
 
 ## The Phase 2 upgrade path (deliberate boundaries)
 
@@ -273,17 +273,16 @@ rewrite:
   Postgres provider option for production. (See `docs/absurd-durable-workflows.md`
   and `docs/pglite-wasm-postgres-database.md`.)
 - **Sandboxing:** done — `GondolinTarget implements ExecutionTarget`, registered
-  in `targets/factory.ts`. Remaining Gondolin work: a curated guest image with
-  language runtimes (default Alpine is minimal), workspace artifact persistence
-  across steps, and per-job VM resource sizing. (See `docs/gondolin-secure-execution.md`.)
-- **Agentic steps:** `uses: agent/<name>@<ref>` resolves a named, versioned
-  agent package (system prompt + tools + model default), validates `with`
-  against its declared inputs at compile time, and routes into a Pi session from
-  inside a step body. The parse layer gains `AgentRef` syntax validation, the
-  compiler resolves the package and emits an `AgentStep`, and `direct.ts` gains
-  the branch that currently rejects `uses`. (See
-  `docs/agent-uses-interface.md` for the interface, `docs/pi-coding-agent-sdk.md`
-  for the Pi surface.)
+  in `targets/factory.ts`. The guest ships sh/bash/node/npm/python3, so steps run
+  in-sandbox without a custom image. Remaining Gondolin work: workspace artifact
+  persistence across steps and per-job VM resource sizing. (See `docs/gondolin-secure-execution.md`.)
+- **Agentic steps:** done — `uses: agent/<name>` resolves a project-local agent
+  package (`instructions.md` + `task.md` + manifest), validates `with` against its
+  declared inputs, and runs a real Pi session (full default toolset over the
+  checkout) through a registered `uses:` handler — host-side or in-guest per
+  `runs-on`. Still ahead: `@ref` sourcing, multi-turn, and tool∩target
+  enforcement. (See `docs/agent-uses-interface.md` for the fuller interface,
+  `docs/pi-coding-agent-sdk.md` for the Pi surface.)
 - **`needs` DAG:** done — the runtime walks the dependency graph and runs
   independent jobs in parallel via worker `concurrency`. **`matrix` / `if`** are
   now executed too: the compiler expands `strategy.matrix` into one independent

@@ -2,9 +2,9 @@
  * ExecutionTarget — the "where" layer (`runs-on`).
  *
  * A target is one job's isolated execution environment. The engine provisions
- * it, runs one or more step commands, then disposes it. Phase 1 ships only
- * LocalTarget; the same interface backs GondolinTarget (micro-VM) in Phase 2,
- * which is why `dispose()` exists and must always be called in a `finally`.
+ * it, runs one or more step commands, then disposes it. Two targets back this
+ * interface — LocalTarget (host process) and GondolinTarget (micro-VM) — which
+ * is why `dispose()` exists and must always be called in a `finally`.
  *
  * This mirrors the interface sketched in docs/gondolin-secure-execution.md so
  * the Gondolin implementation drops in without changing the runtime.

@@ -2,10 +2,9 @@
  * The declarative workflow spec — the "what to run" layer.
  *
  * This mirrors the GitHub-Actions-style YAML described in the README
- * (workflows -> jobs -> steps). Phase 1 implements the subset needed to run
- * `test/e2e/hello-world-gondolin/workflow.yaml`: name, env, jobs, and `run` steps. Fields that
- * later phases will use (`needs`, `runsOn`, `uses`, `if`, `matrix`) are modeled
- * here so the schema is stable, even where the runtime does not yet act on them.
+ * (workflows -> jobs -> steps): name, env, inputs, jobs, `run`/`uses` steps,
+ * `needs`, `runs-on`, `if`/`when`, and `strategy.matrix` — all compiled and
+ * executed by the engine.
  */
 
 /** Environment variables declared at any level. Values are always strings. */
@@ -39,13 +38,13 @@ export interface InputSpec {
 export interface StepSpec {
   /** Human-readable name (defaults to the step's run command if omitted). */
   name?: string;
-  /** Stable id, used to reference this step's outputs (Phase 2+). */
+  /** Stable id, used to reference this step's outputs (`steps.<id>.outputs.*`). */
   id?: string;
   /** Shell command / script to execute. Mutually exclusive with `uses`. */
   run?: string;
-  /** Action/agent reference (Phase 2+). Mutually exclusive with `run`. */
+  /** Action/agent reference (`uses: agent/<name>`). Mutually exclusive with `run`. */
   uses?: string;
-  /** Inputs for a `uses` step (Phase 2+). */
+  /** Inputs for a `uses` step. */
   with?: Record<string, unknown>;
   /** Conditional guard. Evaluated at runtime; a false result skips the step. */
   if?: string;
@@ -83,7 +82,7 @@ export interface StrategySpec {
 export interface JobSpec {
   /** Where the job runs. Default applied by the compiler (`DEFAULT_RUNS_ON`, "gondolin"). */
   runsOn?: string;
-  /** IDs of jobs that must complete before this one (Phase 2+ DAG). */
+  /** IDs of jobs that must complete before this one (the `needs` DAG). */
   needs?: string[];
   /** Conditional guard. Evaluated at runtime; a false result skips the job. */
   if?: string;
@@ -101,7 +100,7 @@ export interface JobSpec {
 export interface WorkflowSpec {
   /** Workflow name. */
   name: string;
-  /** Trigger declaration (Phase 2+). Parsed but not acted on in Phase 1. */
+  /** Trigger declaration (`on:`). Parsed but not yet acted on. */
   on?: unknown;
   /** Declared inputs, provided at run time and read via `${{ inputs.<name> }}`. */
   inputs?: Record<string, InputSpec>;

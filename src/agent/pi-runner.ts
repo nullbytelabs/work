@@ -151,8 +151,9 @@ const PI_PACKAGE = "@earendil-works/pi-coding-agent";
 const PROVIDER_NAME = "pi-workflows-custom";
 
 /**
- * Runs one prompt through the Pi coding-agent SDK (no tools) and returns the
- * final assistant text. The SDK is loaded lazily so typecheck/build don't need
+ * Runs one prompt through the Pi coding-agent SDK (full default toolset rooted
+ * at the job workspace) and returns the final assistant text. The SDK is loaded
+ * lazily so typecheck/build don't need
  * the optional dependency present.
  */
 export class PiAgentRunner implements AgentRunner {

@@ -1,5 +1,5 @@
 /**
- * pi-workflows CLI (Phase 1). Two ways to launch a workflow:
+ * pi-workflows CLI. Two ways to launch a workflow:
  *
  *   pi-workflows <workflow.yaml>            # ad-hoc: run a file wherever it is
  *   pi-workflows [--workspace <dir>] run <name>

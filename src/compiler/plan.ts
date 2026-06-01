@@ -6,10 +6,10 @@
  * depend on a particular runtime: env layering, default `runs-on`, step naming,
  * and a deterministic job order from the `needs` DAG.
  *
- * In Phase 2 the Absurd-backed runtime consumes this same plan — a job becomes
- * an Absurd child task, a step becomes `ctx.step(name, fn)`, and `jobOrder`
- * drives the spawn/await sequence. Keeping the plan runtime-agnostic is what
- * makes the runtime swappable.
+ * The Absurd-backed runtime consumes this same plan — a job becomes an Absurd
+ * task, a step becomes a `ctx.step(name, fn)` checkpoint, and `jobOrder` drives
+ * the spawn/await sequence. Keeping the plan runtime-agnostic is what makes the
+ * runtime swappable.
  */
 
 /** A fully-resolved step ready for execution. */
@@ -26,7 +26,7 @@ export interface PlannedStep {
   uses?: string;
   /** Inputs for a `uses` step (string values may carry deferred expressions). */
   with?: Record<string, unknown>;
-  /** Raw conditional expression (Phase 2+). */
+  /** Raw conditional guard, evaluated at runtime; a false result skips the step. */
   if?: string;
   /** Resolved env (workflow <- job <- step); may carry deferred needs/steps expressions. */
   env: Record<string, string>;

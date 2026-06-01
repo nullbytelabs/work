@@ -1,11 +1,12 @@
 /**
  * Agent layer for `uses: agent/<name>` steps.
  *
- * `AgentRunner` is the seam: the real `OpenAiAgentRunner` makes one
- * OpenAI-compatible chat-completion call (Node `fetch`, no dependency — this is
- * the `openai-completions` dialect Pi also speaks, so config carries over to a
- * full Pi-SDK runner later). Tests inject a stub runner, so the whole pipeline
- * is exercisable without inference.
+ * `AgentRunner` is the seam. The default runners drive the
+ * `@earendil-works/pi-coding-agent` SDK — `PiAgentRunner` host-side and
+ * `GuestPiRunner` in-guest for sandboxed jobs. `OpenAiAgentRunner` (Node
+ * `fetch`, no dependency, the `openai-completions` dialect Pi also speaks) is a
+ * lighter fallback behind the same seam. Tests inject a stub runner, so the
+ * whole pipeline is exercisable without inference.
  *
  * An agent is a **directory package** the *project* supplies (like a GitHub
  * Actions local action), resolved from `<agents-dir>/<name>/`:
@@ -13,7 +14,7 @@
  *   instructions.md  — the system prompt (standing persona/policy)
  *   task.md          — the task prompt template; `{{ <input> }}` placeholders
  *                      bound from the step's `with`
- * (skills/, extension.ts are reserved for the future Pi-SDK runner.) This is the
+ * (skills/, extension.ts are reserved for future agent skills/extensions.) This is the
  * package shape from docs/agent-uses-interface.md. Packages are NOT shipped in
  * the engine — they live in the project (the agent uses-handler points
  * `loadAgent` at `<projectDir>/agents/`). Remote `@ref` sourcing
@@ -58,7 +59,7 @@ export { PiAgentRunner } from "./pi-runner.ts";
 export { GuestPiRunner, GUEST_MODEL_KEY_ENV, type GuestPiRunnerDeps } from "./guest-pi-runner.ts";
 // The agent uses-handler — register this with the runtime (composition root).
 export { createAgentUsesHandler, type AgentUsesHandlerOptions } from "./uses-handler.ts";
-// Per-job sandbox egress for agent steps (allowlist model host + inject key).
+// Per-job sandbox egress for agent steps (allow-all egress + model-host-scoped key).
 export { makeAgentEgressResolver, type AgentJobNetwork } from "./egress.ts";
 
 /** Calls an OpenAI-compatible `/chat/completions` endpoint (Fireworks/LiteLLM/etc.). */

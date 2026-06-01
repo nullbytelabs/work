@@ -24,14 +24,14 @@
 
 ---
 
-## 1. The problem: the agent runs on the host, bypassing the sandbox
+## 1. The problem (now solved — see the Status banner above)
 
 pi-workflows' entire isolation thesis is that **`runs-on: gondolin` is the
 default and secure target** — a step's work executes inside a hardware-virtualized
 micro-VM whose network and filesystem I/O is mediated by host code. Shell (`run`)
-steps honor this. **Agent (`uses:`) steps do not.** They execute on the host
-regardless of `runs-on`, which is precisely the threat the sandbox exists to
-contain.
+steps honor this. **Agent (`uses:`) steps originally did not** — they executed on
+the host regardless of `runs-on`, which is precisely the threat the sandbox exists
+to contain. The rest of this note is the rationale for the fix now shipped.
 
 ### 1a. The current code path (traced)
 
@@ -76,8 +76,8 @@ runner to `new PiAgentRunner()` and calls `runner.run({ system, prompt, model })
 A `uses: agent` step is an LLM-driven loop. Today it runs host-side with:
 
 - **the host filesystem** — anything the agent's tools touch is the real host FS
-  (the current runner pins `noTools: "all"`, but the design intent is shell- and
-  file-capable agents on `gondolin`, per
+  (the original host-side runner pinned `noTools: "all"`; the shipped agent is
+  shell- and file-capable and now runs in-guest on `gondolin`, per
   [`agent-uses-interface.md`](agent-uses-interface.md) §7; the moment tools are
   enabled, `bash`/`write`/`edit` execute on the host);
 - **the host network** — unmediated egress, no allowlist;
