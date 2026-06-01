@@ -16,13 +16,9 @@ const EXAMPLES = resolve(HERE, "e2e");
 const runtime = useSharedRuntime();
 
 const hasPython3 = spawnSync("python3", ["--version"]).status === 0;
-const RUN_VM = process.env["PI_WF_TEST_GONDOLIN"] === "1";
-const RUN_NPM = process.env["PI_WF_TEST_NPM"] === "1";
 
 // Examples needing a runtime not guaranteed in the local/CI environment.
 const NEEDS_PYTHON = new Set(["inline-polyglot"]);
-// Examples whose pipeline installs real npm deps (network) — opt in.
-const NEEDS_NPM = new Set(["agent-project"]);
 
 // Inputs to supply for examples that declare required inputs (others default).
 const EXAMPLE_INPUTS: Record<string, Record<string, unknown>> = {
@@ -65,24 +61,12 @@ async function runExample(name: string) {
   }
 }
 
-// Each example is classified by its compiled `runs-on`: any job on gondolin
-// gates the whole example behind PI_WF_TEST_GONDOLIN (needs Node >= 23.6 + QEMU).
-// This adapts automatically as examples move between local and gondolin.
+// Every example runs unconditionally. Gondolin examples boot a real micro-VM and
+// some pipelines install real npm deps; CI provisions Node >= 23.6 + QEMU for both.
+// The only skip left is a missing python3 runtime, which is auto-detected.
 describe("examples — every workflow runs to success", () => {
   for (const name of examples) {
-    const plan = compilePlan(name);
-    const usesGondolin = Object.values(plan.jobs).some((j) => j.runsOn === "gondolin");
-    const skip = usesGondolin
-      ? RUN_VM
-        ? false
-        : "set PI_WF_TEST_GONDOLIN=1 (needs Node >= 23.6 + QEMU)"
-      : NEEDS_NPM.has(name)
-        ? RUN_NPM
-          ? false
-          : "set PI_WF_TEST_NPM=1 (pipeline installs deps from npm)"
-        : NEEDS_PYTHON.has(name) && !hasPython3
-          ? "python3 not on PATH"
-          : false;
+    const skip = NEEDS_PYTHON.has(name) && !hasPython3 ? "python3 not on PATH" : false;
 
     it(`runs ${name}`, { skip }, async () => {
       const result = await runExample(name);

@@ -28,14 +28,10 @@ describe("GondolinTarget — unit (no VM)", () => {
 });
 
 /**
- * Real micro-VM execution. Skipped by default — it needs Node >= 23.6, QEMU,
- * and the optional @earendil-works/gondolin package. Opt in with:
- *
- *   PI_WF_TEST_GONDOLIN=1 npm test
+ * Real micro-VM execution. Always runs — it needs Node >= 23.6, QEMU, and the
+ * optional @earendil-works/gondolin package (CI provisions all three).
  */
-const RUN_VM = process.env["PI_WF_TEST_GONDOLIN"] === "1";
-
-describe("GondolinTarget — VM smoke (opt-in)", { skip: !RUN_VM }, () => {
+describe("GondolinTarget — VM smoke", () => {
   it("runs the test/e2e/hello-world-gondolin/workflow.yaml workflow in a VM", async () => {
     const dir = resolve(HERE, "e2e", "hello-world-gondolin");
     const plan = compile(parseWorkflow(await readFile(resolve(dir, "workflow.yaml"), "utf-8")));

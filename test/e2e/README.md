@@ -42,7 +42,7 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
 | `input-validation/` | a `required` enum (`options`) + a regex-`pattern` (UUID) input; bad values are rejected at compile time (`--inputs '{"release":"staging","id":"<uuid>"}'`) | required / options / pattern validators |
 | `matrix-build/` | `strategy.matrix` over `node` × `os` with an `exclude` and an `include`, converging into `report` via `needs` | matrix fan-out + `${{ matrix.* }}` |
 | `conditional-steps/` | step-level `if` (`inputs.*`, `always()`) and a job-level `if` gate; default `mode=ci` skips the release-only work (`--inputs '{"mode":"release"}'`) | `if`/`when` conditionals |
-| `agent-project/` | a **real coding project**: its pipeline + agent live in `.workflows/` (like `.github/workflows/`), the workflow runs against the project-root checkout — `npm install` → `tsc` validity → `npm start` smoke → an agent reviews the captured source. Runs `npm install` for real, so it's gated behind `PI_WF_TEST_NPM=1` (the agent is mocked). | `.workflows/` project model; checkout = project root; multiline `$PI_OUTPUT`; workflow-local agents |
+| `agent-project/` | a **real coding project**: its pipeline + agent live in `.workflows/` (like `.github/workflows/`), the workflow runs against the project-root checkout — `npm install` → `tsc` validity → `npm start` smoke → an agent reviews the captured source. Runs `npm install` for real and the agent runs the real in-guest Pi (gondolin), so it needs Node ≥ 23.6 + QEMU. | `.workflows/` project model; checkout = project root; multiline `$PI_OUTPUT`; workflow-local agents |
 
 ## Notes on current behavior
 
@@ -58,5 +58,5 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
   guest is a minimal Alpine image — no `node`/`python`/`bash`, but it does have
   BusyBox `/bin/sh`. So `inline-polyglot/` (needs node + python) is `local`,
   while scripts meant to run under `gondolin` must stay POSIX-`sh`. In the test
-  suite, any example with a `gondolin` job is gated behind `PI_WF_TEST_GONDOLIN=1`
-  (needs Node ≥ 23.6 + QEMU).
+  suite, gondolin examples boot a real micro-VM and run unconditionally, so
+  `npm test` needs Node ≥ 23.6 + QEMU on the machine.

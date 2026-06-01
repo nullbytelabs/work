@@ -127,15 +127,16 @@ it unless a workflow uses `runs-on: gondolin`. It requires:
 ```
 
 If the package isn't available, the engine fails fast with an actionable message
-(`UserFacingError`) rather than a stack trace. The VM smoke tests are opt-in:
+(`UserFacingError`) rather than a stack trace. The VM smoke tests always run as
+part of the suite — they need Node ≥ 23.6 + QEMU on the machine:
 
 ```bash
-PI_WF_TEST_GONDOLIN=1 npm test
+npm test
 ```
 
-CI runs the full suite with these enabled: the `test` job (Node 25) installs
-QEMU and enables `/dev/kvm` on the x86_64 runner (Gondolin ships x86_64 guest
-images), then runs `PI_WF_TEST_GONDOLIN=1 npm test`.
+CI provisions that for the `test` job (Node 25): it installs QEMU and enables
+`/dev/kvm` on the x86_64 runner (Gondolin ships x86_64 guest images), then runs
+`npm test`.
 
 Steps run via `/bin/sh -lc` (the minimal Alpine guest has no bash), the per-job
 working directory is mounted at `/workspace`, and the VM is always torn down
