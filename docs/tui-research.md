@@ -3,8 +3,11 @@
 Research for a future, optional **terminal UI** that shows a workflow run as it
 happens: each job's state (pending → running → success / failed / skipped),
 updating live as parallel jobs progress, with step logs. Library facts verified
-via npm + docs on 2026-05-31; sources at the bottom. **Status: research /
-later-iteration polish — not built.**
+via npm + docs on 2026-05-31; sources at the bottom. **Status: this is iteration
+1 (research). It was built in iteration 2 — see
+[`tui-iteration-2.md`](./tui-iteration-2.md) — though the library verdict changed
+in the build (hand-rolled zero-dep ANSI, since the project runs native TS with no
+JSX/build step, ruling out Ink).**
 
 ## Where it plugs in (we're already set up for it)
 

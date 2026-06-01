@@ -36,6 +36,7 @@ dependencies, so the same `node_modules` works across platforms.
 npm install
 ./pi-workflows ./test/e2e/hello-world-local/workflow.yaml          # ad-hoc: a file anywhere
 ./pi-workflows --workspace ./test/e2e/agent-project run ci         # by name (the workflow whose name: is ci)
+./pi-workflows --workspace ./test/e2e/agent-project graph ci --steps  # inspect the DAG (no run)
 npm test        # unit + integration suite (Node's built-in test runner)
 npm run typecheck
 ```
@@ -46,9 +47,16 @@ whose `name:` field matches (workspace defaults to the current directory, so fro
 inside a project it's just `pi-workflows run ci`). Both converge on the same
 `{ workflowDir, workspaceSource }` layout (see "Project layout" below).
 
+A run prints live: on an interactive terminal, a **DAG-aware status board** (jobs
+by dependency depth, with state, step progress, target, and elapsed; finished step
+logs scroll above); in CI or a pipe it falls back to **buffered per-job blocks**.
+A third verb, `graph <file|name> [--format mermaid|dot|json|ascii] [--steps]`,
+emits the compiled `needs` DAG for inspection instead of running it. Both the
+board and the graph are documented in [`tui-iteration-2.md`](./tui-iteration-2.md).
+
 Flags: `--inputs '<json>'` (workflow inputs), `--workdir <dir>` (default: a temp
-dir), `--quiet` (suppress streaming). Exit code is `0` on success, `1` on
-workflow failure, `2` on bad input.
+dir), `--quiet` (suppress output); `--format` / `--steps` apply to `graph`. Exit
+code is `0` on success, `1` on workflow failure, `2` on bad input.
 
 ## Inputs
 
@@ -284,7 +292,10 @@ rewrite:
   wired yet (the cross-job orchestration lives in the runtime, not a durable
   task; needs a persistent dataDir + run id + `--resume`). The default PGLite is
   ephemeral in-memory per run.
-- No `uses` (agentic) steps, no `matrix`, no `if` evaluation, no step-`outputs`
-  passing between steps/jobs.
+- No `strategy.matrix` expansion and no `if:` evaluation (both are parsed and
+  modeled, but not yet executed). Agent `uses:` steps and `steps.*`/`needs.*`
+  output passing **are** implemented (see the "Agent steps" and "Outputs"
+  sections above); what's not yet built there is **tool-using / multi-turn**
+  agents — the current `agent` handler backs the no-tools `summarize`.
 - Gondolin runs on the minimal Alpine guest image (no language runtimes) and
   does not yet persist workspace artifacts across steps or size VM resources.

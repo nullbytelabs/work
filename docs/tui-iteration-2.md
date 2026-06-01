@@ -13,7 +13,32 @@ The thesis of this iteration: the first note threw away two things the codebase
 hands us for free — the **DAG** (`needs` + `jobOrder`) and the **durable run
 state** (Absurd's `r_`/`c_`/`e_` tables). A flat status list ignores both. We
 can be richer on both axes while keeping the rendering terminal-friendly.
-**Status: design — not built.**
+
+**Status: built (live board + step names + `graph` command).** The live
+DAG-aware board, friendly step names, and the standalone `graph` command shipped;
+the durable `watch <run-id>` attach mode and the two-pane selectable-logs view
+remain future work. The design discussion below is preserved; a "What shipped"
+summary follows immediately, and per-section status notes mark what landed.
+
+## What shipped
+
+- **`src/tui/`** — a presenter seam over the runtime's `RunHooks`
+  (`selectPresenter` → `Null` for `--quiet`, `Buffered` for CI/pipes, `Layered`
+  for an interactive TTY). Zero new dependencies: pure TypeScript + ANSI (see
+  "Library choice" for why not Ink/listr2). `levels.ts` (topological depth),
+  `store.ts` (`RunStore`, the hook-keyed job state), `render.ts` (the layered
+  board), `presenter.ts` (the three presenters + live in-place redraw with
+  finished-job logs committed to scrollback).
+- **Friendly step names** — the compiler now carries each step's author `name:`
+  through as `PlannedStep.title`; the board and the buffered blocks display it
+  (falling back to the step id/index). See `src/compiler/compile.ts`.
+- **`src/graph/`** — the `graph` command: `emitGraph(plan, format, { steps })`
+  in four formats (`mermaid`, `dot`, `json`, `ascii`). With `--steps`, mermaid
+  and dot render steps as **first-class nodes** (a subgraph/cluster per job, step
+  nodes chained in order, `uses` steps drawn distinctly), and json/ascii list
+  them inline.
+- **Tests** — `test/tui.test.ts` and `test/graph.test.ts` cover levels, the
+  store transitions, board rendering, and all four graph formats incl. `--steps`.
 
 ## Recap of what's already wired (unchanged from iteration 1)
 
@@ -74,46 +99,29 @@ graph's *information* — depth, parallel fan-out, and what each downstream job 
 blocked on. The full box-and-edge DAG still belongs in a separate `graph`
 command (Mermaid / Graphviz DOT) for pre-run inspection, exactly as before.
 
-### Open: is the parallel-lanes framing honest? (code says yes, a comment says no)
+### The parallel-lanes framing is honest
 
-Fan-out itself is **not** in question — the `needs` DAG is expressed and executed
-correctly ([`test/e2e/fan-out-fan-in/workflow.yaml`](../test/e2e/fan-out-fan-in/workflow.yaml)
-is a working diamond), and [`src/runtime/absurd/runtime.ts`](../src/runtime/absurd/runtime.ts)
-spawns each independent job as its own Absurd task. What's unresolved is narrower:
-whether independent siblings *execute at the same wall-clock instant*, which is
-what the parallel-lanes visual implies.
-
-The code reads as genuinely concurrent:
+Independent jobs genuinely run in parallel (the README states this as verified),
+so the lanes tell the truth. The mechanism, for reference:
 
 - Each job is its own Absurd task (`app.spawn`), scheduled via
   `Promise.all(plan.jobOrder.map(schedule))`, each awaiting only its `needs`.
 - A single worker runs with `concurrency = min(jobCount, 16)` and
-  `batchSize = concurrency`, so it can claim and run that many handlers at once.
+  `batchSize = concurrency`, so it claims and runs that many handlers at once.
 - The *work* inside a step — `target.run(command)` (a subprocess) or an agent's
   network call — is async I/O that does **not** hold the PGLite connection; only
   the short `ctx.step` checkpoint reads/writes touch the single-connection
   (`max:1`) pool.
 
-But the fixture's own note disagrees: *"today jobs run in deterministic
-topological order (alphabetical among ready jobs); true parallel execution of the
-middle tier is a planned runtime enhancement."* That's either stale (written
-before the `Promise.all`/worker-concurrency runtime) or accurate (the worker
-effectively drains the queue serially in practice). **Reading the code can't
-settle it** — this needs the actual spike README #1 calls for: run the diamond
-with timing instrumentation and observe whether the middle tier overlaps.
-
-Implication for the design, not blocking: if execution turns out serial today,
-the lanes still correctly show DAG *structure* (depth, what's blocked on what) —
-just relabel the live state so concurrently-*ready* jobs don't claim to be
-concurrently-*running*. If it's genuinely concurrent, add the legend caveat that
-it's **cooperative I/O concurrency on one process + one connection**, not CPU
-parallelism (right for I/O-bound shell/agent jobs; two CPU-bound jobs wouldn't
-speed up). Either way the layered view is correct; only the running/ready wording
-depends on the spike.
+The one nuance to keep in the legend rather than hide: this is **cooperative I/O
+concurrency on one process + one connection**, not CPU parallelism — exactly the
+right fit for pi-workflows' I/O-bound shell and agent jobs (two CPU-bound jobs
+wouldn't speed up). The lanes show "in flight," which is accurate.
 
 ### Per-job richness the current CLI drops
 
-For each row, surface the fields the present presenter never reads:
+*Built,* except where noted. For each row, surface the fields the old presenter
+never read:
 
 - **state + spinner:** pending / running / success / failed / skipped, mapped
   from the hook transitions.
@@ -123,20 +131,22 @@ For each row, surface the fields the present presenter never reads:
   current from `onStepStart` count; show the running step's name inline.
 - **target:** `runsOn` from the plan (`local` / `gondolin`) — useful context
   the user otherwise can't see.
-- **attempt / retries:** from the Absurd run row (`attempt`, bounded by
-  `maxAttempts`). This is the durable-state payoff: retries are invisible in a
-  pure event-stream view.
+- **attempt / retries:** *(latent)* from the Absurd run row (`attempt`, bounded
+  by `maxAttempts`). The durable-state payoff, but jobs spawn with a hardcoded
+  `defaultMaxAttempts: 1` today, so the badge reads `try 1/1` until per-job
+  retries are turned on — a separate change, unrelated to this view.
 
-### Two-pane option (selected-job logs)
+### Two-pane option (selected-job logs) — FUTURE
 
 Mirror Turborepo/Nx: the layered list on the left, the selected job's live log
 on the right (arrow/vim nav to switch selection). Logs stream into the pane via
 `<Static>`-style scrollback above the live region so finished output persists.
 This is the same per-job buffering we already do, just made selectable instead of
-flushed in completion order. Reserve this for the Ink path (below); the
-single-pane layered list is the floor.
+flushed in completion order. The single-pane layered list is what
+shipped; this selectable two-pane view is deferred (and would stay hand-rolled,
+not Ink, per "Library choice").
 
-## Durable watch / attach — the differentiator
+## Durable watch / attach — the differentiator (FUTURE)
 
 Because each *job* is an Absurd task and each step within it is a `ctx.step`
 checkpoint (the whole-run orchestration is still plain JS — see constraint 1
@@ -181,23 +191,25 @@ With those addressed, the remaining open item is the replay/ordering contract
 (README #2) before the reader trusts checkpoint ordering to reconstruct
 step-level progress.
 
-## Library choice
+## Library choice — decided: zero-dependency, hand-rolled
 
-Unchanged in spirit from iteration 1, now decided by which features above we
-commit to:
+**Shipped with no new dependency: pure TypeScript + ANSI.** The deciding
+constraint, found when building, overrode the iteration-1 shortlist: pi-workflows
+runs on **Node's native type-stripping** (`erasableSyntaxOnly`, no build step,
+no JSX transform). That rules **Ink** out — it's React/JSX and needs a compile
+step the project deliberately doesn't have — and makes pulling **listr2** (or any
+runtime dep) a poor fit for a project that prides itself on no native/binary deps.
 
-- **Ink** (7.x) — needed for the two-pane layout, freeform lanes, and
-  `<Static>` streaming-log region with a live board above. Cost: pulls React 19
-  + Yoga. Pick this if we want the selectable-logs view and the richest layered
-  rendering. Bridge the hooks into a small store an Ink component subscribes to.
-- **listr2** (10.x) — sufficient for the single-pane layered list if we model
-  levels as nested task groups; lightest path, best built-in non-TTY fallback.
-  It prefers to own execution, so we bridge our emitter → its task promises.
-  Pick this if two-pane and durable-attach are out of scope for the first cut.
+So the live board is hand-rolled: a small in-place redraw using cursor/clear ANSI
+escapes, a finished-job "commit to scrollback" akin to Ink's `<Static>`, a
+spinner, and width-aware truncation so lines never wrap (which would corrupt the
+cursor math). It's the "most work, most control, lightest footprint" option the
+iteration-1 research flagged — and the only one compatible with the no-build
+constraint. The two-pane selectable-logs view (the one place Ink would have
+genuinely helped) is deferred; if it's built, it stays hand-rolled too.
 
-Recommendation: **start on listr2 for the layered single-pane list** (fastest to
-a richer-than-today view, cheapest fallback), and reach for **Ink only if/when**
-two-pane selectable logs or the `watch` attach mode justify the weight.
+What we did **not** need: any of the rejected libraries, and any engine change —
+the presenter is a pure consumer of `RunHooks`.
 
 ## Non-TTY / CI (unchanged)
 
@@ -214,6 +226,11 @@ plan**. No engine or runtime changes for the live view (the durable `watch`
 reader is the only thing that touches Postgres, and only for reads). Ship in the
 order below; each step is independently testable and the first three already beat
 today's output.
+
+**Status:** Steps 0–3 and Step 5 (`graph`) are **built**; Step 4 (durable
+`watch`) is **future**. The code matches this plan closely — `src/tui/{presenter,
+levels,store,render}.ts` and `src/graph/` — with one deviation noted under Step 3
+(library choice: hand-rolled, not listr2/Ink — see "Library choice" above).
 
 ### Step 0 — extract the presenter seam (refactor, no behavior change)
 
@@ -294,28 +311,48 @@ straight off the `JobResult.status` in `onJobEnd`.
 - `BufferedPresenter`: today's code, moved. Optionally wrap each job block in
   `::group::`/`::endgroup::` when `is-in-ci` so GitHub/Buildkite collapse it.
 - `LayeredPresenter`: subscribes its hooks into `RunStore`, renders
-  `store.snapshot()` on a throttled tick (~10–15 Hz) as the layered list. Start
-  single-pane (listr2 nested groups by level, or a hand-rolled `log-update`
-  block); add the Ink two-pane only if/when we commit to selectable logs.
+  `store.snapshot()` on a throttled tick as the single-pane layered list. *As
+  built:* a hand-rolled in-place redraw (cursor/clear ANSI) with a spinner timer
+  and finished-job logs committed to scrollback above the live region; the
+  optional Ink two-pane is deferred.
 
-Library decision stays as in the previous section: **listr2 first** for the
-single-pane layered list (lightest, best built-in CI fallback), **Ink** only when
-two-pane selectable logs or the `watch` attach view justify React + Yoga.
+*As built,* the library decision landed differently from the iteration-1
+shortlist — **hand-rolled, zero new dependencies** — because the project's
+native-TS / no-build constraint rules out Ink (JSX) and disfavors listr2. See
+"Library choice — decided" above.
 
-### Step 4 — durable `watch` reader (separate, gated)
+### Step 4 — durable `watch` reader (FUTURE — not built)
 
-Only after the two prerequisites from the "Durable watch / attach" section
-(surface `runId`; whole-run-as-durable-task, or accept the
-read-only-of-a-live-host framing). A thin read-only query layer over
-the Absurd `r_`/`c_`/`e_` tables reconstructs `RunStore` state without the live
-hook stream, then renders the identical `LayeredPresenter`. Reuses Steps 1–3
-wholesale — the reader is just an alternate state source.
+Gated on the two prerequisites from the "Durable watch / attach" section (surface
+`runId`; whole-run-as-durable-task, or accept the read-only-of-a-live-host
+framing). A thin read-only query layer over the Absurd `r_`/`c_`/`e_` tables would
+reconstruct `RunStore` state without the live hook stream, then render the
+identical `LayeredPresenter`. Reuses Steps 1–3 wholesale — the reader is just an
+alternate state source.
 
-### Step 5 — `graph` command (separate, pre-existing plan)
+### Step 5 — `graph` command (BUILT)
 
-`pi-workflows graph <workflow.yaml>` emits the `needs` DAG as Mermaid / Graphviz
-DOT / JSON. Still the home for the real box-and-edge DAG; unrelated to the live
-view beyond sharing `levelize()`.
+`pi-workflows graph <file|name> [--format mermaid|dot|json|ascii] [--steps]`
+(`src/graph/`) emits the compiled `needs` DAG for pre-run inspection — the home
+for the real box-and-edge DAG, separate from the live view, sharing `levelize()`.
+Resolution mirrors `run` (ad-hoc path, or `--workspace … graph <name>`); it
+compiles and exits before any runtime/config setup. Four formats:
+
+- **mermaid** / **dot** — render in a browser / Graphviz. Default is one node per
+  job (label = name · target · step count) with `needs` edges.
+- **json** — `{ name, jobOrder, jobs: { runsOn, steps, needs, level } }` for
+  tooling.
+- **ascii** — a dependency-free terminal glance: jobs grouped by topological
+  level with upstream `←` annotations.
+
+With **`--steps`**, each job expands to its ordered steps. ascii and json list
+them inline (`{ name, kind, uses?, id? }` for json). mermaid and dot make steps
+**first-class graph nodes**: a subgraph (mermaid) / `cluster` (dot, via
+`compound=true` + `lhead`/`ltail`) per job, step nodes chained in execution order,
+`uses` steps drawn distinctly (stadium shape / filled), and job dependencies
+linking the clusters. Synthetic node ids keep output valid regardless of job-id
+characters; a zero-step job renders a `(no steps)` node so edges always have an
+endpoint.
 
 ### Testing approach
 
@@ -339,27 +376,22 @@ match.
 
 ## Open questions specific to this iteration
 
-- **Running vs ready (README #1):** fan-out works; open question is whether
-  independent siblings *run* simultaneously or the worker drains them serially.
-  Code suggests concurrent, a fixture comment says serial — needs a timing spike
-  to settle. Only the live "running" wording depends on it (see the section
-  above); the DAG structure renders correctly regardless.
 - **Replay/ordering (README #2):** confirm Absurd's replay contract before the
-  `watch` reader trusts checkpoint ordering to reconstruct step progress.
+  future `watch` reader trusts checkpoint ordering to reconstruct step progress.
 - **Attempt surfacing:** decide whether retries collapse into one row (with a
   `try N/M` badge) or expand — collapsing matches the mental model of "one job".
-  Note jobs are currently spawned with a hardcoded `defaultMaxAttempts: 1` in
-  `runtime.ts`, so attempts are always 1 today; enabling per-job retries is an
-  independent change (lift that constant + plumb a retry strategy), unrelated to
-  fan-out. Design the badge now; expect `try 1/1` until retries are turned on.
-- **Selection persistence:** in two-pane mode, what's selected when the selected
-  job finishes — sticky, or auto-advance to the next running job?
+  Jobs spawn with a hardcoded `defaultMaxAttempts: 1` today, so attempts are
+  always 1; enabling per-job retries is an independent change (lift that constant
+  + plumb a retry strategy). Design the badge now; expect `try 1/1` until then.
+- **Selection persistence (future two-pane):** when the selected job finishes —
+  sticky, or auto-advance to the next running job?
 
 ## Sources
 
 - Iteration 1 research + library landscape: [`docs/tui-research.md`](./tui-research.md)
 - Event stream / hooks: [`src/runtime/types.ts`](../src/runtime/types.ts)
 - DAG + plan: [`src/compiler/plan.ts`](../src/compiler/plan.ts)
-- Current presenter: [`src/cli.ts`](../src/cli.ts)
+- Live TUI (as built): [`src/tui/`](../src/tui/) — `presenter.ts`, `levels.ts`, `store.ts`, `render.ts`; wired in [`src/cli.ts`](../src/cli.ts)
+- Graph command (as built): [`src/graph/emit.ts`](../src/graph/emit.ts)
 - Durable state model: [`docs/absurd-durable-workflows.md`](./absurd-durable-workflows.md), [`src/runtime/absurd/schema.sql`](../src/runtime/absurd/schema.sql)
 - Carry-over design questions: [`README.md`](../README.md) "Open design questions"

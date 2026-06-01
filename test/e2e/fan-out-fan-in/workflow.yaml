@@ -2,9 +2,9 @@
 # description: a diamond DAG. `prepare` fans out to three independent jobs
 #              (lint, unit, typecheck); they fan back in to `report`, which only
 #              runs once all three are done. `needs` encodes the shape.
-# note: today jobs run in deterministic topological order (alphabetical among
-#       ready jobs); true parallel execution of the middle tier is a planned
-#       runtime enhancement — the DAG is already expressed correctly.
+# note: the `needs` DAG gates ordering; the independent middle tier (lint, unit,
+#       typecheck) runs in parallel via the Absurd worker's concurrency, then
+#       fans back in to `report`.
 # usage: ./pi-workflows ./test/e2e/fan-out-fan-in/workflow.yaml
 ---
 name: fan-out-fan-in
