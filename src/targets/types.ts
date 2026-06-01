@@ -32,12 +32,12 @@ export interface RunResult {
 }
 
 export interface ExecutionTarget {
-  /** Identifier for diagnostics, e.g. "local". */
+  /** Identifier for diagnostics, e.g. "gondolin". */
   readonly kind: string;
   /**
-   * The staged per-job workspace path **as a run command sees it** — the host
-   * working directory for `local`, the guest mount (`/workspace`) for
-   * `gondolin`. The runtime places files a step writes and the host later reads
+   * The staged per-job workspace path **as a run command sees it** — the guest
+   * mount (`/workspace`) for `gondolin` (or the working directory for a test
+   * host double). The runtime places files a step writes and the host later reads
    * (e.g. `$PI_OUTPUT`) under this path, so output capture works on every target
    * regardless of how the host directory is surfaced inside the environment.
    */

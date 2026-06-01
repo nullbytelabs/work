@@ -5,10 +5,9 @@
  * It is a standalone `.mjs` — NOT part of the TypeScript program — because it
  * executes in a *separate Node process inside the guest VM*, where it resolves
  * `@earendil-works/pi-coding-agent` from the guest's own module path (installed
- * in-guest by `GuestPiRunner` before this runs). The logic mirrors the host
- * `PiAgentRunner` (src/agent/pi-runner.ts): register a custom OpenAI-compatible
- * provider, run one prompt with Pi's full toolset rooted at the workspace
- * (`cwd`), return the final assistant text.
+ * in-guest by `GuestPiRunner` before this runs). It registers a custom
+ * OpenAI-compatible provider, runs one prompt with Pi's full toolset rooted at
+ * the workspace (`cwd`), and returns the final assistant text.
  *
  * Contract (kept dead simple so the host side is testable without a VM):
  *   argv[2] = path to a request JSON  { system, prompt, cwd, model: { baseUrl,

@@ -5,7 +5,7 @@
  * Backed by `@earendil-works/gondolin` (QEMU by default). That package is an
  * OPTIONAL dependency: it requires Node >= 23.6 and a host QEMU install, and
  * ships platform-specific runner binaries. To keep the engine importable and
- * the local target / test suite working everywhere, Gondolin is loaded
+ * the test suite working everywhere, Gondolin is loaded
  * **lazily** inside `provision()` via dynamic import — nothing here is touched
  * unless a workflow actually declares `runs-on: gondolin`.
  *

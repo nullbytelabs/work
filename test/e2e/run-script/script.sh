@@ -1,6 +1,6 @@
 #!/bin/sh
 # Sum the integers read on stdin and flag if the total exceeds THRESHOLD
-# (default 0). POSIX sh so it runs on `local` and inside the Alpine guest.
+# (default 0). POSIX sh so it runs inside the Alpine guest.
 set -eu
 
 total=0

@@ -12,14 +12,14 @@ end-to-end fixtures the test suite runs. Run any of them with:
 ```
 
 When a workflow runs, **its checkout is staged into each job's workspace**
-(copied in for `local`, mounted at `/workspace` for `gondolin`) — analogous to a
+(mounted at `/workspace` in the gondolin guest) — analogous to a
 git checkout (`node_modules/` and `.git/` are never staged; a job installs its
 own deps). The checkout is the workflow's own folder, or — when the workflow
 lives in a `.workflows/` directory — the **project root** (its parent), so
 `package.json`/source files are present. Other examples' files are not.
 
 Everything here uses the engine's core capabilities: `name`, workflow/job/step `env`,
-per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
+per-job `runs-on` (`gondolin`), `jobs`, `needs`, `run` steps,
 `strategy.matrix`, and `if`/`when` conditionals.
 
 ## Hello world
@@ -55,8 +55,8 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
 - **`runs-on`: always `gondolin`.** Every example runs in the Gondolin micro-VM.
   The guest is fully equipped — `sh`, `bash`, `node`, `npm`, and `python3` are all
   present — so even `inline-polyglot/` (bash + node + python) runs entirely in the
-  sandbox; no step needs the host. `runs-on: local` is **deprecated** (host
-  execution, no isolation) and an omitted `runs-on` defaults to `gondolin`; the
-  compiler warns on both, so workflows state `runs-on: gondolin` explicitly. The
-  whole suite therefore boots real micro-VMs — `npm test` needs Node ≥ 23.6 + QEMU
-  on the machine.
+  sandbox; no step needs the host. `runs-on: local` has been **removed** — host
+  execution is gone, `gondolin` is the only target, and `runs-on: local` is a hard
+  compile error. An omitted `runs-on` defaults to `gondolin` (the compiler warns,
+  nudging you to state it explicitly). The whole suite therefore boots real
+  micro-VMs — `npm test` needs Node ≥ 23.6 + QEMU on the machine.

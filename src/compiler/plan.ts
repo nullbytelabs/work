@@ -38,7 +38,7 @@ export interface PlannedJob {
   id: string;
   /** Human-readable label, e.g. `test (node=20)` for a matrix leg; defaults to `id`. */
   title?: string;
-  /** Resolved execution target key, e.g. "local" or "gondolin". */
+  /** Resolved execution target key (currently always "gondolin"). */
   runsOn: string;
   /** Resolved dependencies (job ids; matrix bases are already expanded to legs). */
   needs: string[];

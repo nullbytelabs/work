@@ -507,7 +507,7 @@ async function runUsesStep(
       ...(deps.ctx.workspaceSource ? { projectDir: deps.ctx.workspaceSource } : {}),
       ...(workflowDir ? { workflowDir } : {}),
       runsOn: job.runsOn,
-      sandboxed: job.runsOn !== "local",
+      sandboxed: true, // every job runs in the gondolin sandbox — there is no host execution
       workspacePath: target.workspacePath,
       exec: (command, opts) => target.run(command, opts ?? {}),
       emit,

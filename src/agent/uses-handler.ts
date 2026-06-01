@@ -89,8 +89,8 @@ export function createAgentUsesHandler(opts: AgentUsesHandlerOptions = {}): Uses
         const res = await runner.run({
           system: agent.instructions,
           prompt: buildAgentPrompt(agent, inputs),
-          // The agent runs in the job's workspace (host workdir for `local`, the
-          // guest mount for a sandbox) — both surface as `workspacePath`.
+          // The agent runs in the job's workspace (the gondolin guest mount),
+          // surfaced as `workspacePath`.
           cwd: ctx.workspacePath,
           ...(model ? { model } : {}),
         });
