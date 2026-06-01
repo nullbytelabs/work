@@ -1,0 +1,26 @@
+# The project's CI pipeline — fast verification, no agent or model needed.
+#
+# This project keeps its pipelines + agents in `.workflows/` (like
+# `.github/workflows/`). Each pipeline runs against the PROJECT ROOT checkout —
+# the parent of `.workflows/` — so `package.json`, `main.ts`, `npm install`, and
+# `npm start` are right there in the job's workspace.
+#
+#   verify: install deps -> check main.ts is valid -> smoke-run `npm start`.
+#
+# The companion `review.yaml` runs an agent review separately, so you can get
+# fast CI on every push and request a review only when you want one.
+---
+name: ci
+
+jobs:
+  verify:
+    runs-on: gondolin
+    steps:
+      - name: install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: check main.ts is valid
+        run: npx tsc --noEmit main.ts
+
+      - name: smoke test (npm start)
+        run: npm start --silent

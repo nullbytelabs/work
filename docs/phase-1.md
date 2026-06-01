@@ -195,8 +195,9 @@ so name-based and path-based launches are the same code path, just a different
 front door. The checkout is staged like
 a fresh `git checkout`: `node_modules/` and `.git/` are never copied (each job
 installs its own deps — copying a foreign `node_modules` breaks native binaries).
-`test/e2e/agent-project/` is the worked example: `npm install` → `tsc` validity →
-`npm start` smoke → an agent reviews the captured source.
+`test/e2e/agent-project/` is the worked example: two independent pipelines in
+`.workflows/` — `ci.yaml` (`npm install` → `tsc` validity → `npm start` smoke) and
+`review.yaml` (a workspace-aware agent reads `main.ts` and reviews it).
 
 ## Agent steps (`uses: agent/<name>`)
 
@@ -211,7 +212,8 @@ the full project shape that's `.workflows/agents/<name>/`:
   package.json
   main.ts
   .workflows/               # workflowDir — like .github/workflows/
-    main.yaml
+    ci.yaml                 # one or more pipelines (resolved by `name:`)
+    review.yaml
     agents/
       summarize/
         agent.yaml          # manifest: description, declared inputs/outputs

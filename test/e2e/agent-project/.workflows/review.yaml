@@ -1,0 +1,28 @@
+# A standalone agent review of the project's source.
+#
+# Split out from `ci.yaml` so verification and review run independently: fast CI
+# on every push, and a review only when you want one. The agent is
+# workspace-aware — it reads `main.ts` straight from the checkout — so this
+# pipeline needs nothing from CI (no `needs`, no threaded output).
+#
+# Agent packages live in `.workflows/agents/` (`uses: agent/<name>`). Tests inject
+# a mock runner (no inference). For a real review against a model:
+#   ./pi-workflows ./test/e2e/agent-project/.workflows/review.yaml --config pi-workflows.config.json
+---
+name: review
+
+jobs:
+  review:
+    runs-on: gondolin
+    outputs:
+      review: ${{ steps.summary.outputs.summary }}
+    steps:
+      - id: summary
+        name: review the source with an agent
+        uses: agent/summarize
+
+      - name: show review
+        env:
+          REVIEW: ${{ steps.summary.outputs.summary }}
+        run: |
+          echo "review -> $REVIEW"

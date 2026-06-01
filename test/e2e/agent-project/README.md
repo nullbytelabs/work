@@ -11,25 +11,31 @@ root checkout.
 ├── package.json        # deps + `npm start`
 ├── package-lock.json
 └── .workflows/
-    ├── main.yaml        # the CI pipeline
+    ├── ci.yaml          # fast verification pipeline      (name: ci)
+    ├── review.yaml      # standalone agent review         (name: review)
     └── agents/
         └── summarize/   # a project-local agent package (uses: agent/summarize)
 ```
 
-The `main.yaml` pipeline:
+Two independent pipelines, so verification and review run on their own schedules:
 
-1. **verify** — `npm install`, check `main.ts` is valid (`tsc --noEmit`), and
-   smoke-run `npm start`; then capture the source for review.
-2. **review** — an agent reviews/summarizes the captured source.
+- **`ci.yaml`** (`name: ci`) — **verify**: `npm install`, check `main.ts` is valid
+  (`tsc --noEmit`), smoke-run `npm start`. Fast, no model needed.
+- **`review.yaml`** (`name: review`) — **review**: an agent reads `main.ts` from
+  the checkout and summarizes it. The agent is workspace-aware, so this pipeline
+  needs nothing from CI — no `needs`, no threaded output.
 
-Run it (the workflow's `name:` is `ci`):
+Run them by name (the run resolves `.workflows/*.yaml` by the `name:` inside):
 
 ```bash
-# by name, from anywhere (workspace defaults to cwd; --workspace points elsewhere)
-./pi-workflows --workspace ./test/e2e/agent-project run ci --config pi-workflows.config.json
+# fast CI, no model needed
+./pi-workflows --workspace ./test/e2e/agent-project run ci
+
+# the agent review (needs a model config)
+./pi-workflows --workspace ./test/e2e/agent-project run review --config pi-workflows.config.json
 
 # or ad-hoc by path
-./pi-workflows ./test/e2e/agent-project/.workflows/main.yaml --config pi-workflows.config.json
+./pi-workflows ./test/e2e/agent-project/.workflows/review.yaml --config pi-workflows.config.json
 ```
 
 `node_modules/` is intentionally not part of the checkout — each job installs

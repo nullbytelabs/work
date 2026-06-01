@@ -2,13 +2,14 @@
 
 Each subfolder is one example. Most are a single `workflow.yaml` plus any
 committed companion files (e.g. `run-script/script.sh`); `agent-project/` shows
-the fuller **project shape** — a `.workflows/main.yaml` pipeline (like
+the fuller **project shape** — `.workflows/*.yaml` pipelines (like
 `.github/workflows/`) alongside the project it builds. They double as the
 end-to-end fixtures the test suite runs. Run any of them with:
 
 ```bash
 ./pi-workflows ./test/e2e/<name>/workflow.yaml
-./pi-workflows ./test/e2e/agent-project/.workflows/main.yaml   # the project-shaped one
+./pi-workflows --workspace ./test/e2e/agent-project run ci       # project-shaped: by name
+./pi-workflows --workspace ./test/e2e/agent-project run review   # its second pipeline
 ```
 
 When a workflow runs, **its checkout is staged into each job's workspace**
@@ -41,7 +42,7 @@ per-job `runs-on` (`gondolin`), `jobs`, `needs`, `run` steps,
 | `input-validation/` | a `required` enum (`options`) + a regex-`pattern` (UUID) input; bad values are rejected at compile time (`--inputs '{"release":"staging","id":"<uuid>"}'`) | required / options / pattern validators |
 | `matrix-build/` | `strategy.matrix` over `node` × `os` with an `exclude` and an `include`, converging into `report` via `needs` | matrix fan-out + `${{ matrix.* }}` |
 | `conditional-steps/` | step-level `if` (`inputs.*`, `always()`) and a job-level `if` gate; default `mode=ci` skips the release-only work (`--inputs '{"mode":"release"}'`) | `if`/`when` conditionals |
-| `agent-project/` | a **real coding project**: its pipeline + agent live in `.workflows/` (like `.github/workflows/`), the workflow runs against the project-root checkout — `npm install` → `tsc` validity → `npm start` smoke → an agent reviews the captured source. Runs `npm install` for real and the agent runs the real in-guest Pi (gondolin), so it needs Node ≥ 23.6 + QEMU. | `.workflows/` project model; checkout = project root; multiline `$PI_OUTPUT`; workflow-local agents |
+| `agent-project/` | a **real coding project**: two pipelines + an agent live in `.workflows/` (like `.github/workflows/`), each running against the project-root checkout — `ci.yaml` (`npm install` → `tsc` validity → `npm start` smoke) and `review.yaml` (a workspace-aware agent reads `main.ts` and reviews it). Runs `npm install` for real and the agent runs the real in-guest Pi (gondolin), so it needs Node ≥ 23.6 + QEMU. | `.workflows/` project model; checkout = project root; multiple pipelines per project; workflow-local agents |
 
 ## Notes on current behavior
 

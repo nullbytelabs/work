@@ -180,7 +180,7 @@ jobs:
       - run: echo "review -> ${{ steps.summary.outputs.summary }}"
 ```
 
-The agent's final message becomes the step's declared output (e.g. `steps.summary.outputs.summary`). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example: install deps → typecheck → smoke test → an agent reviews the source.
+The agent's final message becomes the step's declared output (e.g. `steps.summary.outputs.summary`). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a `ci.yaml` pipeline (install deps → typecheck → smoke test) and a separate `review.yaml` where an agent reviews the source.
 
 ---
 
