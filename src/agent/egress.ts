@@ -39,15 +39,13 @@ function stepModelAlias(job: PlannedJob, i: number): string | undefined {
 
 /**
  * Build the `resolveJobNetwork` callback. Returns `undefined` for jobs that
- * need no mediated egress (no config, or no agent steps) — including all
- * `local` jobs, which run host-side.
+ * need no mediated egress (no config, or no agent steps).
  */
 export function makeAgentEgressResolver(
   config?: PiWorkflowsConfig,
 ): (job: PlannedJob) => AgentJobNetwork | undefined {
   return (job) => {
     if (!config) return undefined;
-    if (job.runsOn === "local") return undefined;
 
     // Resolve every model an agent step in this job will call.
     const models: ResolvedModel[] = [];

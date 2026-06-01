@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type UsesHandler } from "../src/runtime/index.ts";
+import { hostTargetFactory } from "./_support.ts";
 
 // Exercises the core's generic uses-handler contract with a NON-agent handler,
 // proving the runtime is agent-agnostic: dispatch by scheme + output flow.
@@ -23,7 +24,7 @@ describe("uses-handler dispatch (core contract)", () => {
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-uses-"));
     let output = "";
     try {
-      const result = await new AbsurdRuntime({ engine, usesHandlers: handlers }).run(plan, {
+      const result = await new AbsurdRuntime({ engine, usesHandlers: handlers, makeTarget: hostTargetFactory }).run(plan, {
         workRoot,
         hooks: { onOutput: (_j, _s, c) => (output += c.text) },
       });
@@ -45,7 +46,7 @@ describe("uses-handler dispatch (core contract)", () => {
 name: u
 jobs:
   go:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - id: f
         uses: fake/thing
@@ -66,7 +67,7 @@ jobs:
 name: u
 jobs:
   go:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - uses: nope/thing
 `,

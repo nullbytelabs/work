@@ -48,13 +48,24 @@ jobs:
     assert.equal(p.jobs["explicit"]!.runsOn, "gondolin");
   });
 
-  it("warns on a deprecated runs-on: local and on an implicit (omitted) runs-on", () => {
+  it("rejects runs-on: local with a hard compile error (host execution removed)", () => {
+    assert.throws(
+      () => plan(`name: w\njobs:\n  legacy:\n    runs-on: local\n    steps: [{ run: "true" }]`),
+      (e) => e instanceof WorkflowCompileError && /"runs-on: local" has been removed/.test(e.message),
+    );
+  });
+
+  it("rejects an unknown runs-on", () => {
+    assert.throws(
+      () => plan(`name: w\njobs:\n  a:\n    runs-on: mars\n    steps: [{ run: "true" }]`),
+      (e) => e instanceof WorkflowCompileError && /unknown runs-on "mars"/.test(e.message),
+    );
+  });
+
+  it("warns on an implicit (omitted) runs-on, and is silent when gondolin is explicit", () => {
     const p = plan(`
 name: w
 jobs:
-  legacy:
-    runs-on: local
-    steps: [{ run: "true" }]
   implicit:
     steps: [{ run: "true" }]
   explicit:
@@ -62,10 +73,7 @@ jobs:
     steps: [{ run: "true" }]
 `);
     const warnings = p.warnings ?? [];
-    // One warning each for the local and the omitted job; the explicit gondolin
-    // job is silent.
-    assert.equal(warnings.length, 2);
-    assert.ok(warnings.some((w) => /"legacy".*"runs-on: local" is deprecated/.test(w)));
+    assert.equal(warnings.length, 1);
     assert.ok(warnings.some((w) => /"implicit".*no "runs-on" set/.test(w)));
     assert.ok(!warnings.some((w) => /"explicit"/.test(w)));
   });
@@ -75,12 +83,11 @@ jobs:
     assert.equal(p.warnings, undefined);
   });
 
-  it("warns once per base job, not once per matrix leg", () => {
+  it("warns once per base job, not once per matrix leg (implicit runs-on)", () => {
     const p = plan(`
 name: w
 jobs:
   build:
-    runs-on: local
     strategy:
       matrix:
         node: [18, 20, 22]

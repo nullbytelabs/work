@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { mkdir, cp, readFile, rm } from "node:fs/promises";
 import type { TaskContext } from "absurd-sdk";
-import { makeTarget } from "../../targets/index.ts";
+import { makeTarget as defaultMakeTarget, type TargetFactory, type ExecutionTarget } from "../../targets/index.ts";
 import {
   interpolate,
   evaluateCondition,
@@ -80,6 +80,13 @@ export interface AbsurdRuntimeOptions {
    * steps). The core stays agent-agnostic and just forwards it to the target.
    */
   resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
+  /**
+   * Override how a job's `runs-on` becomes an ExecutionTarget. Defaults to the
+   * production factory (gondolin micro-VM only). Tests inject a lightweight
+   * host-process double so they exercise the runtime↔target contract without
+   * booting a VM — the double is never reachable from a workflow.
+   */
+  makeTarget?: TargetFactory;
 }
 
 /** Side dependencies captured by the per-job task handler (not serialized). */
@@ -90,6 +97,8 @@ interface JobDeps {
   inputs: WorkflowInputs;
   /** Optional per-job sandbox network policy (allowlist + secrets). */
   resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
+  /** Builds the ExecutionTarget for a job's `runs-on`. */
+  makeTarget: TargetFactory;
 }
 
 export class AbsurdRuntime implements Runtime {
@@ -100,6 +109,7 @@ export class AbsurdRuntime implements Runtime {
   private readonly maxConcurrency: number | undefined;
   private readonly usesHandlers: UsesHandler[];
   private readonly resolveJobNetwork: ((job: PlannedJob) => JobNetwork | undefined) | undefined;
+  private readonly makeTarget: TargetFactory;
 
   constructor(opts: AbsurdRuntimeOptions = {}) {
     this.engine = opts.engine ?? null;
@@ -108,6 +118,7 @@ export class AbsurdRuntime implements Runtime {
     this.maxConcurrency = opts.maxConcurrency;
     this.usesHandlers = opts.usesHandlers ?? [];
     this.resolveJobNetwork = opts.resolveJobNetwork;
+    this.makeTarget = opts.makeTarget ?? defaultMakeTarget;
   }
 
   private async ensureEngine(): Promise<AbsurdEngine> {
@@ -122,6 +133,7 @@ export class AbsurdRuntime implements Runtime {
       ctx,
       usesHandlers: this.usesHandlers,
       inputs: plan.inputs ?? {},
+      makeTarget: this.makeTarget,
       ...(this.resolveJobNetwork ? { resolveJobNetwork: this.resolveJobNetwork } : {}),
     };
 
@@ -301,7 +313,7 @@ async function runJobInTask(
     // the model API). The composition root supplies this per job; the core stays
     // agent-agnostic — it just forwards the allowlist/secrets to the target.
     const network = deps.resolveJobNetwork?.(job);
-    target = makeTarget(job.runsOn, { workdir, ...(network ?? {}) });
+    target = deps.makeTarget(job.runsOn, { workdir, ...(network ?? {}) });
     await target.provision();
   } catch (err) {
     const result: StepResult = {
@@ -405,16 +417,16 @@ async function runJobInTask(
 /**
  * A shell `run` step on the ExecutionTarget; captures `$PI_OUTPUT`.
  *
- * The output file lives in the staged job workspace, which every target shares
- * with the host (the host workdir itself for `local`; the `/workspace` mount for
- * `gondolin`). So `$PI_OUTPUT` points at the path *the command sees*
- * (`target.workspacePath`) while the host reads the same file back from
- * `workdir` — making output capture work uniformly across targets.
+ * The output file lives in the staged job workspace, which the target shares
+ * with the host (the `/workspace` mount for the gondolin guest; the workdir
+ * directly for a test host double). So `$PI_OUTPUT` points at the path *the
+ * command sees* (`target.workspacePath`) while the host reads the same file back
+ * from `workdir` — making output capture work uniformly across targets.
  */
 async function runShellStep(
   step: PlannedStep,
   job: PlannedJob,
-  target: NonNullable<Awaited<ReturnType<typeof makeTarget>>>,
+  target: ExecutionTarget,
   workdir: string,
   ctx: RunContext,
   expr: { needs: NeedsContext; steps: Record<string, OutputBag> },
@@ -453,14 +465,14 @@ async function runShellStep(
  * handler does (agents, etc. are composed in from outside).
  *
  * The handler receives an `exec` bound to the job's target, so a `uses:` step
- * runs **where the job runs** (host for `local`, guest VM for `gondolin`) — the
- * same isolation a `run:` step gets. Output capture / staging uses the shared
+ * runs **where the job runs** (inside the gondolin guest VM) — the same
+ * isolation a `run:` step gets. Output capture / staging uses the shared
  * `target.workspacePath`, exactly like `runShellStep`.
  */
 async function runUsesStep(
   step: PlannedStep,
   job: PlannedJob,
-  target: NonNullable<Awaited<ReturnType<typeof makeTarget>>>,
+  target: ExecutionTarget,
   workdir: string,
   deps: JobDeps,
   expr: { needs: NeedsContext; steps: Record<string, OutputBag> },

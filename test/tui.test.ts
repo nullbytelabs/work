@@ -11,7 +11,7 @@ const strip = (s: string): string => s.replace(ANSI, "");
 function job(id: string, needs: string[], steps = 1): PlannedJob {
   return {
     id,
-    runsOn: "local",
+    runsOn: "gondolin",
     needs,
     steps: Array.from({ length: steps }, (_, i) => ({ name: `${id}/${i}`, env: {} })),
   };

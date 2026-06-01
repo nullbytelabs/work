@@ -154,7 +154,7 @@ inputs:
     default: world
 jobs:
   a:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - env:
           NAME: \${{ inputs.name }}
@@ -184,7 +184,7 @@ inputs:
   age: { type: number, default: 36 }
 jobs:
   a:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - env:
           AGE: \${{ inputs.age }}

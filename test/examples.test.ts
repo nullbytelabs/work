@@ -12,7 +12,9 @@ import { useSharedRuntime } from "./_support.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = resolve(HERE, "e2e");
-const runtime = useSharedRuntime();
+// The e2e tier: every example runs on a REAL gondolin micro-VM (not the host
+// double the other suites use), so this is the QEMU-dependent layer.
+const runtime = useSharedRuntime({ realTargets: true });
 
 // Inputs to supply for examples that declare required inputs (others default).
 const EXAMPLE_INPUTS: Record<string, Record<string, unknown>> = {

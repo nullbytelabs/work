@@ -1,6 +1,7 @@
 /**
  * GuestPiRunner — runs a Pi agent prompt **inside the job's sandbox** (the
- * gondolin guest), instead of on the host like `PiAgentRunner`.
+ * gondolin guest). It is the only agent runner: every job is a sandbox, so the
+ * agent loop never runs on the host.
  *
  * This is what makes `uses: agent/*` steps honor `runs-on: gondolin`: the whole
  * model loop executes in the VM, reaching the model API only through Gondolin's

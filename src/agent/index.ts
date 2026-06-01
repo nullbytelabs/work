@@ -1,12 +1,12 @@
 /**
  * Agent layer for `uses: agent/<name>` steps.
  *
- * `AgentRunner` is the seam. The default runners drive the
- * `@earendil-works/pi-coding-agent` SDK — `PiAgentRunner` host-side and
- * `GuestPiRunner` in-guest for sandboxed jobs. `OpenAiAgentRunner` (Node
- * `fetch`, no dependency, the `openai-completions` dialect Pi also speaks) is a
- * lighter fallback behind the same seam. Tests inject a stub runner, so the
- * whole pipeline is exercisable without inference.
+ * `AgentRunner` is the seam. The production runner is `GuestPiRunner`: every job
+ * runs in the gondolin sandbox, so the agent's whole loop (model calls + tools)
+ * executes in-guest via the `@earendil-works/pi-coding-agent` SDK. There is no
+ * host-side runner — running an agent on the host would defeat the sandbox.
+ * Tests inject a stub runner, so the whole pipeline is exercisable without
+ * inference.
  *
  * An agent is a **directory package** the *project* supplies (like a GitHub
  * Actions local action), resolved from `<agents-dir>/<name>/`:
@@ -53,64 +53,12 @@ export interface AgentRunner {
   run(req: AgentRequest): Promise<AgentResult>;
 }
 
-// The Pi-SDK-backed runner (host-side; full run + retries via session.prompt).
-export { PiAgentRunner } from "./pi-runner.ts";
-// The in-guest runner (sandboxed jobs) + the env var its model key arrives under.
+// The in-guest runner (every job is sandboxed) + the env var its model key arrives under.
 export { GuestPiRunner, GUEST_MODEL_KEY_ENV, type GuestPiRunnerDeps } from "./guest-pi-runner.ts";
 // The agent uses-handler — register this with the runtime (composition root).
 export { createAgentUsesHandler, type AgentUsesHandlerOptions } from "./uses-handler.ts";
 // Per-job sandbox egress for agent steps (allow-all egress + model-host-scoped key).
 export { makeAgentEgressResolver, type AgentJobNetwork } from "./egress.ts";
-
-/** Calls an OpenAI-compatible `/chat/completions` endpoint (Fireworks/LiteLLM/etc.). */
-export class OpenAiAgentRunner implements AgentRunner {
-  async run(req: AgentRequest): Promise<AgentResult> {
-    if (!req.model) {
-      throw new UserFacingError(
-        "agent step needs a model — provide a config (--config) with providers/models and a defaultModel, or set with.model",
-      );
-    }
-    const { baseUrl, apiKey, model, maxTokens, temperature } = req.model;
-    const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
-    const body: Record<string, unknown> = {
-      model,
-      messages: [
-        { role: "system", content: req.system },
-        { role: "user", content: req.prompt },
-      ],
-      stream: false,
-    };
-    if (maxTokens !== undefined) body["max_tokens"] = maxTokens;
-    if (temperature !== undefined) body["temperature"] = temperature;
-
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(body),
-      });
-    } catch (err) {
-      throw new UserFacingError(`agent model request to ${url} failed: ${(err as Error).message}`);
-    }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      throw new UserFacingError(`agent model request failed (${res.status}): ${detail.slice(0, 300)}`);
-    }
-    // stream:false → this single response is the COMPLETE result; nothing to await further.
-    const json = (await res.json()) as {
-      choices?: { message?: { content?: string }; finish_reason?: string }[];
-    };
-    const choice = json.choices?.[0];
-    const text = choice?.message?.content;
-    if (typeof text !== "string") {
-      throw new UserFacingError("agent model response had no choices[0].message.content");
-    }
-    const result: AgentResult = { text };
-    if (choice?.finish_reason) result.finishReason = choice.finish_reason;
-    return result;
-  }
-}
 
 /** A loaded agent package. */
 export interface LoadedAgent {

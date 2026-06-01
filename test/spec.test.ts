@@ -41,11 +41,11 @@ jobs:
 name: w
 jobs:
   a:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - run: "true"
 `);
-    assert.equal(spec.jobs["a"]!.runsOn, "local");
+    assert.equal(spec.jobs["a"]!.runsOn, "gondolin");
   });
 
   it("parses inputs (shorthand null + full declaration)", () => {
@@ -136,13 +136,13 @@ describe("parseWorkflow — validation", () => {
   });
 
   it("rejects a top-level runs-on (it is defined per job)", () => {
-    const e = err(`name: w\nruns-on: local\njobs:\n  a:\n    steps: [{ run: x }]`);
+    const e = err(`name: w\nruns-on: gondolin\njobs:\n  a:\n    steps: [{ run: x }]`);
     assert.equal(e.path, "runs-on");
     assert.match(e.message, /per job/);
   });
 
   it("gives a helpful error when runs-on is misplaced inside the jobs map", () => {
-    const e = err(`name: w\njobs:\n  runs-on: local\n  a:\n    steps: [{ run: x }]`);
+    const e = err(`name: w\njobs:\n  runs-on: gondolin\n  a:\n    steps: [{ run: x }]`);
     assert.equal(e.path, "jobs.runs-on");
     assert.match(e.message, /individual job/);
   });

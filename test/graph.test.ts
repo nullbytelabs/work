@@ -6,7 +6,7 @@ import { emitGraph, isGraphFormat, GRAPH_FORMATS } from "../src/graph/index.ts";
 function job(id: string, needs: string[], steps = 1): PlannedJob {
   return {
     id,
-    runsOn: "local",
+    runsOn: "gondolin",
     needs,
     steps: Array.from({ length: steps }, (_, i) => ({ name: `${id}/${i}`, env: {} })),
   };
@@ -38,8 +38,8 @@ describe("emitGraph: mermaid", () => {
   const out = emitGraph(diamond(), "mermaid");
   it("is a flowchart with a node per job and synthetic ids", () => {
     assert.match(out, /^flowchart TD/);
-    assert.match(out, /n0\["prepare<br\/>local · 2 steps"\]/);
-    assert.match(out, /n1\["lint<br\/>local · 1 step"\]/); // singular
+    assert.match(out, /n0\["prepare<br\/>gondolin · 2 steps"\]/);
+    assert.match(out, /n1\["lint<br\/>gondolin · 1 step"\]/); // singular
   });
   it("emits an edge per dependency", () => {
     assert.match(out, /n0 --> n1/); // prepare -> lint
@@ -54,7 +54,7 @@ describe("emitGraph: dot", () => {
   it("is a digraph with rankdir and labelled nodes", () => {
     assert.match(out, /^digraph "diamond" \{/);
     assert.match(out, /rankdir=TB;/);
-    assert.match(out, /"unit" \[label="unit\\nlocal · 3 steps"\];/);
+    assert.match(out, /"unit" \[label="unit\\ngondolin · 3 steps"\];/);
   });
   it("emits directed edges", () => {
     assert.match(out, /"prepare" -> "lint";/);
@@ -81,7 +81,7 @@ function withSteps(): ExecutionPlan {
     jobs: {
       verify: {
         id: "verify",
-        runsOn: "local",
+        runsOn: "gondolin",
         needs: [],
         steps: [
           { name: "verify/0", title: "install dependencies", env: {}, run: "npm i" },
@@ -90,7 +90,7 @@ function withSteps(): ExecutionPlan {
       },
       review: {
         id: "review",
-        runsOn: "local",
+        runsOn: "gondolin",
         needs: ["verify"],
         steps: [{ name: "review/summary", id: "summary", title: "review with agent", env: {}, uses: "agent/summarize" }],
       },
@@ -121,7 +121,7 @@ describe("emitGraph: steps option", () => {
 
   it("mermaid renders steps as first-class subgraph nodes", () => {
     const out = emitGraph(withSteps(), "mermaid", { steps: true });
-    assert.match(out, /subgraph n0\["verify · local"\]/);
+    assert.match(out, /subgraph n0\["verify · gondolin"\]/);
     assert.match(out, /n0_s1\["1\. install dependencies"\]/);
     assert.match(out, /n0_s1 --> n0_s2/); // ordered chain
     // uses step gets the stadium shape and uses ref

@@ -449,8 +449,13 @@ Takeaways for our engine:
 
 ## 6. Proposed `ExecutionTarget` abstraction (engine integration)
 
-This is a design sketch for switching on `runs-on:` between a Gondolin sandbox
-and local execution. It is engine code (not part of Gondolin) — adapt freely.
+This is the original design sketch for switching on `runs-on:` between a Gondolin
+sandbox and host execution. **The shipped engine kept only `GondolinTarget`** —
+host execution (`runs-on: local` and the `LocalTarget` below) was removed so a
+workflow can never run a step on the host; a lightweight host-process double
+satisfying the same interface is used only in tests. The `LocalTarget` and the
+`local` branch below are retained as a record of the original two-target shape.
+It is engine code (not part of Gondolin) — adapt freely.
 
 ```ts
 // execution-target.ts

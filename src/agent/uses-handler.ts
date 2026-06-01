@@ -11,7 +11,6 @@ import { join } from "node:path";
 import type { UsesHandler, UsesContext, UsesResult } from "../runtime/types.ts";
 import { resolveModel, type PiWorkflowsConfig } from "../config/index.ts";
 import { parseAgentUses, loadAgent, buildAgentPrompt, agentOutputs, type AgentRunner } from "./index.ts";
-import { PiAgentRunner } from "./pi-runner.ts";
 import { GuestPiRunner } from "./guest-pi-runner.ts";
 
 export interface AgentUsesHandlerOptions {
@@ -19,9 +18,8 @@ export interface AgentUsesHandlerOptions {
   config?: PiWorkflowsConfig;
   /**
    * Force a specific runner (tests inject a mock so no inference happens). When
-   * omitted, the runner is chosen per step by where the job runs: an in-guest
-   * `GuestPiRunner` for a sandboxed job (`runs-on: gondolin`), the host
-   * `PiAgentRunner` for `runs-on: local`.
+   * omitted, the agent runs in-guest via `GuestPiRunner` — every job is a
+   * gondolin sandbox, so there is no host-side runner.
    */
   runner?: AgentRunner;
   /**
@@ -37,21 +35,18 @@ const TRUNCATION_WARNING =
 
 /**
  * Pick the runner for a step. An explicitly injected runner always wins (tests).
- * Otherwise the runner follows `runs-on`: a sandboxed job runs the agent
- * **inside the guest** (`GuestPiRunner` over `ctx.exec`), `local` runs it
- * host-side (`PiAgentRunner`) — exactly mirroring how `run:` steps are placed.
+ * Otherwise the agent runs **inside the job's guest** via `GuestPiRunner` (over
+ * `ctx.exec`) — every job is a gondolin sandbox, so the agent loop never touches
+ * the host, exactly like a `run:` step.
  */
 function selectRunner(opts: AgentUsesHandlerOptions, ctx: UsesContext): AgentRunner {
   if (opts.runner) return opts.runner;
-  if (ctx.sandboxed) {
-    return new GuestPiRunner({
-      exec: ctx.exec,
-      hostDir: ctx.workdir,
-      guestDir: ctx.workspacePath,
-      emit: (c) => ctx.emit(c),
-    });
-  }
-  return new PiAgentRunner();
+  return new GuestPiRunner({
+    exec: ctx.exec,
+    hostDir: ctx.workdir,
+    guestDir: ctx.workspacePath,
+    emit: (c) => ctx.emit(c),
+  });
 }
 
 /** Build the `uses: agent/<name>` handler. */

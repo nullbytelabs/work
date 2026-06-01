@@ -151,14 +151,14 @@ describe("pipeline — parallelism & skip semantics", () => {
 name: outputs
 jobs:
   produce:
-    runs-on: local
+    runs-on: gondolin
     outputs:
       msg: \${{ steps.gen.outputs.msg }}
     steps:
       - id: gen
         run: printf 'msg=%s\\n' "hello-from-upstream" >> "$PI_OUTPUT"
   consume:
-    runs-on: local
+    runs-on: gondolin
     needs: [produce]
     steps:
       - env:
@@ -174,7 +174,7 @@ jobs:
 name: trunc
 jobs:
   go:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - id: sum
         uses: agent/summarize
@@ -198,7 +198,7 @@ jobs:
 name: f
 jobs:
   go:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - id: s
         uses: agent/summarize
@@ -224,7 +224,7 @@ jobs:
 name: agent
 jobs:
   go:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - id: sum
         uses: agent/summarize
@@ -265,7 +265,7 @@ describe("project layout (.workflows/): checkout is the project root", () => {
 name: layout
 jobs:
   go:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - name: checkout is the project root
         run: |

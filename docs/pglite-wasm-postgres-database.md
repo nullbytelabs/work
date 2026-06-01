@@ -168,7 +168,7 @@ Think of the Postgres provider as a tier the engine selects, mirroring the `runs
 | **Embedded / dev / CI** | **PGLite** (`memory://` or local disk) | single in-process consumer | local development, fast hermetic tests (one fresh DB per test via prepopulated FS), demos, single-tenant/edge/local-first installs, "laptop mode" |
 | **Production** | server Postgres (or Supabase/RDS/Neon) | many runner processes, real `pgmq` + `pg_partman` | multi-runner `runs-on` pools, partitioned high-volume fan-out, DB-side scheduling |
 
-PGLite's specific wins for the embedded tier: zero-setup (no server to run), **in-memory mode** for ephemeral CI runs, **disk mode** (`NodeFS`) for a persistent single-node install, **prepopulated FS** to ship the engine's schema (Absurd + pgmq SQL pre-seeded) so a fresh instance skips `initdb` and migrations, and a clean Drizzle integration for the engine's own tables. A workflow author running `runs-on: local` on a laptop pairs naturally with a PGLite-on-disk backend — the whole engine + one worker in a single Node process.
+PGLite's specific wins for the embedded tier: zero-setup (no server to run), **in-memory mode** for ephemeral CI runs, **disk mode** (`NodeFS`) for a persistent single-node install, **prepopulated FS** to ship the engine's schema (Absurd + pgmq SQL pre-seeded) so a fresh instance skips `initdb` and migrations, and a clean Drizzle integration for the engine's own tables. A single-host install — the whole engine plus one worker in a single Node process — pairs naturally with a PGLite-on-disk backend.
 
 ## Spike result — Absurd on PGLite (VERIFIED 2026-05-31)
 

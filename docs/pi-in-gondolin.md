@@ -16,8 +16,9 @@
 > `GuestPiRunner` (`src/agent/guest-pi-runner.ts`) — it stages a request on the
 > shared mount, `npm install`s Pi in-guest, runs the Pi SDK there, and reads the
 > result back (§6b). Model egress is allowlisted and the key injected host-side
-> by `makeAgentEgressResolver` (`src/agent/egress.ts`, §5a). `runs-on: local`
-> keeps the host `PiAgentRunner`. The notes below remain the rationale of record.
+> by `makeAgentEgressResolver` (`src/agent/egress.ts`, §5a). Every job runs in the
+> sandbox — `runs-on: local` has since been removed — so the agent always runs
+> in-guest. The notes below remain the rationale of record.
 >
 > Still validated against a real Pi-equipped run, not in unit tests: NODE's MITM
 > CA trust (§5a) and localhost-LiteLLM egress (§5a) — see the open questions.
@@ -64,12 +65,12 @@ const res = await handler.run({
 });
 ```
 
-`UsesContext.runsOn` is carried (`src/runtime/types.ts`) but the agent handler
-ignores it. `createAgentUsesHandler` (`src/agent/uses-handler.ts`) defaults the
-runner to `new PiAgentRunner()` and calls `runner.run({ system, prompt, model })`.
-`PiAgentRunner` (`src/agent/pi-runner.ts`) dynamic-imports the Pi SDK and calls
-`createAgentSession({ cwd: process.cwd(), noTools: "all", … })` / `session.prompt(…)`
-**in the host Node process**. No VM, no `target.run`, no sandbox boundary.
+**Originally** the agent handler ignored `UsesContext.runsOn`:
+`createAgentUsesHandler` (`src/agent/uses-handler.ts`) defaulted to a host-side
+`PiAgentRunner` that dynamic-imported the Pi SDK and ran `createAgentSession(…)`
+/ `session.prompt(…)` **in the host Node process** — no VM, no `target.run`, no
+sandbox boundary. That host runner has since been removed (see the Status
+banner); `GuestPiRunner` now runs the agent in-guest for every job.
 
 ### 1b. Why this breaks the security model
 
@@ -84,10 +85,9 @@ A `uses: agent` step is an LLM-driven loop. Today it runs host-side with:
 - **the host's secrets** — the model API key sits in the host process env, and any
   host-side tool the agent runs can read it.
 
-This is the same footgun the project already calls out for `runs-on: local`
-(`agent-uses-interface.md` §7: *"an agent declaring `bash`/`write`/`edit` and
-running on `runs-on: local` executes on the host with no isolation"*) — except
-here it happens **even when the author asked for `gondolin`**. The sandbox is
+This is the same class of footgun the project once had for `runs-on: local`
+(host execution with no isolation) — the reason that mode was removed entirely —
+except here it happened **even when the author asked for `gondolin`**. The sandbox is
 provisioned for the job and then bypassed for its agent step. It is recorded as
 open question #6 in [`agent-uses-interface.md`](agent-uses-interface.md) (*"Agent
 inside VM vs host"*) and the **UNVERIFIED** note in
@@ -96,11 +96,11 @@ the direction.
 
 ### 1c. Goal
 
-When `runs-on` is a sandbox (`gondolin` / `gondolin:<variant>`), the **entire Pi
-agent loop — model calls and tool execution — must run inside the guest**, with
-the model API reached only through Gondolin's mediated egress and the API key
-never present in the guest. `runs-on: local` keeps the host-side runner (it has
-already opted out of isolation).
+The job's target is always a sandbox (`gondolin` / `gondolin:<variant>`), so the
+**entire Pi agent loop — model calls and tool execution — must run inside the
+guest**, with the model API reached only through Gondolin's mediated egress and
+the API key never present in the guest. (There is no host-execution mode —
+`runs-on: local` was removed — so this holds for every job.)
 
 ---
 
@@ -125,7 +125,7 @@ inside a Gondolin sandbox."* Relevant hermetic knobs: `PI_OFFLINE=1` / `--offlin
 disables startup network ops; `PI_SKIP_VERSION_CHECK=1` skips the update probe
 ([`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md) §11).
 
-The current `PiAgentRunner` already speaks Pi via the SDK; the work here is about
+The original `PiAgentRunner` already spoke Pi via the SDK; the work was about
 **where that process lives**, not re-integrating Pi.
 
 ## 3. What Gondolin gives us to work with
@@ -353,10 +353,11 @@ Output capture is therefore uniform across targets.
 
 ## 6. Recommendation & implementation sketch
 
-**Recommend Option B** (one-shot Pi subprocess in-guest via `target.run`),
-behind the existing `runs-on` switch: `gondolin*` → in-guest runner; `local` →
-today's host `PiAgentRunner`. Evolve toward Option A only if/when in-step
-multi-turn or streaming becomes a requirement. Reject Option C as the default.
+**Recommend Option B** (one-shot Pi subprocess in-guest via `target.run`). This
+shipped for every job; the host `PiAgentRunner` and `runs-on: local` were since
+removed entirely, so there is no host-side runner to fall back to. Evolve toward
+Option A only if/when in-step multi-turn or streaming becomes a requirement.
+Reject Option C as the default.
 
 This requires giving the `uses` handler access to the job's execution target —
 the one seam deliberately missing today (§1a). Two coordinated changes.
@@ -403,7 +404,7 @@ async function runUsesStep(step, job, target, workdir, deps, expr) {   // ← ad
 ```
 
 This is a contract change to `UsesHandler`/`UsesContext` only; the runtime core
-still imports no agent code, and `LocalTarget`/`GondolinTarget` are unchanged.
+still imports no agent code, and `GondolinTarget` is unchanged.
 
 ### 6b. Add a sandbox-aware agent runner
 

@@ -34,8 +34,7 @@ rates, and want different review:
    unversioned, un-reusable. Two workflows that both want "the review agent"
    copy-paste and drift.
 2. **Capability** (`tools`) — an arbitrary list with no validation that the
-   tools are coherent or safe for the `runs-on` target (`bash` on `runs-on:
-   local` executes on the host).
+   declared tools are even available or coherent for the `runs-on` target.
 3. **Ops/cost** (`model`) — a deployment knob that legitimately varies per
    environment, mixed into the same block as behavior.
 4. **Everything Pi can actually do** (extensions, skills, thinking level,
@@ -240,25 +239,28 @@ pending; content-hash-of-dir is the proposal.)*
 
 ## 7. Capability ∩ target: tools must agree with `runs-on`
 
-An agent declaring `bash`/`write`/`edit` and running on `runs-on: local`
-executes on the host with no isolation. The engine must compute:
+Host execution (`runs-on: local`) — where `bash`/`write`/`edit` ran on the host
+with no isolation — was removed for exactly this reason. The principle still
+applies across sandbox variants (`gondolin` today, future `gondolin:<variant>`
+images with narrower policies): the engine should compute
 
 ```
 effective_tools = agent.tools ∩ target.allowed_tools
 ```
 
 and **error** when the agent requires a tool the target forbids, rather than
-silently dropping it (a silently de-fanged agent is a correctness bug). Rough
-target policy (refine against the Gondolin doc):
+silently dropping it (a silently de-fanged agent is a correctness bug). The
+default `gondolin` policy is permissive because the VM is the isolation boundary:
 
-| Tool | `runs-on: local` | `runs-on: gondolin` |
-|---|---|---|
-| `read`, `grep`, `find`, `ls` | allow | allow |
-| `edit`, `write` | warn / opt-in | allow (VM-isolated) |
-| `bash` | deny by default | allow (VM-isolated, deny-by-default net) |
+| Tool | `runs-on: gondolin` (default) |
+|---|---|
+| `read`, `grep`, `find`, `ls` | allow |
+| `edit`, `write` | allow (VM-isolated) |
+| `bash` | allow (VM-isolated, deny-by-default net) |
 
-This makes Gondolin the natural home for any shell-capable agent and gives a
-clear, early error instead of a surprising runtime footgun. (Target capabilities:
+A future restricted variant could narrow this (e.g. a read-only image); the
+intersection logic is what would enforce it, with a clear, early error instead of
+a surprising runtime footgun. (Target capabilities:
 [`gondolin-secure-execution.md`](gondolin-secure-execution.md).)
 
 ## 8. Outputs

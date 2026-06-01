@@ -2,8 +2,9 @@
 
 Goal: run the `hello-world` examples end-to-end through real architectural seams,
 without committing to the durability backbone still under research
-(Absurd-on-PGLite). The local target needs no external infrastructure; the
-Gondolin target adds a real micro-VM behind the same interface.
+(Absurd-on-PGLite). The Gondolin target runs each job in a real micro-VM behind
+the `ExecutionTarget` interface; tests drive a lightweight host-process double
+through that same interface.
 
 ## What's here
 
@@ -11,7 +12,7 @@ Gondolin target adds a real micro-VM behind the same interface.
 src/
 ├── spec/        # YAML -> WorkflowSpec types, parser, validation
 ├── compiler/    # WorkflowSpec -> ExecutionPlan (env layering, needs topo-sort)
-├── targets/     # ExecutionTarget: LocalTarget (host) + GondolinTarget (micro-VM)
+├── targets/     # ExecutionTarget: GondolinTarget (micro-VM) — the only target
 ├── runtime/     # Runtime interface + AbsurdRuntime (Absurd + PGLite) + vendored schema.sql
 ├── errors.ts    # UserFacingError (clean CLI messages vs. unexpected stack traces)
 └── cli.ts       # read -> parse -> compile -> run
@@ -25,7 +26,7 @@ fills each with its simplest honest implementation:
 | spec | "what to run" | full parse + validation of `name`/`inputs`/`env`/`jobs`/`steps`; `needs`/`runs-on` acted on; `uses`/`if` modeled but rejected at parse/compile |
 | compiler | "spec → task graph" | runtime-agnostic `ExecutionPlan`: env layering, default `runs-on`, stable step names, deterministic topo order |
 | runtime | "how durably" | `AbsurdRuntime` on Absurd + in-process PGLite; steps are durable `ctx.step` checkpoints (memoized across retries) |
-| targets | "where" (`runs-on`) | `LocalTarget` (host process) and `GondolinTarget` (secure micro-VM, optional dep loaded lazily) |
+| targets | "where" (`runs-on`) | `GondolinTarget` (secure micro-VM, optional dep loaded lazily) — every job runs in the sandbox; `runs-on: local` is rejected |
 
 Runs on Node's native TypeScript support — no build step and no native-binary
 dependencies, so the same `node_modules` works across platforms.
@@ -95,7 +96,7 @@ in the shell — see `test/e2e/with-inputs/`.
 
 - `spec.test.ts` — parse + validation (errors carry a path; env coercion; misplaced `runs-on`)
 - `compiler.test.ts` — env layering, default/override `runs-on`, step naming, topo order, cycle detection
-- `targets.test.ts` — LocalTarget exec/exit/env/streaming; factory target selection
+- `targets.test.ts` — the host-process test double (exec/exit/env/streaming); factory target selection + `runs-on: local` rejection
 - `integration.test.ts` — parse→compile→run on inline workflows; failure/skip semantics; needs ordering
 - `examples.test.ts` — runs every local workflow in `test/e2e/` end-to-end (the examples double as e2e fixtures)
 - `gondolin.test.ts` — GondolinTarget unit checks + an opt-in VM smoke test
@@ -240,8 +241,7 @@ package is loaded from disk through an `AgentRunner` seam. The **default runner
 is the Pi coding-agent SDK** (`@earendil-works/pi-coding-agent`, an optional
 dependency loaded lazily; needs Node ≥ 22.19): it registers an OpenAI-compatible
 provider in memory and drives `session.prompt()`, which resolves only after the
-full run **including retries**. A dependency-free `OpenAiAgentRunner` (one
-`fetch`) is a lighter fallback behind the same seam. The result is exposed as
+full run **including retries**. The result is exposed as
 `steps.<id>.outputs.summary`; a `length` finish adds a truncation warning. The
 runner is injectable, so tests use a mock and never call inference. (Tool-using
 agents, `runs-on` tool∩target enforcement, and `@ref`/override paths are next —

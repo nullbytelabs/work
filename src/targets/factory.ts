@@ -1,14 +1,19 @@
 /**
  * Resolve a `runs-on` value to a concrete ExecutionTarget.
  *
- *   local    -> LocalTarget   (host child process; fast, no isolation)
  *   gondolin -> GondolinTarget (secure micro-VM; lazily loads the optional SDK)
  *
- * Construction is cheap and side-effect-free for both targets — GondolinTarget
- * does not import or boot anything until `provision()` is called.
+ * Gondolin is the only execution target: every job runs in the sandbox. There is
+ * deliberately no host-execution target — running a step directly on the host
+ * would defeat the isolation the engine exists to provide. (Tests inject a
+ * lightweight `ExecutionTarget` double via the runtime's `makeTarget` hook to
+ * exercise the contract without booting a VM; that double lives in test code and
+ * is never reachable from a workflow.)
+ *
+ * Construction is cheap and side-effect-free — GondolinTarget does not import or
+ * boot anything until `provision()` is called.
  */
 import type { ExecutionTarget } from "./types.ts";
-import { LocalTarget } from "./local.ts";
 import { GondolinTarget } from "./gondolin.ts";
 
 export interface TargetContext {
@@ -22,10 +27,12 @@ export interface TargetContext {
   secrets?: Record<string, { hosts: string[]; value: string }>;
 }
 
-export function makeTarget(runsOn: string, ctx: TargetContext): ExecutionTarget {
+/** Builds the ExecutionTarget for a job's `runs-on`. The runtime accepts an
+ *  override of this (e.g. tests inject a host-process double) via its options. */
+export type TargetFactory = (runsOn: string, ctx: TargetContext) => ExecutionTarget;
+
+export const makeTarget: TargetFactory = (runsOn, ctx) => {
   switch (runsOn) {
-    case "local":
-      return new LocalTarget(ctx.workdir);
     case "gondolin":
       return new GondolinTarget({
         workdir: ctx.workdir,
@@ -34,6 +41,6 @@ export function makeTarget(runsOn: string, ctx: TargetContext): ExecutionTarget 
         ...(ctx.secrets ? { secrets: ctx.secrets } : {}),
       });
     default:
-      throw new Error(`unknown runs-on: "${runsOn}" (supported: "local", "gondolin")`);
+      throw new Error(`unknown runs-on: "${runsOn}" (the only supported target is "gondolin")`);
   }
-}
+};

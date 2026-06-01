@@ -3,15 +3,19 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LocalTarget, makeTarget } from "../src/targets/index.ts";
+import { makeTarget } from "../src/targets/index.ts";
+import { HostTarget } from "./_support.ts";
 
-describe("LocalTarget", () => {
+// HostTarget is the test-only ExecutionTarget double (host child processes) that
+// component/integration suites inject so they exercise the runtime↔target
+// contract without a VM. Verify it honors that contract here.
+describe("HostTarget (test contract double)", () => {
   let workdir: string;
-  let target: LocalTarget;
+  let target: HostTarget;
 
   before(async () => {
     workdir = await mkdtemp(join(tmpdir(), "pi-wf-test-"));
-    target = new LocalTarget(workdir);
+    target = new HostTarget(workdir);
     await target.provision();
   });
 
@@ -63,14 +67,13 @@ describe("LocalTarget", () => {
 });
 
 describe("makeTarget factory", () => {
-  it("returns a LocalTarget for runs-on local", () => {
-    const t = makeTarget("local", { workdir: "/tmp/x" });
-    assert.equal(t.kind, "local");
-  });
-
   it("returns a GondolinTarget for runs-on gondolin (without loading the SDK)", () => {
     const t = makeTarget("gondolin", { workdir: "/tmp/x" });
     assert.equal(t.kind, "gondolin");
+  });
+
+  it("rejects runs-on local (the host target was removed — no foot-gun)", () => {
+    assert.throws(() => makeTarget("local", { workdir: "/tmp/x" }), /only supported target is "gondolin"/);
   });
 
   it("rejects an unknown runs-on", () => {

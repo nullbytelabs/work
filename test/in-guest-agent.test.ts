@@ -14,6 +14,7 @@ import {
   type UsesContext,
 } from "../src/runtime/index.ts";
 import { GuestPiRunner, GUEST_MODEL_KEY_ENV, makeAgentEgressResolver } from "../src/agent/index.ts";
+import { hostTargetFactory } from "./_support.ts";
 
 // --- The seam: a uses step runs through the job's target -----------------------
 
@@ -29,7 +30,7 @@ describe("uses steps inherit runs-on (the exec/sandboxed seam)", () => {
       scheme: "probe",
       async run(ctx: UsesContext) {
         seenSandboxed = ctx.sandboxed;
-        // exec runs in the job's environment — here the local host.
+        // exec runs in the job's environment (a host-process double in this test).
         const r = await ctx.exec("echo from-target");
         execStdout = r.stdout.trim();
         return { status: "success", outputs: { via: execStdout } };
@@ -41,7 +42,7 @@ describe("uses steps inherit runs-on (the exec/sandboxed seam)", () => {
 name: u
 jobs:
   go:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - id: p
         uses: probe/thing
@@ -52,12 +53,12 @@ jobs:
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-seam-"));
     let output = "";
     try {
-      const result = await new AbsurdRuntime({ engine, usesHandlers: [probe] }).run(plan, {
+      const result = await new AbsurdRuntime({ engine, usesHandlers: [probe], makeTarget: hostTargetFactory }).run(plan, {
         workRoot,
         hooks: { onOutput: (_j, _s, c) => (output += c.text) },
       });
       assert.equal(result.status, "success");
-      assert.equal(seenSandboxed, false); // local is not a sandbox
+      assert.equal(seenSandboxed, true); // every job is sandboxed (gondolin)
       assert.equal(execStdout, "from-target");
       assert.match(output, /got=from-target/);
     } finally {
@@ -183,19 +184,17 @@ jobs:
     });
   });
 
-  it("returns undefined for local jobs, agent-free jobs, and when there is no config", () => {
+  it("returns undefined for agent-free jobs and when there is no config", () => {
     const resolveWith = makeAgentEgressResolver(config);
     const resolveNoCfg = makeAgentEgressResolver(undefined);
 
-    const localPlan = compile(
-      parseWorkflow(`name: w\njobs:\n  go:\n    runs-on: local\n    steps: [{ uses: agent/summarize }]`),
-    );
     const noAgentPlan = compile(
       parseWorkflow(`name: w\njobs:\n  go:\n    runs-on: gondolin\n    steps: [{ run: "true" }]`),
     );
 
-    assert.equal(resolveWith(localPlan.jobs["go"]!), undefined);
+    // No agent steps in the job → no mediated egress needed.
     assert.equal(resolveWith(noAgentPlan.jobs["go"]!), undefined);
+    // No config at all → nothing to allowlist or inject.
     assert.equal(resolveNoCfg(gondolinAgentPlan().jobs["review"]!), undefined);
   });
 });

@@ -28,13 +28,11 @@ jobs:
 
 ## Requirements
 
-- **Node.js ≥ 23.6** — required by the default `gondolin` sandbox, and runs the engine's TypeScript directly with no build step. (The engine itself works back to 22.6, but only the deprecated `runs-on: local` runs there.)
-- **QEMU**, for the `gondolin` sandbox. macOS works out of the box; Linux needs KVM. Install with `brew install qemu` (macOS) or `apt-get install qemu-system-x86 qemu-utils` (Linux).
+- **Node.js ≥ 23.6** — runs the engine's TypeScript directly, with no build step.
+- **QEMU** — every job runs in the `gondolin` micro-VM (there is no host-execution mode), so QEMU is required. macOS works out of the box; Linux needs KVM. Install with `brew install qemu` (macOS) or `apt-get install qemu-system-x86 qemu-utils` (Linux).
 - macOS or Linux.
 
 > The first sandboxed run downloads a ~200 MB guest image (cached afterward). The guest ships `sh`, `bash`, `node`, `npm`, and `python3`, so your steps run without any host toolchain.
-
-If you can't run QEMU, jobs can fall back to `runs-on: local` (host process, no isolation) — but it's **deprecated** and the engine will warn.
 
 ## Install
 
@@ -98,7 +96,7 @@ The building blocks:
 | Feature | How |
 |---|---|
 | **Jobs & steps** | `jobs:` → named jobs, each with ordered `steps:`. A step is a `run:` command or a `uses:` agent. |
-| **`runs-on`** | `gondolin` (default, micro-VM) or `local` (deprecated). Set it per job. |
+| **`runs-on`** | `gondolin` — every job runs in a micro-VM (the only target, and the default; state it explicitly per job). |
 | **`needs`** | `needs: [build]` — a job waits for its dependencies. Independent jobs run **in parallel**. |
 | **`env`** | declared at workflow, job, or step level; inner scopes override outer. |
 | **Inputs** | `inputs:` declares typed params (`string`/`number`/`boolean`, with `required`/`default`/`options`/`pattern`). Pass at run time with `--inputs '{"name":"josh"}'`, read via `${{ inputs.name }}`. |
@@ -212,7 +210,7 @@ The agent's final message becomes the step's declared output (e.g. `steps.summar
 
 ## How it works
 
-Under the hood, a workflow compiles to a graph of durable tasks: each **job** is an [Absurd](https://www.npmjs.com/package/absurd-sdk) task and each **step** is a checkpoint, journaled to an in-process Postgres ([PGLite](https://www.npmjs.com/package/@electric-sql/pglite)) — no external services. The `needs` DAG drives parallel scheduling; each job runs on an execution target ([Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin) micro-VM or local), and agent steps invoke Pi inside that target.
+Under the hood, a workflow compiles to a graph of durable tasks: each **job** is an [Absurd](https://www.npmjs.com/package/absurd-sdk) task and each **step** is a checkpoint, journaled to an in-process Postgres ([PGLite](https://www.npmjs.com/package/@electric-sql/pglite)) — no external services. The `needs` DAG drives parallel scheduling; every job runs in a [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin) micro-VM, and agent steps invoke Pi inside that sandbox.
 
 The deep dives live in [`docs/`](docs/): [`phase-1.md`](docs/phase-1.md) (what's built + internals), [`absurd-durable-workflows.md`](docs/absurd-durable-workflows.md), [`gondolin-secure-execution.md`](docs/gondolin-secure-execution.md), [`pi-in-gondolin.md`](docs/pi-in-gondolin.md), and [`agent-uses-interface.md`](docs/agent-uses-interface.md).
 

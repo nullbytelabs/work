@@ -33,17 +33,33 @@ export interface CompileOptions {
 export const DEFAULT_RUNS_ON = "gondolin";
 
 /**
- * Warn when a job doesn't explicitly opt into the sandbox. `runs-on: local` is
- * deprecated (host execution, no isolation); an omitted `runs-on` silently
- * defaults to gondolin, which we'd rather have authors state outright. Returns a
- * warning string for the job, or undefined when `runs-on: gondolin` is explicit.
+ * Validate a job's `runs-on`. `gondolin` is the only supported target — every
+ * job runs in the sandbox. `runs-on: local` (host execution) has been removed
+ * outright: allowing it would let a workflow run a step on the host, defeating
+ * the isolation the engine exists to provide, so it's a hard error rather than a
+ * silent footgun. Any other value is rejected too. Throws on an invalid value.
+ */
+function validateRunsOn(jobId: string, runsOn: string | undefined): void {
+  if (runsOn === undefined || runsOn === DEFAULT_RUNS_ON) return;
+  if (runsOn === "local") {
+    throw new WorkflowCompileError(
+      `job "${jobId}": "runs-on: local" has been removed — every job runs in the gondolin sandbox. ` +
+        `Drop the line (gondolin is the default) or set "runs-on: gondolin".`,
+    );
+  }
+  throw new WorkflowCompileError(
+    `job "${jobId}": unknown runs-on "${runsOn}" (the only supported target is "gondolin").`,
+  );
+}
+
+/**
+ * Nudge authors to state the sandbox outright: an omitted `runs-on` defaults to
+ * gondolin, which we'd rather have written explicitly. Returns a warning string
+ * for an implicit `runs-on`, or undefined when it's explicit.
  */
 function runsOnWarning(jobId: string, runsOn: string | undefined): string | undefined {
   if (runsOn === undefined) {
     return `job "${jobId}": no "runs-on" set — defaulting to "${DEFAULT_RUNS_ON}". Set "runs-on: gondolin" explicitly.`;
-  }
-  if (runsOn === "local") {
-    return `job "${jobId}": "runs-on: local" is deprecated — use "runs-on: gondolin".`;
   }
   return undefined;
 }
@@ -204,6 +220,7 @@ export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): Executio
   const jobs: Record<string, PlannedJob> = {};
   const warnings: string[] = [];
   for (const [jobId, job] of Object.entries(spec.jobs)) {
+    validateRunsOn(jobId, job.runsOn);
     const w = runsOnWarning(jobId, job.runsOn);
     if (w) warnings.push(w);
     const needs = (job.needs ?? []).flatMap(legsOf);
