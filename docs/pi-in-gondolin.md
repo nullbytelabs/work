@@ -10,8 +10,17 @@
 > sources, and flagged **UNVERIFIED — needs confirmation** where the sources don't
 > settle it. Builds on the code-path trace recorded below. Date: 2026-05-31.
 >
-> Status: **research / design sketch — no code change.** This doc records the
-> options and a recommendation; it does not implement anything.
+> Status: **IMPLEMENTED (Option B).** Agent `uses:` steps now execute inside the
+> job's target: the runtime hands the handler an `exec`/`sandboxed`/`workspacePath`
+> bound to the target (§6a), and a sandboxed job runs the agent in-guest via
+> `GuestPiRunner` (`src/agent/guest-pi-runner.ts`) — it stages a request on the
+> shared mount, `npm install`s Pi in-guest, runs the Pi SDK there, and reads the
+> result back (§6b). Model egress is allowlisted and the key injected host-side
+> by `makeAgentEgressResolver` (`src/agent/egress.ts`, §5a). `runs-on: local`
+> keeps the host `PiAgentRunner`. The notes below remain the rationale of record.
+>
+> Still validated against a real Pi-equipped run, not in unit tests: NODE's MITM
+> CA trust (§5a) and localhost-LiteLLM egress (§5a) — see the open questions.
 
 ---
 

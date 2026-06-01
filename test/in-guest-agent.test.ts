@@ -1,0 +1,197 @@
+import { describe, it, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseWorkflow } from "../src/spec/index.ts";
+import { compile } from "../src/compiler/index.ts";
+import { parseConfig } from "../src/config/index.ts";
+import {
+  AbsurdRuntime,
+  createAbsurdEngine,
+  type AbsurdEngine,
+  type UsesHandler,
+  type UsesContext,
+} from "../src/runtime/index.ts";
+import { GuestPiRunner, GUEST_MODEL_KEY_ENV, makeAgentEgressResolver } from "../src/agent/index.ts";
+
+// --- The seam: a uses step runs through the job's target -----------------------
+
+describe("uses steps inherit runs-on (the exec/sandboxed seam)", () => {
+  let engine: AbsurdEngine;
+  before(async () => (engine = await createAbsurdEngine()));
+  after(async () => await engine.close());
+
+  it("hands the handler a sandboxed flag and an exec bound to the job target", async () => {
+    let seenSandboxed: boolean | undefined;
+    let execStdout = "";
+    const probe: UsesHandler = {
+      scheme: "probe",
+      async run(ctx: UsesContext) {
+        seenSandboxed = ctx.sandboxed;
+        // exec runs in the job's environment — here the local host.
+        const r = await ctx.exec("echo from-target");
+        execStdout = r.stdout.trim();
+        return { status: "success", outputs: { via: execStdout } };
+      },
+    };
+
+    const plan = compile(
+      parseWorkflow(`
+name: u
+jobs:
+  go:
+    runs-on: local
+    steps:
+      - id: p
+        uses: probe/thing
+      - env: { V: "\${{ steps.p.outputs.via }}" }
+        run: echo "got=$V"
+`),
+    );
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-seam-"));
+    let output = "";
+    try {
+      const result = await new AbsurdRuntime({ engine, usesHandlers: [probe] }).run(plan, {
+        workRoot,
+        hooks: { onOutput: (_j, _s, c) => (output += c.text) },
+      });
+      assert.equal(result.status, "success");
+      assert.equal(seenSandboxed, false); // local is not a sandbox
+      assert.equal(execStdout, "from-target");
+      assert.match(output, /got=from-target/);
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- GuestPiRunner: host-side orchestration (no VM needed) ----------------------
+
+describe("GuestPiRunner", () => {
+  it("installs Pi in-guest, runs the wrapper, and returns the result", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
+    const commands: string[] = [];
+    // Fake guest exec: record commands; npm install no-ops; the wrapper writes a result.
+    const exec = async (command: string) => {
+      commands.push(command);
+      const m = /guest-runner\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+      if (m) {
+        const resHost = (m[2] as string).replace(`${dir}/`, `${dir}/`); // guestDir==hostDir==dir here
+        const { writeFile } = await import("node:fs/promises");
+        await writeFile(resHost, JSON.stringify({ text: "GUEST RESULT", finishReason: "stop" }));
+      }
+      return { exitCode: 0, stdout: "", stderr: "", ok: true };
+    };
+
+    const runner = new GuestPiRunner({ exec, hostDir: dir, guestDir: dir });
+    const res = await runner.run({
+      system: "sys",
+      prompt: "hi",
+      model: { baseUrl: "https://model.example.com/v1", apiKey: "SECRET", model: "m" },
+    });
+
+    assert.equal(res.text, "GUEST RESULT");
+    assert.equal(res.finishReason, "stop");
+    // It installed the Pi package, then ran the wrapper.
+    assert.ok(commands.some((c) => /npm install .*@earendil-works\/pi-coding-agent/.test(c)), "should npm install Pi");
+    assert.ok(commands.some((c) => /node .*guest-runner\.mjs/.test(c)), "should run the wrapper");
+
+    // The staged request must NOT contain the API key (it crosses via header injection).
+    const stage = join(dir, ".pi-agent");
+    const files = await readdir(stage);
+    // request file was cleaned up after a successful run; the wrapper persists.
+    assert.ok(files.includes("guest-runner.mjs"));
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("never writes the API key into the staged request file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
+    let capturedReq = "";
+    const exec = async (command: string) => {
+      const m = /guest-runner\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+      if (m) {
+        capturedReq = await readFile(m[1] as string, "utf-8");
+        const { writeFile } = await import("node:fs/promises");
+        await writeFile(m[2] as string, JSON.stringify({ text: "ok" }));
+      }
+      return { exitCode: 0, stdout: "", stderr: "", ok: true };
+    };
+    const runner = new GuestPiRunner({ exec, hostDir: dir, guestDir: dir });
+    await runner.run({
+      system: "s",
+      prompt: "p",
+      model: { baseUrl: "https://model.example.com/v1", apiKey: "SUPER-SECRET-KEY", model: "m" },
+    });
+    assert.doesNotMatch(capturedReq, /SUPER-SECRET-KEY/, "request file must not leak the key");
+    assert.match(capturedReq, new RegExp(GUEST_MODEL_KEY_ENV), "request names the key env var instead");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("fails clearly when the in-guest install fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
+    const exec = async (command: string) => {
+      if (/npm install/.test(command)) return { exitCode: 1, stdout: "", stderr: "network down", ok: false };
+      return { exitCode: 0, stdout: "", stderr: "", ok: true };
+    };
+    const runner = new GuestPiRunner({ exec, hostDir: dir, guestDir: dir });
+    await assert.rejects(
+      () =>
+        runner.run({
+          system: "s",
+          prompt: "p",
+          model: { baseUrl: "https://m.example.com/v1", apiKey: "k", model: "m" },
+        }),
+      /failed to install .*pi-coding-agent/,
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+// --- Egress resolver: allowlist model host + inject key ------------------------
+
+describe("makeAgentEgressResolver", () => {
+  const config = parseConfig({
+    providers: { p: { baseUrl: "https://api.model.test/v1", apiKey: "the-real-key" } },
+    models: { default: { provider: "p", model: "m1" } },
+    defaultModel: "default",
+  });
+
+  function gondolinAgentPlan() {
+    return compile(
+      parseWorkflow(`
+name: w
+jobs:
+  review:
+    runs-on: gondolin
+    steps:
+      - uses: agent/summarize
+`),
+    );
+  }
+
+  it("allowlists the model host and injects the key under the guest env var", () => {
+    const resolve = makeAgentEgressResolver(config);
+    const net = resolve(gondolinAgentPlan().jobs["review"]!);
+    assert.deepEqual(net?.allowedHosts, ["api.model.test"]);
+    assert.deepEqual(net?.secrets, {
+      [GUEST_MODEL_KEY_ENV]: { hosts: ["api.model.test"], value: "the-real-key" },
+    });
+  });
+
+  it("returns undefined for local jobs, agent-free jobs, and when there is no config", () => {
+    const resolveWith = makeAgentEgressResolver(config);
+    const resolveNoCfg = makeAgentEgressResolver(undefined);
+
+    const localPlan = compile(
+      parseWorkflow(`name: w\njobs:\n  go:\n    runs-on: local\n    steps: [{ uses: agent/summarize }]`),
+    );
+    const noAgentPlan = compile(
+      parseWorkflow(`name: w\njobs:\n  go:\n    runs-on: gondolin\n    steps: [{ run: "true" }]`),
+    );
+
+    assert.equal(resolveWith(localPlan.jobs["go"]!), undefined);
+    assert.equal(resolveWith(noAgentPlan.jobs["go"]!), undefined);
+    assert.equal(resolveNoCfg(gondolinAgentPlan().jobs["review"]!), undefined);
+  });
+});

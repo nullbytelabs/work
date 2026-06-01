@@ -1,0 +1,146 @@
+/**
+ * GuestPiRunner — runs a Pi agent prompt **inside the job's sandbox** (the
+ * gondolin guest), instead of on the host like `PiAgentRunner`.
+ *
+ * This is what makes `uses: agent/*` steps honor `runs-on: gondolin`: the whole
+ * model loop executes in the VM, reaching the model API only through Gondolin's
+ * mediated egress, with the API key injected host-side (it never enters the
+ * guest). The host side here only *stages* a request and *reads back* a result
+ * over the shared `/workspace` mount — so all of it is testable without a VM by
+ * supplying a fake `exec` that writes the result file.
+ *
+ * Mechanics (Option B in docs/pi-in-gondolin.md):
+ *   1. copy the standalone wrapper (`guest-runner-script.mjs`) + a request JSON
+ *      into a private subdir of the shared workspace (host writes, guest reads);
+ *   2. `npm install` the Pi package into that dir in-guest (native deps build
+ *      for the guest platform), then `exec("node <wrapper> <req> <res>")` — Pi
+ *      drives the model call through the allowlisted egress;
+ *   3. read the result JSON back from the host side of the mount.
+ *
+ * The request file carries baseUrl + model id but **never the key**: the wrapper
+ * reads it from `process.env[GUEST_MODEL_KEY_ENV]`, which Gondolin fills with a
+ * placeholder and swaps into the Authorization header for the model host only.
+ */
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { mkdir, readFile, writeFile, rm, copyFile } from "node:fs/promises";
+import { join } from "node:path";
+import { UserFacingError } from "../errors.ts";
+import type { AgentRequest, AgentResult, AgentRunner } from "./index.ts";
+
+/** Env var the in-guest wrapper reads the (placeholder) model key from. The
+ *  composition root injects the real key under this name via Gondolin secrets. */
+export const GUEST_MODEL_KEY_ENV = "PI_WF_MODEL_KEY";
+
+/** Default guest path for Gondolin's MITM CA, so in-guest Node trusts the proxy. */
+const GUEST_CA_PATH = "/etc/gondolin/mitm/ca.crt";
+
+/** The Pi package (+ range) installed into the guest so the wrapper can load it. */
+const PI_PACKAGE = "@earendil-works/pi-coding-agent@^0.78.0";
+
+/** The exec capability + workspace paths a sandboxed handler is handed. */
+export interface GuestPiRunnerDeps {
+  /** Run a command in the guest (the job's target). */
+  exec(
+    command: string,
+    opts?: {
+      env?: Record<string, string>;
+      onOutput?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
+    },
+  ): Promise<{ exitCode: number; stdout: string; stderr: string; ok: boolean }>;
+  /** Host path of the shared workspace (where we write/read staged files). */
+  hostDir: string;
+  /** Guest path of the same workspace (what the `exec`'d command sees). */
+  guestDir: string;
+  /** Stream guest output to the run's hooks. */
+  emit?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
+}
+
+const STAGE_DIR = ".pi-agent";
+
+export class GuestPiRunner implements AgentRunner {
+  private readonly deps: GuestPiRunnerDeps;
+  constructor(deps: GuestPiRunnerDeps) {
+    this.deps = deps;
+  }
+
+  async run(req: AgentRequest): Promise<AgentResult> {
+    if (!req.model) {
+      throw new UserFacingError(
+        "agent step needs a model — provide a config (--config) with providers/models and a defaultModel, or set with.model",
+      );
+    }
+    const { exec, hostDir, guestDir, emit } = this.deps;
+    const id = randomUUID().slice(0, 8);
+    const hostStage = join(hostDir, STAGE_DIR);
+    await mkdir(hostStage, { recursive: true });
+
+    const wrapperSrc = fileURLToPath(new URL("./guest-runner-script.mjs", import.meta.url));
+    const hostWrapper = join(hostStage, "guest-runner.mjs");
+    const hostReq = join(hostStage, `req-${id}.json`);
+    const hostRes = join(hostStage, `res-${id}.json`);
+
+    // Request carries everything EXCEPT the key (which crosses via header injection).
+    const request = {
+      system: req.system,
+      prompt: req.prompt,
+      keyEnv: GUEST_MODEL_KEY_ENV,
+      model: {
+        baseUrl: req.model.baseUrl,
+        model: req.model.model,
+        ...(req.model.maxTokens !== undefined ? { maxTokens: req.model.maxTokens } : {}),
+        ...(req.model.temperature !== undefined ? { temperature: req.model.temperature } : {}),
+      },
+    };
+
+    await copyFile(wrapperSrc, hostWrapper);
+    await writeFile(hostReq, JSON.stringify(request), "utf-8");
+    await rm(hostRes, { force: true });
+
+    // Guest-visible paths (same files via the shared mount).
+    const gStage = `${guestDir}/${STAGE_DIR}`;
+    const gWrapper = `${gStage}/guest-runner.mjs`;
+    const gReq = `${gStage}/req-${id}.json`;
+    const gRes = `${gStage}/res-${id}.json`;
+
+    // Install the Pi package into the guest (idempotent — npm no-ops if present),
+    // so the wrapper resolves it from the staging dir's node_modules. This runs
+    // in-guest, so native deps build for the guest platform.
+    const install = await exec(
+      `npm install --prefix ${gStage} --no-save --no-audit --no-fund ${PI_PACKAGE}`,
+      { ...(emit ? { onOutput: emit } : {}) },
+    );
+    if (!install.ok) {
+      throw new UserFacingError(
+        `failed to install ${PI_PACKAGE} in the sandbox guest (exit ${install.exitCode})` +
+          `${install.stderr ? `: ${install.stderr.slice(0, 300)}` : ""}`,
+      );
+    }
+
+    const run = await exec(`node ${gWrapper} ${gReq} ${gRes}`, {
+      env: { NODE_EXTRA_CA_CERTS: GUEST_CA_PATH, PI_SKIP_VERSION_CHECK: "1" },
+      ...(emit ? { onOutput: emit } : {}),
+    });
+
+    let resultText: string | undefined;
+    try {
+      resultText = await readFile(hostRes, "utf-8");
+    } catch {
+      /* no result file — fall through to the error below */
+    }
+    // Best-effort cleanup of the per-invocation request/result.
+    await rm(hostReq, { force: true });
+    await rm(hostRes, { force: true });
+
+    if (resultText) {
+      const parsed = JSON.parse(resultText) as { text?: string; finishReason?: string; error?: string };
+      if (parsed.error) throw new UserFacingError(`in-guest agent failed: ${parsed.error}`);
+      if (typeof parsed.text === "string") {
+        return parsed.finishReason ? { text: parsed.text, finishReason: parsed.finishReason } : { text: parsed.text };
+      }
+    }
+    throw new UserFacingError(
+      `in-guest agent produced no result (exit ${run.exitCode})${run.stderr ? `: ${run.stderr.slice(0, 300)}` : ""}`,
+    );
+  }
+}

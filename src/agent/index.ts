@@ -45,10 +45,14 @@ export interface AgentRunner {
   run(req: AgentRequest): Promise<AgentResult>;
 }
 
-// The Pi-SDK-backed runner (default; full run + retries via session.prompt).
+// The Pi-SDK-backed runner (host-side; full run + retries via session.prompt).
 export { PiAgentRunner } from "./pi-runner.ts";
+// The in-guest runner (sandboxed jobs) + the env var its model key arrives under.
+export { GuestPiRunner, GUEST_MODEL_KEY_ENV, type GuestPiRunnerDeps } from "./guest-pi-runner.ts";
 // The agent uses-handler — register this with the runtime (composition root).
 export { createAgentUsesHandler, type AgentUsesHandlerOptions } from "./uses-handler.ts";
+// Per-job sandbox egress for agent steps (allowlist model host + inject key).
+export { makeAgentEgressResolver, type AgentJobNetwork } from "./egress.ts";
 
 /** Calls an OpenAI-compatible `/chat/completions` endpoint (Fireworks/LiteLLM/etc.). */
 export class OpenAiAgentRunner implements AgentRunner {

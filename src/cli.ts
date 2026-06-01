@@ -17,7 +17,7 @@ import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { AbsurdRuntime } from "./runtime/index.ts";
 import { loadConfig, type PiWorkflowsConfig } from "./config/index.ts";
-import { createAgentUsesHandler } from "./agent/index.ts";
+import { createAgentUsesHandler, makeAgentEgressResolver } from "./agent/index.ts";
 import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "./project.ts";
 import { selectPresenter, detectCI } from "./tui/index.ts";
 import { emitGraph, isGraphFormat, GRAPH_FORMATS, type GraphFormat } from "./graph/index.ts";
@@ -214,8 +214,14 @@ async function main(): Promise<void> {
   });
   presenter.start(plan);
 
-  // Compose the agent uses-handler into the (agent-agnostic) runtime.
-  const runtime = new AbsurdRuntime({ usesHandlers: [createAgentUsesHandler({ config })] });
+  // Compose the agent uses-handler into the (agent-agnostic) runtime. For
+  // sandboxed jobs, `resolveJobNetwork` allowlists the model host and injects the
+  // API key so an in-guest agent can reach the model without the key entering the
+  // guest.
+  const runtime = new AbsurdRuntime({
+    usesHandlers: [createAgentUsesHandler({ config })],
+    resolveJobNetwork: makeAgentEgressResolver(config),
+  });
   let result;
   try {
     result = await runtime.run(plan, {

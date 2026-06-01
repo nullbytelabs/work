@@ -16,6 +16,10 @@ export interface TargetContext {
   workdir: string;
   /** Non-secret env to apply to the target environment. */
   env?: Record<string, string>;
+  /** Outbound HTTP allowlist for sandbox targets (deny-by-default otherwise). */
+  allowedHosts?: string[];
+  /** Secrets injected into outbound headers host-side only; never seen in-guest. */
+  secrets?: Record<string, { hosts: string[]; value: string }>;
 }
 
 export function makeTarget(runsOn: string, ctx: TargetContext): ExecutionTarget {
@@ -23,7 +27,12 @@ export function makeTarget(runsOn: string, ctx: TargetContext): ExecutionTarget 
     case "local":
       return new LocalTarget(ctx.workdir);
     case "gondolin":
-      return new GondolinTarget({ workdir: ctx.workdir, env: ctx.env });
+      return new GondolinTarget({
+        workdir: ctx.workdir,
+        ...(ctx.env ? { env: ctx.env } : {}),
+        ...(ctx.allowedHosts ? { allowedHosts: ctx.allowedHosts } : {}),
+        ...(ctx.secrets ? { secrets: ctx.secrets } : {}),
+      });
     default:
       throw new Error(`unknown runs-on: "${runsOn}" (supported: "local", "gondolin")`);
   }

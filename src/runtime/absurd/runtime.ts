@@ -56,6 +56,14 @@ function toConditionBags(
   return out;
 }
 
+/** Mediated egress for a job's sandbox target (allowlist + header-only secrets). */
+export interface JobNetwork {
+  /** Outbound HTTP hosts the guest may reach (deny-by-default otherwise). */
+  allowedHosts?: string[];
+  /** Secrets injected into outbound headers host-side only; never seen in-guest. */
+  secrets?: Record<string, { hosts: string[]; value: string }>;
+}
+
 export interface AbsurdRuntimeOptions {
   /** PGLite data dir for persistence; omit for ephemeral in-memory. */
   dataDir?: string;
@@ -66,6 +74,12 @@ export interface AbsurdRuntimeOptions {
   /** Handlers for `uses:` steps, keyed by scheme (e.g. an agent handler). The
    *  core is agent-agnostic; the composition root registers handlers. */
   usesHandlers?: UsesHandler[];
+  /**
+   * Per-job network policy for sandbox targets — the composition root computes
+   * it (e.g. allowlist the model host + inject the API key for a job's agent
+   * steps). The core stays agent-agnostic and just forwards it to the target.
+   */
+  resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
 }
 
 /** Side dependencies captured by the per-job task handler (not serialized). */
@@ -74,6 +88,8 @@ interface JobDeps {
   usesHandlers: UsesHandler[];
   /** Resolved workflow inputs, for `if:` evaluation inside steps. */
   inputs: WorkflowInputs;
+  /** Optional per-job sandbox network policy (allowlist + secrets). */
+  resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
 }
 
 export class AbsurdRuntime implements Runtime {
@@ -83,6 +99,7 @@ export class AbsurdRuntime implements Runtime {
   private readonly dataDir: string | undefined;
   private readonly maxConcurrency: number | undefined;
   private readonly usesHandlers: UsesHandler[];
+  private readonly resolveJobNetwork: ((job: PlannedJob) => JobNetwork | undefined) | undefined;
 
   constructor(opts: AbsurdRuntimeOptions = {}) {
     this.engine = opts.engine ?? null;
@@ -90,6 +107,7 @@ export class AbsurdRuntime implements Runtime {
     this.dataDir = opts.dataDir;
     this.maxConcurrency = opts.maxConcurrency;
     this.usesHandlers = opts.usesHandlers ?? [];
+    this.resolveJobNetwork = opts.resolveJobNetwork;
   }
 
   private async ensureEngine(): Promise<AbsurdEngine> {
@@ -100,7 +118,12 @@ export class AbsurdRuntime implements Runtime {
   async run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult> {
     const { app } = await this.ensureEngine();
     const runId = randomUUID();
-    const deps: JobDeps = { ctx, usesHandlers: this.usesHandlers, inputs: plan.inputs ?? {} };
+    const deps: JobDeps = {
+      ctx,
+      usesHandlers: this.usesHandlers,
+      inputs: plan.inputs ?? {},
+      ...(this.resolveJobNetwork ? { resolveJobNetwork: this.resolveJobNetwork } : {}),
+    };
 
     const jobTaskName = `job:${plan.name}:${runId}`;
     app.registerTask(
@@ -274,7 +297,11 @@ async function runJobInTask(
 
   let target;
   try {
-    target = makeTarget(job.runsOn, { workdir });
+    // A sandbox target may need mediated egress (e.g. an in-guest agent reaching
+    // the model API). The composition root supplies this per job; the core stays
+    // agent-agnostic — it just forwards the allowlist/secrets to the target.
+    const network = deps.resolveJobNetwork?.(job);
+    target = makeTarget(job.runsOn, { workdir, ...(network ?? {}) });
     await target.provision();
   } catch (err) {
     const result: StepResult = {
@@ -345,7 +372,7 @@ async function runJobInTask(
 
       const result = await taskCtx.step<StepResult>(step.name, async () => {
         if (step.uses !== undefined) {
-          return runUsesStep(step, job, workdir, deps, exprCtx());
+          return runUsesStep(step, job, target!, workdir, deps, exprCtx());
         }
         return runShellStep(step, job, target!, workdir, ctx, exprCtx());
       });
@@ -424,10 +451,16 @@ async function runShellStep(
  * A `uses:` step — dispatch to the registered handler for its scheme. The core
  * resolves expressions in `with` (needs/steps) but knows nothing about what the
  * handler does (agents, etc. are composed in from outside).
+ *
+ * The handler receives an `exec` bound to the job's target, so a `uses:` step
+ * runs **where the job runs** (host for `local`, guest VM for `gondolin`) — the
+ * same isolation a `run:` step gets. Output capture / staging uses the shared
+ * `target.workspacePath`, exactly like `runShellStep`.
  */
 async function runUsesStep(
   step: PlannedStep,
   job: PlannedJob,
+  target: NonNullable<Awaited<ReturnType<typeof makeTarget>>>,
   workdir: string,
   deps: JobDeps,
   expr: { needs: NeedsContext; steps: Record<string, OutputBag> },
@@ -462,6 +495,9 @@ async function runUsesStep(
       ...(deps.ctx.workspaceSource ? { projectDir: deps.ctx.workspaceSource } : {}),
       ...(workflowDir ? { workflowDir } : {}),
       runsOn: job.runsOn,
+      sandboxed: job.runsOn !== "local",
+      workspacePath: target.workspacePath,
+      exec: (command, opts) => target.run(command, opts ?? {}),
       emit,
     });
     return {

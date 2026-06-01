@@ -97,6 +97,33 @@ export interface UsesContext {
   workflowDir?: string;
   /** The job's `runs-on` target key. */
   runsOn: string;
+  /**
+   * True when the job runs in an isolated sandbox (any non-`local` target).
+   * A handler uses this to decide whether to execute *inside* the sandbox
+   * (via `exec`) rather than on the host.
+   */
+  sandboxed: boolean;
+  /**
+   * Run a command in the job's execution environment — the host for `local`,
+   * the guest VM for `gondolin`. Mirrors `ExecutionTarget.run`, so a handler can
+   * place work where the job actually runs instead of always on the host. This
+   * is the seam that lets `uses:` steps honor `runs-on` exactly like `run:`
+   * steps (an agent's whole loop executes in the sandbox, not host-side).
+   */
+  exec(
+    command: string,
+    opts?: {
+      env?: Record<string, string>;
+      onOutput?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
+    },
+  ): Promise<{ exitCode: number; stdout: string; stderr: string; ok: boolean }>;
+  /**
+   * The staged workspace path **as a command run via `exec` sees it** — the host
+   * `workdir` for `local`, the `/workspace` guest mount for `gondolin`. Both map
+   * to the same files on the host `workdir`, so it's the channel for staging a
+   * handler's request/response across the boundary.
+   */
+  workspacePath: string;
   /** Stream output live (shown by the CLI, captured by hooks). */
   emit(chunk: { stream: "stdout" | "stderr"; text: string }): void;
 }

@@ -9,7 +9,7 @@ export type {
   UsesContext,
   UsesResult,
 } from "./types.ts";
-export { AbsurdRuntime, type AbsurdRuntimeOptions } from "./absurd/runtime.ts";
+export { AbsurdRuntime, type AbsurdRuntimeOptions, type JobNetwork } from "./absurd/runtime.ts";
 export {
   createAbsurdEngine,
   type AbsurdEngine,
