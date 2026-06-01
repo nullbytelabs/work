@@ -170,10 +170,14 @@ jobs:
     );
   }
 
-  it("allowlists the model host and injects the key under the guest env var", () => {
+  it("allows all egress (so the guest can npm-install Pi) but scopes the injected key to the model host", () => {
     const resolve = makeAgentEgressResolver(config);
     const net = resolve(gondolinAgentPlan().jobs["review"]!);
-    assert.deepEqual(net?.allowedHosts, ["api.model.test"]);
+    // Egress is wide-open: the in-guest GuestPiRunner must reach registry.npmjs.org
+    // to install @earendil-works/pi-coding-agent at runtime, not just the model API.
+    assert.deepEqual(net?.allowedHosts, ["*"]);
+    // The real API key stays scoped to the model host only — wildcarding egress
+    // does NOT widen where the secret is injected.
     assert.deepEqual(net?.secrets, {
       [GUEST_MODEL_KEY_ENV]: { hosts: ["api.model.test"], value: "the-real-key" },
     });
