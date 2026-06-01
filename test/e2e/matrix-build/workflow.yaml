@@ -12,7 +12,7 @@ name: matrix-build
 
 jobs:
   test:
-    runs-on: local
+    runs-on: gondolin
     strategy:
       matrix:
         node: [20, 22, 24]
@@ -27,7 +27,7 @@ jobs:
           echo "node=${{ matrix.node }} os=${{ matrix.os }} experimental=${{ matrix.experimental }}"
 
   report:
-    runs-on: local
+    runs-on: gondolin
     needs: test # converges after every matrix leg
     steps:
       - name: report

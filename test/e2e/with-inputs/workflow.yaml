@@ -21,7 +21,7 @@ env:
 
 jobs:
   greet:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - name: greet
         # Map inputs into env vars (the idiomatic pattern), then use them in the shell.

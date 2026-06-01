@@ -22,7 +22,7 @@ inputs:
 
 jobs:
   validate:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - name: show
         env:

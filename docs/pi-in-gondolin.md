@@ -153,10 +153,11 @@ the live Gondolin docs:
   value into the outbound `Authorization` header for allowlisted hosts only. The
   real secret **never enters the guest**. `GondolinTarget.provision()` already
   wires `allowedHosts` + `secrets` through `createHttpHooks` when configured.
-- **Custom images:** the default Alpine guest is minimal (no Node). A guest image
-  with `nodejs`/`npm` (and the Pi package) is a declarative build-config away — the
-  Gondolin default config already lists `nodejs`, `npm`
-  ([`gondolin-custom-images.md`](gondolin-custom-images.md) §1). Selected at boot
+- **Guest toolchain:** the default Alpine guest already ships `nodejs`/`npm`
+  (plus `bash` and `python3`), so the in-guest runner installs the Pi package and
+  runs it without a custom image. Pinning a different image (e.g. with the Pi
+  package pre-baked) stays a declarative build-config away
+  ([`gondolin-custom-images.md`](gondolin-custom-images.md) §1), selected at boot
   via `sandbox.imagePath`, which the planned `gondolin:<variant>` mechanism already
   contemplates.
 

@@ -12,7 +12,7 @@ import { AbsurdRuntime } from "../src/runtime/index.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 describe("GondolinTarget — unit (no VM)", () => {
-  it("uses /bin/sh -lc so the minimal Alpine guest can run the command", () => {
+  it("uses /bin/sh -lc for portable command execution in the guest", () => {
     assert.deepEqual(buildExecArgs("echo $HELLO"), ["/bin/sh", "-lc", "echo $HELLO"]);
   });
 

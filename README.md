@@ -52,7 +52,7 @@ The engine runs end-to-end today: GHA-style YAML → validated spec → runtime-
 
 ```bash
 npm install
-./pi-workflows ./test/e2e/hello-world-local/workflow.yaml
+./pi-workflows ./test/e2e/hello-world-gondolin/workflow.yaml
 npm test
 ```
 
@@ -138,10 +138,10 @@ interface ExecutionTarget {
 }
 ```
 
-- `runs-on: gondolin` (**default**) → `GondolinTarget`: `VM.create()` → `vm.exec()` → `vm.close()`. Hardware-virtualized micro-VM (QEMU, minimal Alpine guest), deny-by-default networking, secrets injected only into outbound HTTP via `createHttpHooks({ secrets })` — the guest sees placeholders, never raw values. Boots in under a second; treat VMs as disposable.
-- `runs-on: local` → `LocalTarget`: a plain host child process. Fast, no isolation — for trusted steps / local dev.
+- `runs-on: gondolin` (**default**) → `GondolinTarget`: `VM.create()` → `vm.exec()` → `vm.close()`. Hardware-virtualized micro-VM (QEMU, Alpine guest), deny-by-default networking, secrets injected only into outbound HTTP via `createHttpHooks({ secrets })` — the guest sees placeholders, never raw values. The guest ships `sh`/`bash`/`node`/`npm`/`python3`, so steps run in the sandbox without a host toolchain. Boots in under a second; treat VMs as disposable.
+- `runs-on: local` → `LocalTarget`: a plain host child process. Fast, no isolation. **Deprecated** — the compiler warns; prefer `runs-on: gondolin`.
 
-Engine gotchas surfaced by the research: **one exec at a time per VM**, so parallel jobs each get their **own VM**; the minimal Alpine image means language runtimes need a custom image; secrets must flow through `createHttpHooks`, not `env`; always `dispose()`.
+Engine gotchas surfaced by the research: **one exec at a time per VM**, so parallel jobs each get their **own VM**; secrets must flow through `createHttpHooks`, not `env`; always `dispose()`.
 
 ### 3. Agentic steps → Pi, models → LiteLLM
 

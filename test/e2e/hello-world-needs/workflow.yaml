@@ -10,7 +10,7 @@ env:
 
 jobs:
   hello-world:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - name: hello-world
         run: |

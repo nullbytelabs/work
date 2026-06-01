@@ -51,9 +51,11 @@ export interface GondolinTargetConfig {
 }
 
 /**
- * Build the argv for a step command. Uses `/bin/sh` (always present in the
- * minimal Alpine guest; `/bin/bash` may not be) with `-lc` so `$VARS`, pipes,
- * and `${VAR}` expansion behave as workflow authors expect. Exported for tests.
+ * Build the argv for a step command. Uses `/bin/sh -lc` for portability — `sh`
+ * is the lowest common denominator and is always present — so `$VARS`, pipes,
+ * and `${VAR}` expansion behave as workflow authors expect. (The guest also
+ * ships bash/node/python3, but steps shouldn't have to assume that.) Exported
+ * for tests.
  */
 export function buildExecArgs(command: string): string[] {
   return ["/bin/sh", "-lc", command];

@@ -3,9 +3,8 @@
 #              share the per-job workspace and cross-check each other's results.
 #              bash splits a dataset to a file, Node sums it and writes sum.txt,
 #              Python independently re-sums and asserts the two agree.
-# note: runs-on MUST be `local` here — the minimal Gondolin Alpine guest ships
-#       no node/python. on `local`, steps inherit the host PATH.
-# prerequisites: node and python3 on PATH.
+# note: runs on `gondolin` — the guest ships bash, node, and python3, so all
+#       three step languages run inside the sandbox (no host toolchain needed).
 # usage: ./pi-workflows ./test/e2e/inline-polyglot/workflow.yaml
 ---
 name: inline-polyglot
@@ -15,7 +14,7 @@ env:
 
 jobs:
   polyglot:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - name: bash-prepare
         run: |

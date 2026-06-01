@@ -26,9 +26,8 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
 
 | Folder | Shows |
 |---|---|
-| `hello-world-local/` | the minimal workflow on the host (`runs-on: local`) |
-| `hello-world-gondolin/` | the same workflow inside a Gondolin micro-VM (needs Node ≥ 23.6 + QEMU) |
-| `hello-world-needs/` | a second job that `needs` the first — and runs on a different target |
+| `hello-world-gondolin/` | the minimal workflow inside a Gondolin micro-VM (needs Node ≥ 23.6 + QEMU) |
+| `hello-world-needs/` | a second job that `needs` the first, so it runs after it |
 
 ## Going further
 
@@ -53,10 +52,11 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
   order (alphabetical among ready jobs). Independent jobs do **not** yet run in
   parallel — that's a planned runtime enhancement. The DAG shape is already
   expressed and respected. There is no cross-job artifact passing yet.
-- **`local` vs `gondolin`.** `local` runs steps as host child processes and
-  inherits the host `PATH` (so `node`/`python3`/etc. are available). The Gondolin
-  guest is a minimal Alpine image — no `node`/`python`/`bash`, but it does have
-  BusyBox `/bin/sh`. So `inline-polyglot/` (needs node + python) is `local`,
-  while scripts meant to run under `gondolin` must stay POSIX-`sh`. In the test
-  suite, gondolin examples boot a real micro-VM and run unconditionally, so
-  `npm test` needs Node ≥ 23.6 + QEMU on the machine.
+- **`runs-on`: always `gondolin`.** Every example runs in the Gondolin micro-VM.
+  The guest is fully equipped — `sh`, `bash`, `node`, `npm`, and `python3` are all
+  present — so even `inline-polyglot/` (bash + node + python) runs entirely in the
+  sandbox; no step needs the host. `runs-on: local` is **deprecated** (host
+  execution, no isolation) and an omitted `runs-on` defaults to `gondolin`; the
+  compiler warns on both, so workflows state `runs-on: gondolin` explicitly. The
+  whole suite therefore boots real micro-VMs — `npm test` needs Node ≥ 23.6 + QEMU
+  on the machine.

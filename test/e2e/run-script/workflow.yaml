@@ -14,7 +14,7 @@ env:
 
 jobs:
   analyze:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - name: run
         run: |

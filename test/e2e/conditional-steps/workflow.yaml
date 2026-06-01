@@ -19,7 +19,7 @@ inputs:
 
 jobs:
   build:
-    runs-on: local
+    runs-on: gondolin
     steps:
       - name: build
         run: echo "building (${{ inputs.mode }})"
@@ -34,7 +34,7 @@ jobs:
         run: echo "cleanup runs regardless"
 
   notify:
-    runs-on: local
+    runs-on: gondolin
     needs: build
     if: ${{ inputs.mode == 'release' }} # whole job is gated
     steps:

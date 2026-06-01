@@ -3,7 +3,7 @@
  *
  * This mirrors the GitHub-Actions-style YAML described in the README
  * (workflows -> jobs -> steps). Phase 1 implements the subset needed to run
- * `test/e2e/hello-world-local/workflow.yaml`: name, env, jobs, and `run` steps. Fields that
+ * `test/e2e/hello-world-gondolin/workflow.yaml`: name, env, jobs, and `run` steps. Fields that
  * later phases will use (`needs`, `runsOn`, `uses`, `if`, `matrix`) are modeled
  * here so the schema is stable, even where the runtime does not yet act on them.
  */

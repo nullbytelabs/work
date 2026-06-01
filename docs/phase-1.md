@@ -34,7 +34,7 @@ dependencies, so the same `node_modules` works across platforms.
 
 ```bash
 npm install
-./pi-workflows ./test/e2e/hello-world-local/workflow.yaml          # ad-hoc: a file anywhere
+./pi-workflows ./test/e2e/hello-world-gondolin/workflow.yaml          # ad-hoc: a file anywhere
 ./pi-workflows --workspace ./test/e2e/agent-project run ci         # by name (the workflow whose name: is ci)
 ./pi-workflows --workspace ./test/e2e/agent-project graph ci --steps  # inspect the DAG (no run)
 npm test        # unit + integration suite (Node's built-in test runner)
@@ -107,7 +107,7 @@ top-level `runs-on` is rejected). A job that omits it falls back to `local`. Two
 targets are supported:
 
 - **`local`** — runs each step as a host `/bin/bash -lc` child process. Fast, no
-  isolation. No extra dependencies. (`test/e2e/hello-world-local/workflow.yaml`)
+  isolation. No extra dependencies. (`test/e2e/hello-world-gondolin/workflow.yaml`)
 - **`gondolin`** — runs each step inside a hardware-virtualized Alpine micro-VM
   via `@earendil-works/gondolin` (QEMU). Secure, deny-by-default networking.
   (`test/e2e/hello-world-gondolin/workflow.yaml`)
@@ -138,8 +138,9 @@ CI provisions that for the `test` job (Node 25): it installs QEMU and enables
 `/dev/kvm` on the x86_64 runner (Gondolin ships x86_64 guest images), then runs
 `npm test`.
 
-Steps run via `/bin/sh -lc` (the minimal Alpine guest has no bash), the per-job
-working directory is mounted at `/workspace`, and the VM is always torn down
+Steps run via `/bin/sh -lc` (portable lowest common denominator; the guest also
+ships bash/node/python3), the per-job working directory is mounted at
+`/workspace`, and the VM is always torn down
 (`vm.close()`) in a `finally`. Network is deny-by-default; HTTP allowlists and
 header-only secret injection (`createHttpHooks`) are wired in the target config
 for when steps need egress.
@@ -301,7 +302,10 @@ rewrite:
   evaluator). Not yet: matrix `max-parallel` / `fail-fast`, and the `github`
   expression context. Agent `uses:` steps and `steps.*`/`needs.*`
   output passing **are** implemented (see the "Agent steps" and "Outputs"
-  sections above); what's not yet built there is **tool-using / multi-turn**
-  agents — the current `agent` handler backs the no-tools `summarize`.
-- Gondolin runs on the minimal Alpine guest image (no language runtimes) and
-  does not yet persist workspace artifacts across steps or size VM resources.
+  sections above). The `agent` handler runs Pi with its full default toolset
+  rooted at the job workspace, so an agent reads/edits the checkout directly
+  (e.g. `summarize` reviews `main.ts` in-place); what's not yet built is
+  **multi-turn / multi-step** agent orchestration.
+- Gondolin does not yet persist workspace artifacts across steps or size VM
+  resources. (The guest image is well-equipped — sh/bash/node/npm/python3 — so
+  steps run in the sandbox without a host toolchain.)

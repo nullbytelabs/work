@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,11 +13,6 @@ import { useSharedRuntime } from "./_support.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = resolve(HERE, "e2e");
 const runtime = useSharedRuntime();
-
-const hasPython3 = spawnSync("python3", ["--version"]).status === 0;
-
-// Examples needing a runtime not guaranteed in the local/CI environment.
-const NEEDS_PYTHON = new Set(["inline-polyglot"]);
 
 // Inputs to supply for examples that declare required inputs (others default).
 const EXAMPLE_INPUTS: Record<string, Record<string, unknown>> = {
@@ -61,14 +55,12 @@ async function runExample(name: string) {
   }
 }
 
-// Every example runs unconditionally. Gondolin examples boot a real micro-VM and
-// some pipelines install real npm deps; CI provisions Node >= 23.6 + QEMU for both.
-// The only skip left is a missing python3 runtime, which is auto-detected.
+// Every example runs unconditionally on a real gondolin micro-VM (the guest
+// ships sh/bash/node/npm/python3, so every step language runs in the sandbox).
+// CI provisions Node >= 23.6 + QEMU; some pipelines also install real npm deps.
 describe("examples — every workflow runs to success", () => {
   for (const name of examples) {
-    const skip = NEEDS_PYTHON.has(name) && !hasPython3 ? "python3 not on PATH" : false;
-
-    it(`runs ${name}`, { skip }, async () => {
+    it(`runs ${name}`, async () => {
       const result = await runExample(name);
       assert.equal(result.status, "success", `${name} should succeed`);
     });

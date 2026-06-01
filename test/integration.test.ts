@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,13 +62,7 @@ jobs:
     assert.match(output, /hello world/);
     assert.equal(step(result, "hello-world", "hello-world/0").exitCode, 0);
   });
-
-  it("runs the actual test/e2e/hello-world-local/workflow.yaml file", async () => {
-    const yaml = await readFile(resolve(HERE, "e2e", "hello-world-local", "workflow.yaml"), "utf-8");
-    const { result, output } = await runWorkflow(yaml);
-    assert.equal(result.status, "success");
-    assert.match(output, /hello world/);
-  });
+  // (Running the committed example files end-to-end is covered by examples.test.ts.)
 });
 
 describe("pipeline — failure semantics", () => {
