@@ -27,6 +27,10 @@ describe("LocalTarget", () => {
     assert.equal(r.stdout.trim(), "hello");
   });
 
+  it("exposes the workdir as its workspacePath (where $PI_OUTPUT lives)", () => {
+    assert.equal(target.workspacePath, workdir);
+  });
+
   it("reports a non-zero exit code without throwing", async () => {
     const r = await target.run("echo oops >&2; exit 7");
     assert.equal(r.ok, false);

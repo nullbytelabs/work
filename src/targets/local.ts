@@ -13,9 +13,12 @@ import type { ExecutionTarget, RunOptions, RunResult } from "./types.ts";
 export class LocalTarget implements ExecutionTarget {
   readonly kind = "local";
   private readonly workdir: string;
+  /** Commands run directly on the host, so the workspace path is the workdir. */
+  readonly workspacePath: string;
 
   constructor(workdir: string) {
     this.workdir = workdir;
+    this.workspacePath = workdir;
   }
 
   async provision(): Promise<void> {

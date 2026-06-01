@@ -76,6 +76,8 @@ async function loadGondolin(): Promise<Record<string, unknown>> {
 
 export class GondolinTarget implements ExecutionTarget {
   readonly kind = "gondolin";
+  /** The job workdir is mounted into the guest here, so $PI_OUTPUT lives under it. */
+  readonly workspacePath = GUEST_WORKSPACE;
   private readonly cfg: GondolinTargetConfig;
   private vm: GVM | null = null;
 

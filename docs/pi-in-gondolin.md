@@ -324,13 +324,12 @@ Agent outputs today come from the runner's returned text, mapped by
 `agentOutputs()` (`src/agent/index.ts`) to declared keys. In-guest, the wrapper
 writes the result where the host can read it. Because `/workspace` is a **shared
 `RealFSProvider` mount**, the host reads outputs straight from the job workdir —
-no `vm.fs` round-trip needed. This also **lifts the current `$PI_OUTPUT`
-"local-only" limitation** (`runShellStep` disables `PI_OUTPUT` capture on
-`gondolin` because the guest path differs from the host path,
-`src/runtime/absurd/runtime.ts`): with a known mount, host path = `workdir/X`,
-guest path = `/workspace/X`, so a `PI_OUTPUT=/workspace/.pi-output-<step>` written
-in-guest is readable host-side at `workdir/.pi-output-<step>`. Worth fixing for
-shell steps in the same change.
+no `vm.fs` round-trip needed. The same mount **lifts the former `$PI_OUTPUT`
+"local-only" limitation** — now done (`runShellStep`, `src/runtime/absurd/runtime.ts`):
+each target exposes `workspacePath` (`workdir` for local, `/workspace` for
+gondolin), so `$PI_OUTPUT` points at `<workspacePath>/.pi-output-<step>` inside
+the command while the host reads the same file back from `workdir/.pi-output-<step>`.
+Output capture is therefore uniform across targets.
 
 ### 5d. Auth summary
 

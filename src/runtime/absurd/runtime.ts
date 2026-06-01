@@ -375,7 +375,15 @@ async function runJobInTask(
   return jobResult;
 }
 
-/** A shell `run` step on the ExecutionTarget; captures $PI_OUTPUT (local only). */
+/**
+ * A shell `run` step on the ExecutionTarget; captures `$PI_OUTPUT`.
+ *
+ * The output file lives in the staged job workspace, which every target shares
+ * with the host (the host workdir itself for `local`; the `/workspace` mount for
+ * `gondolin`). So `$PI_OUTPUT` points at the path *the command sees*
+ * (`target.workspacePath`) while the host reads the same file back from
+ * `workdir` — making output capture work uniformly across targets.
+ */
 async function runShellStep(
   step: PlannedStep,
   job: PlannedJob,
@@ -388,14 +396,10 @@ async function runShellStep(
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(step.env)) env[k] = interpolate(v, expr);
 
-  // Output capture via a $PI_OUTPUT file in the (host) workdir — local only,
-  // since the gondolin guest path differs from the host mount path.
-  const captureOutputs = job.runsOn === "local";
-  const outFile = join(workdir, `.pi-output-${step.name.replace(/[^\w-]/g, "_")}`);
-  if (captureOutputs) {
-    env["PI_OUTPUT"] = outFile;
-    await rm(outFile, { force: true });
-  }
+  const outName = `.pi-output-${step.name.replace(/[^\w-]/g, "_")}`;
+  const hostOutFile = join(workdir, outName); // host reads here
+  env["PI_OUTPUT"] = `${target.workspacePath}/${outName}`; // the command writes here
+  await rm(hostOutFile, { force: true });
 
   const run = await target.run(command, {
     env,
@@ -409,8 +413,8 @@ async function runShellStep(
     stdout: run.stdout,
     stderr: run.stderr,
   };
-  if (captureOutputs && run.ok) {
-    const text = await readFile(outFile, "utf-8").catch(() => "");
+  if (run.ok) {
+    const text = await readFile(hostOutFile, "utf-8").catch(() => "");
     if (text) result.outputs = parseOutputFile(text);
   }
   return result;
