@@ -147,16 +147,20 @@ describe("parseWorkflow — validation", () => {
     assert.match(e.message, /individual job/);
   });
 
-  it("rejects a step-level conditional (if) until supported", () => {
-    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        if: \${{ false }}`);
-    assert.equal(e.path, "jobs.a.steps[0]");
-    assert.match(e.message, /conditionals .* aren't supported/);
+  it("parses a step-level conditional (if)", () => {
+    const spec = parseWorkflow(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        if: \${{ inputs.flag == 'yes' }}`);
+    assert.equal(spec.jobs["a"]!.steps[0]!.if, "${{ inputs.flag == 'yes' }}");
   });
 
-  it("rejects a job-level conditional (when) until supported", () => {
-    const e = err(`name: w\njobs:\n  a:\n    when: manual\n    steps: [{ run: x }]`);
-    assert.equal(e.path, "jobs.a");
-    assert.match(e.message, /conditionals/);
+  it("parses a job-level conditional (when, as an if synonym)", () => {
+    const spec = parseWorkflow(`name: w\njobs:\n  a:\n    when: success()\n    steps: [{ run: x }]`);
+    assert.equal(spec.jobs["a"]!.if, "success()");
+  });
+
+  it("rejects a step that declares both if and when", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        if: success()\n        when: failure()`);
+    assert.equal(e.path, "jobs.a.steps[0]");
+    assert.match(e.message, /either "if" or "when"/);
   });
 
   it("rejects an invalid input type", () => {

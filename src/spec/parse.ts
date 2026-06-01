@@ -6,7 +6,7 @@
  * parser does NOT execute anything — it only produces a validated spec object.
  */
 import { parse as parseYaml } from "yaml";
-import type { EnvMap, InputSpec, JobSpec, StepSpec, WorkflowSpec } from "./types.ts";
+import type { EnvMap, InputSpec, JobSpec, MatrixSpec, MatrixValue, StepSpec, StrategySpec, WorkflowSpec } from "./types.ts";
 
 /** Thrown when a workflow file is structurally invalid. */
 export class WorkflowParseError extends Error {
@@ -114,17 +114,79 @@ function parseInputs(raw: unknown, path: string): Record<string, InputSpec> | un
 }
 
 /**
- * Conditionals (`if` / `when`) are modeled in the spec but NOT yet evaluated by
- * the runtime. Reject them at parse time so a condition is never silently
- * ignored (which would be worse than not supporting it).
+ * Parse a conditional guard. `if:` and `when:` are accepted as synonyms (a step
+ * or job may use either, but not both). The value is a string expression,
+ * evaluated at runtime; the spec only validates its shape here. A boolean
+ * literal is allowed as a convenience (`if: true`) and stringified.
  */
-function rejectConditionals(raw: Record<string, unknown>, path: string): void {
-  if (raw.if !== undefined || raw.when !== undefined) {
-    throw new WorkflowParseError(
-      "conditionals (if/when) aren't supported yet — remove the condition",
-      path,
-    );
+function parseCondition(raw: Record<string, unknown>, path: string): string | undefined {
+  if (raw.if !== undefined && raw.when !== undefined) {
+    throw new WorkflowParseError('use either "if" or "when", not both', path);
   }
+  const cond = raw.if ?? raw.when;
+  if (cond === undefined) return undefined;
+  if (typeof cond === "boolean" || typeof cond === "number") return String(cond);
+  if (typeof cond !== "string") {
+    throw new WorkflowParseError('"if"/"when" must be a string expression', path);
+  }
+  if (cond.trim() === "") throw new WorkflowParseError('"if"/"when" must not be empty', path);
+  return cond;
+}
+
+/** Parse a single matrix cell (`include`/`exclude` entry): a mapping of scalars. */
+function parseMatrixCell(raw: unknown, path: string): Record<string, MatrixValue> {
+  if (!isPlainObject(raw)) throw new WorkflowParseError("must be a mapping of axis -> value", path);
+  const cell: Record<string, MatrixValue> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v === null || typeof v === "object") {
+      throw new WorkflowParseError(`value for "${k}" must be a scalar`, path);
+    }
+    cell[k] = v as MatrixValue;
+  }
+  return cell;
+}
+
+/** Parse `strategy:` (currently just `matrix`). Returns undefined when absent. */
+function parseStrategy(raw: unknown, path: string): StrategySpec | undefined {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) throw new WorkflowParseError("strategy must be a mapping", path);
+  if (raw.matrix === undefined) return undefined;
+
+  const mp = `${path}.matrix`;
+  if (!isPlainObject(raw.matrix)) throw new WorkflowParseError("matrix must be a mapping", mp);
+
+  const axes: Record<string, MatrixValue[]> = {};
+  let include: Record<string, MatrixValue>[] | undefined;
+  let exclude: Record<string, MatrixValue>[] | undefined;
+
+  for (const [key, val] of Object.entries(raw.matrix)) {
+    if (key === "include" || key === "exclude") {
+      if (!Array.isArray(val)) throw new WorkflowParseError(`${key} must be an array of cells`, `${mp}.${key}`);
+      const cells = val.map((c, i) => parseMatrixCell(c, `${mp}.${key}[${i}]`));
+      if (key === "include") include = cells;
+      else exclude = cells;
+      continue;
+    }
+    // An axis: name -> non-empty array of scalars.
+    if (!Array.isArray(val) || val.length === 0) {
+      throw new WorkflowParseError(`axis "${key}" must be a non-empty array of values`, `${mp}.${key}`);
+    }
+    for (const v of val) {
+      if (v === null || typeof v === "object") {
+        throw new WorkflowParseError(`axis "${key}" values must be scalars`, `${mp}.${key}`);
+      }
+    }
+    axes[key] = val as MatrixValue[];
+  }
+
+  if (Object.keys(axes).length === 0 && include === undefined) {
+    throw new WorkflowParseError("matrix must declare at least one axis or an include", mp);
+  }
+
+  const matrix: MatrixSpec = { axes };
+  if (include) matrix.include = include;
+  if (exclude) matrix.exclude = exclude;
+  return { matrix };
 }
 
 function parseStep(raw: unknown, path: string): StepSpec {
@@ -138,7 +200,6 @@ function parseStep(raw: unknown, path: string): StepSpec {
   if (hasRun && hasUses) {
     throw new WorkflowParseError('step cannot define both "run" and "uses"', path);
   }
-  rejectConditionals(raw, path);
 
   const step: StepSpec = {};
   if (typeof raw.name === "string") step.name = raw.name;
@@ -146,6 +207,8 @@ function parseStep(raw: unknown, path: string): StepSpec {
   if (hasRun) step.run = raw.run as string;
   if (hasUses) step.uses = raw.uses as string;
   if (isPlainObject(raw.with)) step.with = raw.with;
+  const cond = parseCondition(raw, path);
+  if (cond !== undefined) step.if = cond;
   const env = parseEnv(raw.env, `${path}.env`);
   if (env) step.env = env;
   return step;
@@ -153,7 +216,6 @@ function parseStep(raw: unknown, path: string): StepSpec {
 
 function parseJob(raw: unknown, path: string): JobSpec {
   if (!isPlainObject(raw)) throw new WorkflowParseError("job must be a mapping", path);
-  rejectConditionals(raw, path);
 
   if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
     throw new WorkflowParseError("job must have a non-empty steps array", `${path}.steps`);
@@ -162,6 +224,12 @@ function parseJob(raw: unknown, path: string): JobSpec {
   const job: JobSpec = {
     steps: raw.steps.map((s, i) => parseStep(s, `${path}.steps[${i}]`)),
   };
+
+  const cond = parseCondition(raw, path);
+  if (cond !== undefined) job.if = cond;
+
+  const strategy = parseStrategy(raw.strategy, `${path}.strategy`);
+  if (strategy) job.strategy = strategy;
 
   if (raw.runsOn !== undefined || raw["runs-on"] !== undefined) {
     const runsOn = raw.runsOn ?? raw["runs-on"];

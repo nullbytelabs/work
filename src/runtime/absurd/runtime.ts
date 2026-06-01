@@ -23,7 +23,14 @@ import { basename, join } from "node:path";
 import { mkdir, cp, readFile, rm } from "node:fs/promises";
 import type { TaskContext } from "absurd-sdk";
 import { makeTarget } from "../../targets/index.ts";
-import { interpolate, type OutputBag } from "../../compiler/index.ts";
+import {
+  interpolate,
+  evaluateCondition,
+  ConditionError,
+  type OutputBag,
+  type ConditionContext,
+  type ConditionBag,
+} from "../../compiler/index.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
 import type { JobResult, RunContext, Runtime, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
@@ -31,8 +38,23 @@ import type { JobResult, RunContext, Runtime, StepResult, UsesHandler, WorkflowR
 const QUEUE = "default";
 const DEFAULT_MAX_CONCURRENCY = 16;
 
-/** Upstream job outputs passed to a job's task (JSON-serializable). */
-type NeedsContext = Record<string, OutputBag>;
+/** Upstream job outputs + status passed to a job's task (JSON-serializable). */
+type NeedsBag = OutputBag & { result?: JobResult["status"] };
+type NeedsContext = Record<string, NeedsBag>;
+
+/** Resolved workflow inputs threaded to the runtime for `if:` evaluation. */
+type WorkflowInputs = Record<string, string | number | boolean>;
+
+/** Convert a needs/steps output map into condition bags (outputs + result). */
+function toConditionBags(
+  src: Record<string, OutputBag & { result?: string }>,
+): Record<string, ConditionBag> {
+  const out: Record<string, ConditionBag> = {};
+  for (const [k, v] of Object.entries(src)) {
+    out[k] = v.result !== undefined ? { outputs: v.outputs, result: v.result } : { outputs: v.outputs };
+  }
+  return out;
+}
 
 export interface AbsurdRuntimeOptions {
   /** PGLite data dir for persistence; omit for ephemeral in-memory. */
@@ -50,6 +72,8 @@ export interface AbsurdRuntimeOptions {
 interface JobDeps {
   ctx: RunContext;
   usesHandlers: UsesHandler[];
+  /** Resolved workflow inputs, for `if:` evaluation inside steps. */
+  inputs: WorkflowInputs;
 }
 
 export class AbsurdRuntime implements Runtime {
@@ -76,7 +100,7 @@ export class AbsurdRuntime implements Runtime {
   async run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult> {
     const { app } = await this.ensureEngine();
     const runId = randomUUID();
-    const deps: JobDeps = { ctx, usesHandlers: this.usesHandlers };
+    const deps: JobDeps = { ctx, usesHandlers: this.usesHandlers, inputs: plan.inputs ?? {} };
 
     const jobTaskName = `job:${plan.name}:${runId}`;
     app.registerTask(
@@ -99,12 +123,35 @@ export class AbsurdRuntime implements Runtime {
         const job = plan.jobs[jobId]!;
         const p = (async (): Promise<JobResult> => {
           const depResults = await Promise.all(job.needs.map((d) => schedule(d)));
-          if (depResults.some((d) => d.status !== "success")) {
+          const depsAllSucceeded = depResults.every((d) => d.status === "success");
+          const depsSomeFailed = depResults.some((d) => d.status === "failure");
+
+          // Build the needs context from dependencies' resolved outputs + status.
+          const needs: NeedsContext = {};
+          for (const dep of depResults) needs[dep.id] = { outputs: dep.outputs ?? {}, result: dep.status };
+
+          // Gate the job. With no `if`, a job runs only if every dependency
+          // succeeded (the default). An `if:` takes over entirely — letting
+          // `always()` / `failure()` run a job after an upstream failure.
+          if (job.if !== undefined) {
+            let run: boolean;
+            try {
+              run = evaluateCondition(job.if, {
+                inputs: deps.inputs,
+                needs: toConditionBags(needs),
+                ...(job.matrix ? { matrix: job.matrix } : {}),
+                status: { success: depsAllSucceeded, failure: depsSomeFailed },
+              });
+            } catch (err) {
+              if (err instanceof ConditionError) {
+                return jobConditionError(jobId, `job if: ${err.message}`);
+              }
+              throw err;
+            }
+            if (!run) return { id: jobId, status: "skipped", steps: [] };
+          } else if (!depsAllSucceeded) {
             return { id: jobId, status: "skipped", steps: [] };
           }
-          // Build the needs context from dependencies' resolved outputs.
-          const needs: NeedsContext = {};
-          for (const dep of depResults) needs[dep.id] = { outputs: dep.outputs ?? {} };
 
           const { taskID } = await app.spawn(
             jobTaskName,
@@ -148,6 +195,15 @@ export class AbsurdRuntime implements Runtime {
       this.engine = null;
     }
   }
+}
+
+/** A failed-job result carrying a single synthetic error step (e.g. bad `if:`). */
+function jobConditionError(jobId: string, message: string): JobResult {
+  return {
+    id: jobId,
+    status: "failure",
+    steps: [{ name: `${jobId}/error`, status: "failure", exitCode: 1, stdout: "", stderr: message }],
+  };
 }
 
 async function awaitTaskTerminal(app: AbsurdEngine["app"], taskID: string) {
@@ -235,17 +291,56 @@ async function runJobInTask(
   }
 
   const steps: StepResult[] = [];
-  const stepOutputs: Record<string, OutputBag> = {}; // by step id, for steps.<id>.outputs
+  // by step id, for steps.<id>.outputs / steps.<id>.result
+  const stepOutputs: Record<string, OutputBag & { result?: string }> = {};
   let failed = false;
 
   const exprCtx = () => ({ needs, steps: stepOutputs });
 
+  /** Build the condition context as of "now" (current failed-state + outputs). */
+  const condCtx = (): ConditionContext => ({
+    inputs: deps.inputs,
+    needs: toConditionBags(needs),
+    steps: toConditionBags(stepOutputs),
+    ...(job.matrix ? { matrix: job.matrix } : {}),
+    status: { success: !failed, failure: failed },
+  });
+
   try {
     for (const step of job.steps) {
-      if (failed) {
+      // Decide whether this step runs. With no `if`, a step runs only while the
+      // job is still healthy (skip once something failed). An `if:` takes over:
+      // `always()` / `failure()` let a step run after an earlier failure.
+      let shouldRun: boolean;
+      if (step.if !== undefined) {
+        try {
+          shouldRun = evaluateCondition(step.if, condCtx());
+        } catch (err) {
+          if (!(err instanceof ConditionError)) throw err;
+          const result: StepResult = {
+            name: step.name,
+            status: "failure",
+            exitCode: 1,
+            stdout: "",
+            stderr: `if: ${err.message}`,
+          };
+          ctx.hooks?.onStepStart?.(job.id, step.name);
+          ctx.hooks?.onStepEnd?.(job.id, result);
+          steps.push(result);
+          if (step.id) stepOutputs[step.id] = { outputs: {}, result: "failure" };
+          failed = true;
+          continue;
+        }
+      } else {
+        shouldRun = !failed;
+      }
+
+      if (!shouldRun) {
         steps.push({ name: step.name, status: "skipped", exitCode: 0, stdout: "", stderr: "" });
+        if (step.id) stepOutputs[step.id] = { outputs: {}, result: "skipped" };
         continue;
       }
+
       ctx.hooks?.onStepStart?.(job.id, step.name);
 
       const result = await taskCtx.step<StepResult>(step.name, async () => {
@@ -255,8 +350,8 @@ async function runJobInTask(
         return runShellStep(step, job, target!, workdir, ctx, exprCtx());
       });
 
-      // Capture declared outputs for steps with an id.
-      if (step.id && result.outputs) stepOutputs[step.id] = { outputs: result.outputs };
+      // Capture declared outputs + result for steps with an id.
+      if (step.id) stepOutputs[step.id] = { outputs: result.outputs ?? {}, result: result.status };
       ctx.hooks?.onStepEnd?.(job.id, result);
       steps.push(result);
       if (result.status === "failure") failed = true;

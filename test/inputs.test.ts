@@ -115,8 +115,19 @@ describe("inputs — interpolate", () => {
 
   it("throws on an unsupported expression", () => {
     assert.throws(
-      () => interpolate("${{ matrix.node }}", { inputs: {} }),
+      () => interpolate("${{ github.sha }}", { inputs: {} }),
       (e) => e instanceof WorkflowCompileError && /unsupported expression/.test(e.message),
+    );
+  });
+
+  it("resolves matrix.* when a cell is supplied", () => {
+    assert.equal(interpolate("node-${{ matrix.node }}", { inputs: {}, matrix: { node: 20 } }), "node-20");
+  });
+
+  it("throws when matrix.* is referenced outside a matrix job", () => {
+    assert.throws(
+      () => interpolate("${{ matrix.node }}", { inputs: {} }),
+      (e) => e instanceof WorkflowCompileError && /matrix context is only available/.test(e.message),
     );
   });
 

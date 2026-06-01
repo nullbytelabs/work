@@ -3,12 +3,13 @@
  *
  * Supported contexts:
  *   - `inputs.<name>`               (resolved at COMPILE time)
+ *   - `matrix.<axis>`               (resolved at COMPILE time, per matrix leg)
  *   - `needs.<job>.outputs.<name>`  (resolved at RUNTIME, after the dep finishes)
  *   - `steps.<id>.outputs.<key>`    (resolved at RUNTIME, within the job)
  *
  * When the relevant context isn't supplied (e.g. `needs` at compile time), the
  * expression is **left intact** for a later phase rather than erroring. An
- * unknown root (`matrix`, `github`, …) always errors — never silently passes.
+ * unknown root (`github`, …) always errors — never silently passes.
  */
 import { WorkflowCompileError } from "./compile.ts";
 
@@ -18,6 +19,8 @@ export interface OutputBag {
 
 export interface ExprContext {
   inputs?: Record<string, string | number | boolean>;
+  /** Resolved matrix cell for the current leg; only present in a matrix job. */
+  matrix?: Record<string, string | number | boolean>;
   needs?: Record<string, OutputBag>;
   steps?: Record<string, OutputBag>;
 }
@@ -37,6 +40,20 @@ function resolveExpr(expr: string, ctx: ExprContext, whole: string): string {
       throw new WorkflowCompileError(`expression references undeclared input "${name}" (declare it under inputs:)`);
     }
     return String(ctx.inputs[name]);
+  }
+
+  m = /^matrix\.([A-Za-z_][\w-]*)$/.exec(expr) ?? /^matrix\[\s*['"]([^'"]+)['"]\s*\]$/.exec(expr);
+  if (m) {
+    if (!ctx.matrix) {
+      throw new WorkflowCompileError(
+        `matrix context is only available in a job with strategy.matrix (saw "\${{ ${expr} }}")`,
+      );
+    }
+    const name = m[1]!;
+    // A matrix property absent from *this* cell resolves to empty — `include`
+    // routinely adds a key to only some legs (GHA semantics).
+    if (!Object.prototype.hasOwnProperty.call(ctx.matrix, name)) return "";
+    return String(ctx.matrix[name]);
   }
 
   m = /^needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(expr);

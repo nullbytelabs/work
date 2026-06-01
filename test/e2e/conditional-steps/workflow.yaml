@@ -1,0 +1,40 @@
+# conditional steps
+# description: if/when conditionals at both the step and job level. Each step's
+#              `if` is evaluated at runtime; a false result skips the step. The
+#              `always()` status function runs a cleanup step regardless of what
+#              came before, and a job-level `if` gates a whole downstream job.
+# note: conditions read `inputs.*` and the status functions
+#       success()/failure()/always()/cancelled(). With default inputs (mode=ci)
+#       the release-only step and the `notify` job are skipped — skipped work is
+#       not a failure, so the workflow still succeeds.
+# usage: ./pi-workflows ./test/e2e/conditional-steps/workflow.yaml --inputs '{"mode":"release"}'
+---
+name: conditional-steps
+
+inputs:
+  mode:
+    type: string
+    default: ci
+    options: [ci, release]
+
+jobs:
+  build:
+    steps:
+      - name: build
+        run: echo "building (${{ inputs.mode }})"
+      - name: ci-only
+        if: ${{ inputs.mode == 'ci' }}
+        run: echo "running ci checks"
+      - name: release-only
+        if: ${{ inputs.mode == 'release' }}
+        run: echo "packaging a release"
+      - name: always-cleanup
+        if: always() # runs even if an earlier step had failed
+        run: echo "cleanup runs regardless"
+
+  notify:
+    needs: build
+    if: ${{ inputs.mode == 'release' }} # whole job is gated
+    steps:
+      - name: notify
+        run: echo "notifying the release channel"

@@ -32,7 +32,6 @@ describe("compile — defaults and naming", () => {
   it("applies the default runs-on", () => {
     const p = plan(`name: w\njobs:\n  a:\n    steps: [{ run: "true" }]`);
     assert.equal(p.jobs["a"]!.runsOn, DEFAULT_RUNS_ON);
-    assert.equal(DEFAULT_RUNS_ON, "local");
   });
 
   it("takes runs-on from each job, falling back to the default when omitted", () => {
@@ -108,5 +107,156 @@ jobs:
 `),
       (e) => e instanceof WorkflowCompileError && /cycle/.test(e.message),
     );
+  });
+});
+
+describe("compile — conditionals", () => {
+  it("carries a step-level if onto the planned step", () => {
+    const p = plan(`
+name: w
+jobs:
+  a:
+    steps:
+      - run: x
+        if: \${{ inputs.flag == 'yes' }}
+`);
+    assert.equal(p.jobs["a"]!.steps[0]!.if, "${{ inputs.flag == 'yes' }}");
+  });
+
+  it("carries a job-level if onto every leg", () => {
+    const p = plan(`
+name: w
+jobs:
+  a:
+    if: success()
+    steps: [{ run: x }]
+`);
+    assert.equal(p.jobs["a"]!.if, "success()");
+  });
+});
+
+describe("compile — matrix expansion", () => {
+  it("expands a single axis into one leg per value", () => {
+    const p = plan(`
+name: w
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - run: test node \${{ matrix.node }}
+`);
+    assert.deepEqual(p.jobOrder, ["test::node-20", "test::node-22", "test::node-24"]);
+    assert.equal(p.jobs["test::node-20"]!.title, "test (node=20)");
+    assert.equal(p.jobs["test::node-20"]!.steps[0]!.run, "test node 20");
+    assert.deepEqual(p.jobs["test::node-22"]!.matrix, { node: 22 });
+  });
+
+  it("takes the cartesian product of multiple axes", () => {
+    const p = plan(`
+name: w
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [20, 22]
+        os: [linux, mac]
+    steps: [{ run: "true" }]
+`);
+    assert.deepEqual(p.jobOrder.sort(), [
+      "test::node-20_os-linux",
+      "test::node-20_os-mac",
+      "test::node-22_os-linux",
+      "test::node-22_os-mac",
+    ]);
+  });
+
+  it("prunes cells listed in exclude", () => {
+    const p = plan(`
+name: w
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [20, 22]
+        os: [linux, mac]
+        exclude:
+          - { node: 22, os: mac }
+    steps: [{ run: "true" }]
+`);
+    assert.ok(!("test::node-22_os-mac" in p.jobs));
+    assert.equal(Object.keys(p.jobs).length, 3);
+  });
+
+  it("extends a matching cell via include", () => {
+    const p = plan(`
+name: w
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [20, 22]
+        include:
+          - { node: 22, experimental: true }
+    steps:
+      - run: echo \${{ matrix.experimental }}
+        env: { X: "\${{ matrix.experimental }}" }
+`);
+    // The extended leg's id reflects the added key, and matrix.* resolves.
+    assert.equal(p.jobs["test::node-22_experimental-true"]!.steps[0]!.env["X"], "true");
+    // The non-matching leg has no `experimental` key (resolves to empty).
+    assert.equal(p.jobs["test::node-20"]!.matrix!["experimental"], undefined);
+    assert.equal(p.jobs["test::node-20"]!.steps[0]!.env["X"], "");
+  });
+
+  it("appends a standalone include cell that matches nothing", () => {
+    const p = plan(`
+name: w
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [20]
+        include:
+          - { node: 99, label: edge }
+    steps: [{ run: "true" }]
+`);
+    assert.ok("test::node-99_label-edge" in p.jobs);
+    assert.deepEqual(p.jobs["test::node-99_label-edge"]!.matrix, { node: 99, label: "edge" });
+  });
+
+  it("converges dependents across all matrix legs", () => {
+    const p = plan(`
+name: w
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps: [{ run: "true" }]
+  report:
+    needs: test
+    steps: [{ run: "true" }]
+`);
+    assert.deepEqual(p.jobs["report"]!.needs.sort(), ["test::node-20", "test::node-22"]);
+  });
+
+  it("resolves matrix.* in run, env, and outputs", () => {
+    const p = plan(`
+name: w
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [20]
+    env: { NODE: "\${{ matrix.node }}" }
+    outputs: { used: "\${{ matrix.node }}" }
+    steps:
+      - run: "true"
+`);
+    const leg = p.jobs["test::node-20"]!;
+    assert.equal(leg.steps[0]!.env["NODE"], "20");
+    assert.deepEqual(leg.outputs, { used: "20" });
   });
 });

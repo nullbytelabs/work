@@ -47,10 +47,36 @@ export interface StepSpec {
   uses?: string;
   /** Inputs for a `uses` step (Phase 2+). */
   with?: Record<string, unknown>;
-  /** Conditional guard (Phase 2+). */
+  /** Conditional guard. Evaluated at runtime; a false result skips the step. */
   if?: string;
   /** Step-level env, layered over job and workflow env. */
   env?: EnvMap;
+}
+
+/** A matrix axis value (scalar). */
+export type MatrixValue = string | number | boolean;
+
+/**
+ * `strategy.matrix` — fan-out a job into one leg per combination of axis values.
+ *
+ * The named keys are axes (`node: [20, 22]`); each is an array of scalars and
+ * the legs are the full cartesian product. `include` appends/extends cells and
+ * `exclude` prunes them, matching GitHub Actions semantics. The compiler expands
+ * this into N independent `PlannedJob`s, each carrying its resolved cell so
+ * `${{ matrix.<axis> }}` can be interpolated.
+ */
+export interface MatrixSpec {
+  /** Named axes: axis name -> list of values to expand over. */
+  axes: Record<string, MatrixValue[]>;
+  /** Extra cells / extensions of existing cells (GHA `include`). */
+  include?: Record<string, MatrixValue>[];
+  /** Partial cells to remove from the product (GHA `exclude`). */
+  exclude?: Record<string, MatrixValue>[];
+}
+
+/** A job's execution `strategy:` (currently just `matrix`). */
+export interface StrategySpec {
+  matrix?: MatrixSpec;
 }
 
 /** A job: an isolated execution unit containing ordered steps. */
@@ -59,6 +85,10 @@ export interface JobSpec {
   runsOn?: string;
   /** IDs of jobs that must complete before this one (Phase 2+ DAG). */
   needs?: string[];
+  /** Conditional guard. Evaluated at runtime; a false result skips the job. */
+  if?: string;
+  /** Fan-out strategy (matrix). Expanded into independent legs by the compiler. */
+  strategy?: StrategySpec;
   /** Job-level env, layered over workflow env. */
   env?: EnvMap;
   /** Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. */

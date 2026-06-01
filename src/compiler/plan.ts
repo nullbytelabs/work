@@ -34,11 +34,18 @@ export interface PlannedStep {
 
 /** A fully-resolved job. */
 export interface PlannedJob {
+  /** Stable, unique id. For a matrix leg this is `<base>::<cell>` (path-safe). */
   id: string;
+  /** Human-readable label, e.g. `test (node=20)` for a matrix leg; defaults to `id`. */
+  title?: string;
   /** Resolved execution target key, e.g. "local" or "gondolin". */
   runsOn: string;
-  /** Resolved dependencies (job ids). */
+  /** Resolved dependencies (job ids; matrix bases are already expanded to legs). */
   needs: string[];
+  /** Raw conditional guard, evaluated at runtime; a false result skips the job. */
+  if?: string;
+  /** Resolved matrix cell for this leg, exposed as `${{ matrix.* }}`; absent for non-matrix jobs. */
+  matrix?: Record<string, string | number | boolean>;
   steps: PlannedStep[];
   /** Job outputs: name -> expression (resolved at runtime from step outputs). */
   outputs?: Record<string, string>;
@@ -50,4 +57,6 @@ export interface ExecutionPlan {
   jobs: Record<string, PlannedJob>;
   /** A valid topological execution order over `needs`. */
   jobOrder: string[];
+  /** Resolved workflow inputs, so the runtime can evaluate `if:` against them. */
+  inputs?: Record<string, string | number | boolean>;
 }
