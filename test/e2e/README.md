@@ -19,7 +19,8 @@ lives in a `.workflows/` directory — the **project root** (its parent), so
 `package.json`/source files are present. Other examples' files are not.
 
 Everything here uses only Phase 1 capabilities: `name`, workflow/job/step `env`,
-per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, and `run` steps.
+per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, `run` steps,
+`strategy.matrix`, and `if`/`when` conditionals.
 
 ## Hello world
 
@@ -39,6 +40,8 @@ per-job `runs-on` (`local` | `gondolin`), `jobs`, `needs`, and `run` steps.
 | `run-script/` | a committed `script.sh`, staged into the workspace and run with `sh script.sh` | workspace staging of committed files |
 | `with-inputs/` | typed `inputs:` (string `name`, number `age`) mapped into step env vars (defaults `world`/`36`; pass `--inputs '{"name":"josh","age":40}'`) | typed workflow inputs + interpolation |
 | `input-validation/` | a `required` enum (`options`) + a regex-`pattern` (UUID) input; bad values are rejected at compile time (`--inputs '{"release":"staging","id":"<uuid>"}'`) | required / options / pattern validators |
+| `matrix-build/` | `strategy.matrix` over `node` × `os` with an `exclude` and an `include`, converging into `report` via `needs` | matrix fan-out + `${{ matrix.* }}` |
+| `conditional-steps/` | step-level `if` (`inputs.*`, `always()`) and a job-level `if` gate; default `mode=ci` skips the release-only work (`--inputs '{"mode":"release"}'`) | `if`/`when` conditionals |
 | `agent-project/` | a **real coding project**: its pipeline + agent live in `.workflows/` (like `.github/workflows/`), the workflow runs against the project-root checkout — `npm install` → `tsc` validity → `npm start` smoke → an agent reviews the captured source. Runs `npm install` for real, so it's gated behind `PI_WF_TEST_NPM=1` (the agent is mocked). | `.workflows/` project model; checkout = project root; multiline `$PI_OUTPUT`; workflow-local agents |
 
 ## Notes on current behavior

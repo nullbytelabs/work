@@ -19,6 +19,7 @@ inputs:
 
 jobs:
   build:
+    runs-on: local
     steps:
       - name: build
         run: echo "building (${{ inputs.mode }})"
@@ -33,6 +34,7 @@ jobs:
         run: echo "cleanup runs regardless"
 
   notify:
+    runs-on: local
     needs: build
     if: ${{ inputs.mode == 'release' }} # whole job is gated
     steps:

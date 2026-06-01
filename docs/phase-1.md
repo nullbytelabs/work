@@ -82,8 +82,9 @@ isn't validated (an optional pattern-constrained input that wasn't provided
 resolves to `""` rather than failing).
 Resolved values are **interpolated at compile time** into `run` and `env`, so the
 durable plan contains concrete values and the runtime never sees an expression.
-Only `${{ inputs.<name> }}` is supported today (dot or `['name']` form); any other
-expression context (`matrix`, `github`, …) errors rather than passing through.
+`${{ inputs.<name> }}` and `${{ matrix.<axis> }}` are resolved at compile time
+(dot or `['name']` form); `needs.*`/`steps.*` resolve at runtime; the `github`
+context errors rather than passing through.
 Idiomatic use is to map an input into a step `env` var, then reference `$NAME`
 in the shell — see `test/e2e/with-inputs/`.
 
@@ -283,8 +284,10 @@ rewrite:
   for the Pi surface.)
 - **`needs` DAG:** done — the runtime walks the dependency graph and runs
   independent jobs in parallel via worker `concurrency`. **`matrix` / `if`** are
-  still modeled-but-not-executed (matrix expansion and conditional evaluation
-  are future work).
+  now executed too: the compiler expands `strategy.matrix` into one independent
+  leg per cell (cartesian product + `include`/`exclude`), and the runtime
+  evaluates `if`/`when` to gate jobs and steps. Still future work: matrix
+  `max-parallel` / `fail-fast`.
 
 ## Known Phase 1 limitations
 
@@ -292,8 +295,10 @@ rewrite:
   wired yet (the cross-job orchestration lives in the runtime, not a durable
   task; needs a persistent dataDir + run id + `--resume`). The default PGLite is
   ephemeral in-memory per run.
-- No `strategy.matrix` expansion and no `if:` evaluation (both are parsed and
-  modeled, but not yet executed). Agent `uses:` steps and `steps.*`/`needs.*`
+- `strategy.matrix` expansion and `if:`/`when:` evaluation are implemented
+  (cartesian product + `include`/`exclude`; a safe GHA-subset condition
+  evaluator). Not yet: matrix `max-parallel` / `fail-fast`, and the `github`
+  expression context. Agent `uses:` steps and `steps.*`/`needs.*`
   output passing **are** implemented (see the "Agent steps" and "Outputs"
   sections above); what's not yet built there is **tool-using / multi-turn**
   agents — the current `agent` handler backs the no-tools `summarize`.
