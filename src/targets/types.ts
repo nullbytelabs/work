@@ -33,6 +33,14 @@ export interface RunResult {
 export interface ExecutionTarget {
   /** Identifier for diagnostics, e.g. "local". */
   readonly kind: string;
+  /**
+   * The staged per-job workspace path **as a run command sees it** — the host
+   * working directory for `local`, the guest mount (`/workspace`) for
+   * `gondolin`. The runtime places files a step writes and the host later reads
+   * (e.g. `$PI_OUTPUT`) under this path, so output capture works on every target
+   * regardless of how the host directory is surfaced inside the environment.
+   */
+  readonly workspacePath: string;
   /** Provision/boot the environment. */
   provision(): Promise<void>;
   /** Run a single step command, capturing output + exit code. */
