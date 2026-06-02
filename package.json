@@ -1,6 +1,6 @@
 {
   "name": "@nullbytelabs/work",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run GitHub-Actions-style workflows locally — each job isolated in a secure gondolin micro-VM, with optional AI agent steps.",
   "author": "dydx",
   "license": "MIT",
