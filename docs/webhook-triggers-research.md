@@ -279,6 +279,19 @@ operator may forget the edge, or switch tunnels). Note Alertmanager can't do SSO
 for the CF-Access path it needs a **service token**; otherwise lean on our bearer
 check.
 
+> **Updates from [`embedded-tunneling-research.md`](embedded-tunneling-research.md)
+> (programmatic/embedded tunnels):** two refinements to the above. (1) ngrok's edge
+> `verify-webhook` is **named-provider-only with no generic-HMAC mode**, and **neither
+> Alertmanager nor Grafana is on the list** — so for *our* senders the edge can't
+> verify signatures; our own `node:crypto` HMAC/bearer is the boundary (ngrok's edge
+> value collapses to OAuth/IP/basic-auth defense-in-depth). (2) Cloudflare
+> **TryCloudflare quick tunnels have no SSE support and a 200-request cap** — unfit
+> for the live-run streaming in §7; use **named** Cloudflare tunnels. That doc also
+> finds **only ngrok is Node-embeddable** (`@ngrok/ngrok`); Tailscale (`tsnet` is
+> Go-only) and Pangolin (Newt) are sidecar/self-host, so a `work --tunnel` feature
+> would shell out to an installed binary (no npm dep) with ngrok-SDK embed as an
+> optional dependency.
+
 ---
 
 ## 7. Async receiver architecture (extends the `--web` server)
