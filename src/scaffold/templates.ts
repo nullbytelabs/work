@@ -154,6 +154,77 @@ export function scaffoldFiles(opts: ScaffoldOptions): Map<string, string> {
   files.set(`${agentDir}/agent.yaml`, render(AGENT_MANIFEST_YAML, name));
   files.set(`${agentDir}/instructions.md`, render(AGENT_INSTRUCTIONS_MD, name));
   files.set(`${agentDir}/task.md`, render(AGENT_TASK_MD, name));
-  files.set(CONFIG_FILENAME, JSON.stringify(STARTER_CONFIG, null, 2) + "\n");
+  const cfg = starterConfigFile();
+  files.set(cfg.path, cfg.contents);
+  return files;
+}
+
+/**
+ * The starter project config (codegen). `init` always writes this; the writer
+ * preserves an existing one (it may hold real creds). Mirrors the
+ * `pi-workflows.config.example.json` shape — `apiKey` is an `$ENV` ref, never a
+ * literal secret.
+ */
+export function starterConfigFile(): { path: string; contents: string } {
+  return { path: CONFIG_FILENAME, contents: JSON.stringify(STARTER_CONFIG, null, 2) + "\n" };
+}
+
+// A skill for the developer's OWN coding agent (Claude Code / Amp) — files on
+// disk that teach *their* assistant to author and drive the `work` CLI. This is
+// unrelated to the engine's in-gondolin agent steps (two different "agents").
+// A single SKILL.md works in both editors; the `description` drives auto-discovery.
+const SKILL_MD = `---
+name: work-workflows
+description: Author and run GitHub-Actions-style workflows with the \`work\` CLI in this repo. Use when asked to write, run, inspect, or debug a workflow, a .workflows/*.yaml file, or an \`agent/\` step.
+---
+
+# Authoring \`work\` workflows
+
+This repo uses the **work** CLI to run GitHub-Actions-style workflows locally —
+each job isolated in a gondolin micro-VM, with optional AI agent steps.
+
+## Layout
+- Workflows live in \`${WORKFLOWS_DIR}/<file>.yaml\`; you run one by its declared
+  \`name:\` (not its filename).
+- Agent packages live in \`${WORKFLOWS_DIR}/agents/<name>/\` and are referenced as
+  \`uses: agent/<name>\`.
+- Provider/model config for agent steps is \`${CONFIG_FILENAME}\` (\`$ENV\` refs for keys).
+
+## Spec shape
+\`\`\`yaml
+name: <unique name>          # how you invoke it: work run <name>
+env: { KEY: value }          # optional workflow-level env
+jobs:
+  <job-id>:
+    runs-on: gondolin        # the only target (the default)
+    needs: [<other-job>]     # optional dependencies
+    strategy:
+      matrix: { k: [a, b] }  # optional fan-out
+    steps:
+      - name: <label>
+        run: echo hi         # a shell step (run XOR uses)
+      - id: review
+        uses: agent/<name>   # an agent step
+\`\`\`
+A step has \`run\` **or** \`uses\`, never both. Typed \`inputs\` are validated at compile time.
+
+## Commands
+- \`work create <name>\` — scaffold a new workflow (\`--template hello-world|agent-action\`).
+- \`work run <name>\` — run the workflow whose \`name:\` matches.
+- \`work <file>.yaml\` — run an ad-hoc file directly.
+- \`work graph <name>\` — print the job DAG (\`--format mermaid|dot|json|ascii\`).
+- \`work doctor\` — check this machine can run gondolin workflows.
+`;
+
+/**
+ * Files written by `init --include-skill`: the same SKILL.md at both editors'
+ * project-scope locations. Claude Code reads `.claude/skills/`; Amp reads its
+ * first-class `.agents/skills/` (and also `.claude/skills/` for compatibility),
+ * so writing both covers either assistant.
+ */
+export function skillFiles(): Map<string, string> {
+  const files = new Map<string, string>();
+  files.set(".claude/skills/work-workflows/SKILL.md", SKILL_MD);
+  files.set(".agents/skills/work-workflows/SKILL.md", SKILL_MD);
   return files;
 }

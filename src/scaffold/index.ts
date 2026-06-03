@@ -12,9 +12,8 @@
  *     workflow file needs `--force` to overwrite, and `pi-workflows.config.json`
  *     is never overwritten (it may hold real creds).
  */
-import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "../spec/index.ts";
 import { compile, WorkflowCompileError } from "../compiler/index.ts";
 import { listWorkflowNames } from "../project.ts";
@@ -22,6 +21,7 @@ import { UserFacingError } from "../errors.ts";
 import { failUsage, prog } from "../cli-util.ts";
 import { CODE, paint, shouldColor } from "../tui/palette.ts";
 import { slug } from "./slug.ts";
+import { planWrites, executeWrites } from "./write.ts";
 import {
   CONFIG_FILENAME,
   TEMPLATES,
@@ -74,7 +74,7 @@ function parseCreateArgs(argv: string[]): CreateOptions {
 }
 
 /** Validate generated workflow YAML through the real pipeline before writing. */
-function assertValidWorkflow(name: string, yamlText: string): void {
+export function assertValidWorkflow(name: string, yamlText: string): void {
   try {
     const plan = compile(parseWorkflow(yamlText));
     // A clean scaffold sets runs-on explicitly, so there should be no warnings;
@@ -89,32 +89,6 @@ function assertValidWorkflow(name: string, yamlText: string): void {
     }
     throw err;
   }
-}
-
-interface FileAction {
-  rel: string;
-  abs: string;
-  action: "create" | "overwrite" | "skip";
-  reason?: string;
-}
-
-/** Decide what happens to each file (no FS writes) — the skip/force/clobber policy. */
-function planWrites(files: Map<string, string>, cwd: string, force: boolean): FileAction[] {
-  const actions: FileAction[] = [];
-  for (const rel of files.keys()) {
-    const abs = join(cwd, rel);
-    if (!existsSync(abs)) {
-      actions.push({ rel, abs, action: "create" });
-    } else if (rel === CONFIG_FILENAME) {
-      // Never overwrite config — it may hold real credentials.
-      actions.push({ rel, abs, action: "skip", reason: "exists (config preserved)" });
-    } else if (force) {
-      actions.push({ rel, abs, action: "overwrite" });
-    } else {
-      actions.push({ rel, abs, action: "skip", reason: "exists (use --force to overwrite)" });
-    }
-  }
-  return actions;
 }
 
 /** Run the create command. Resolves with the process exit code. */
@@ -142,33 +116,10 @@ export async function runCreate(argv: string[], cwd: string = process.cwd()): Pr
     );
   }
 
-  const actions = planWrites(files, cwd, opts.force);
   const color = shouldColor(Boolean(process.stdout.isTTY));
-
-  if (opts.dryRun) {
-    process.stdout.write(`${paint(color, CODE.bold, `dry run`)} — would write (nothing changed):\n`);
-    for (const a of actions) {
-      const tag = a.action === "skip" ? paint(color, CODE.yellow, `skip ${a.reason}`) : paint(color, CODE.green, a.action);
-      process.stdout.write(`  ${tag}  ${a.rel}\n`);
-    }
-    return 0;
-  }
-
-  for (const a of actions) {
-    if (a.action === "skip") continue;
-    await mkdir(dirname(a.abs), { recursive: true });
-    await writeFile(a.abs, files.get(a.rel)!);
-  }
-
-  // Report + next steps.
-  for (const a of actions) {
-    if (a.action === "skip") {
-      process.stdout.write(`  ${paint(color, CODE.yellow, "⊘")} ${a.rel}  ${paint(color, CODE.dim, a.reason ?? "skipped")}\n`);
-    } else {
-      const verb = a.action === "overwrite" ? "overwrote" : "created";
-      process.stdout.write(`  ${paint(color, CODE.green, "✓")} ${verb} ${a.rel}\n`);
-    }
-  }
+  const actions = planWrites(files, cwd, opts.force);
+  await executeWrites(files, actions, { dryRun: opts.dryRun, color });
+  if (opts.dryRun) return 0;
 
   const p = prog();
   process.stdout.write(`\n${paint(color, CODE.bold, "Next steps:")}\n`);
