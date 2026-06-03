@@ -43,7 +43,19 @@ Prefer `"apiKey": "$FIREWORKS_API_KEY"` over pasting a literal key. A committed 
 is a leaked key.
 :::
 
+::: tip Scaffold the config
+`work init` writes a starter `pi-workflows.config.json` like this, and
+`work init --global` puts one at `~/.config/work/config.json` to share across
+projects. Fill in a real `$FIREWORKS_API_KEY` (or your provider's key).
+:::
+
 ## 2. Define an agent
+
+::: tip Scaffold the whole thing
+`work create <name> --template agent-action` generates the workflow, the
+`.workflows/agents/<name>/` package below, and a starter config in one step — then
+you just edit the prompts.
+:::
 
 An agent is a package under `.workflows/agents/<name>/` with three files:
 

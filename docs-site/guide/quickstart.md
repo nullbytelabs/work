@@ -4,6 +4,22 @@ This page takes you from an empty directory to a workflow running inside a
 micro-VM. It assumes you've met the [Requirements](./requirements) and
 [installed](./installation) `work`.
 
+## Scaffold or hand-write
+
+The fastest start is to let `work` scaffold a project for you:
+
+```bash
+work init                 # writes .workflows/hello-world.yaml + a starter config
+work run hello-world      # run the scaffolded workflow by its name
+```
+
+`work create <name>` scaffolds an additional workflow any time, and
+`work create <name> --template agent-action` scaffolds a full [agent
+step](./agent-steps). Both validate the generated YAML before writing and never
+clobber existing files.
+
+The rest of this page hand-writes the YAML so you can see the moving parts.
+
 ## Your first workflow
 
 A workflow is a YAML file: a set of **jobs**, each a list of ordered **steps**.

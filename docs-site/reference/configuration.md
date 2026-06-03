@@ -6,13 +6,40 @@
 
 ## File resolution
 
-The engine looks for config in this order:
+Config is loaded in **two layers** — a machine-wide global file, then one project
+layer that overrides it:
 
-1. The path passed to `--config <file>`.
-2. The path in `$PI_WORKFLOWS_CONFIG`.
-3. `./pi-workflows.config.json` in the working directory, if it exists.
+1. **Global** (lowest precedence) — `~/.config/work/config.json`
+   (`$XDG_CONFIG_HOME/work/config.json` when set; `~/.work/config.json` is read as a
+   legacy fallback). This is the natural home for your providers and models, shared
+   across every project. Create it with `work init --global`. Skip it for a single
+   run with `--no-global`.
+2. **Project** (overrides global) — chosen by, in order:
+   1. the path passed to `--config <file>`,
+   2. the path in `$PI_WORKFLOWS_CONFIG`,
+   3. `./pi-workflows.config.json` in the working directory, if it exists.
 
 An absent config is fine until an agent step actually needs a model.
+
+::: tip Scaffold it
+`work init` writes a starter project `pi-workflows.config.json`, and
+`work init --global` writes the machine-wide one. Neither ever overwrites an
+existing config.
+:::
+
+## How the layers merge
+
+The two layers are **deep-merged**, with the project layer winning:
+
+- `providers` and `models` are unioned by key; on a collision the project layer's
+  entry **replaces** the global one wholesale (no field-level merging).
+- `defaultModel` is last-writer-wins (the project layer's, if set).
+- An omitted or empty map inherits the lower layer — so a project config can shrink
+  to just `{ "defaultModel": "kimi" }` once the global file supplies the catalog.
+
+Cross-references are validated **after** merging, not per file. That's what lets a
+project layer reference a model whose `provider` is declared only in the global
+file — a layer that looks "incomplete" on its own is still valid once merged.
 
 ## Shape
 
@@ -53,7 +80,7 @@ A map of model alias → model definition. The alias is what you reference (and 
 
 | Field | Type | Notes |
 |---|---|---|
-| `provider` | string | **Required.** A key in `providers`. Must exist, or config validation fails. |
+| `provider` | string | **Required.** A key in `providers` — in the *merged* config, so it may be declared in the global layer. Validation fails if it exists nowhere. |
 | `model` | string | **Required.** The provider-native model id. |
 | `maxTokens` | number | Optional. Max tokens for the response. |
 | `temperature` | number | Optional. Sampling temperature. |

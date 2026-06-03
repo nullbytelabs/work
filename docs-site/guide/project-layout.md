@@ -17,6 +17,13 @@ my-project/
             └── task.md
 ```
 
+::: tip Scaffold it
+`work init` creates this layout (a starter workflow + config), and
+`work create <name>` adds another workflow — `--template agent-action` also writes
+an `agents/<name>/` package like the one above. See the
+[CLI reference](../reference/cli#work-init).
+:::
+
 ## Running a pipeline by name
 
 When your workflows live in `.workflows/`, run one **by its `name:`** — the engine
