@@ -75,3 +75,46 @@ describe("runInit (integration, real temp dir)", () => {
     assert.ok(existsSync(join(proj, ".workflows", "agents", "agent-action", "instructions.md")));
   });
 });
+
+describe("runInit --global (writes the XDG global config)", () => {
+  let xdg: string;
+  let prevXdg: string | undefined;
+  beforeEach(async () => {
+    xdg = await mkdtemp(join(tmpdir(), "pi-wf-xdg-"));
+    prevXdg = process.env["XDG_CONFIG_HOME"];
+    process.env["XDG_CONFIG_HOME"] = xdg;
+  });
+  afterEach(async () => {
+    if (prevXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
+    else process.env["XDG_CONFIG_HOME"] = prevXdg;
+    await rm(xdg, { recursive: true, force: true });
+  });
+
+  it("writes config.json under $XDG_CONFIG_HOME/work and does NOT touch the project", async () => {
+    const proj = await mkdtemp(join(tmpdir(), "pi-wf-gproj-"));
+    try {
+      const code = await runInit(["--global"], proj);
+      assert.equal(code, 0);
+      assert.ok(existsSync(join(xdg, "work", "config.json")));
+      assert.equal(existsSync(join(proj, ".workflows")), false);
+      assert.equal(existsSync(join(proj, CONFIG_FILENAME)), false);
+    } finally {
+      await rm(proj, { recursive: true, force: true });
+    }
+  });
+
+  it("is idempotent and never clobbers an existing global config", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    await mkdir(join(xdg, "work"), { recursive: true });
+    const mine = '{"providers":{},"models":{},"_mine":true}';
+    await writeFile(join(xdg, "work", "config.json"), mine);
+    const code = await runInit(["--global"], "/tmp");
+    assert.equal(code, 0);
+    assert.equal(await (await import("node:fs/promises")).readFile(join(xdg, "work", "config.json"), "utf-8"), mine);
+  });
+
+  it("--dry-run writes nothing", async () => {
+    await runInit(["--global", "--dry-run"], "/tmp");
+    assert.equal(existsSync(join(xdg, "work", "config.json")), false);
+  });
+});

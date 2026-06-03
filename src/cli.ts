@@ -10,13 +10,12 @@
  * Streams step output live and exits non-zero if any job fails.
  */
 import { readFile, mkdtemp } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { AbsurdRuntime } from "./runtime/index.ts";
-import { loadConfig, type PiWorkflowsConfig } from "./config/index.ts";
+import { resolveConfigLayers, loadMergedConfig, type PiWorkflowsConfig } from "./config/index.ts";
 import { createAgentUsesHandler, makeAgentEgressResolver } from "./agent/index.ts";
 import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "./project.ts";
 import { selectPresenter, detectCI } from "./tui/index.ts";
@@ -25,8 +24,6 @@ import { runDoctor } from "./doctor/index.ts";
 import { runCreate } from "./scaffold/index.ts";
 import { runInit } from "./init/index.ts";
 import { UserFacingError } from "./errors.ts";
-
-const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
 
 interface CliArgs {
   /** Ad-hoc: a path to a workflow file. */
@@ -39,6 +36,8 @@ interface CliArgs {
   quiet: boolean;
   inputs: Record<string, unknown>;
   config?: string;
+  /** Skip the global config layer for a hermetic run. */
+  noGlobal?: boolean;
   /** `graph` subcommand: emit the DAG instead of running. */
   graph?: boolean;
   /** Graph output format (defaults to mermaid). */
@@ -54,6 +53,7 @@ function parseArgs(argv: string[]): CliArgs {
   let quiet = false;
   let inputs: Record<string, unknown> = {};
   let config: string | undefined;
+  let noGlobal = false;
   let format: GraphFormat | undefined;
   let steps = false;
 
@@ -90,6 +90,8 @@ function parseArgs(argv: string[]): CliArgs {
       inputs = parsed as Record<string, unknown>;
     } else if (arg === "--quiet") {
       quiet = true;
+    } else if (arg === "--no-global") {
+      noGlobal = true;
     } else if (arg === "-h" || arg === "--help") {
       printUsage();
       process.exit(0);
@@ -100,7 +102,7 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  const common = { workdir, quiet, inputs, ...(workspace ? { workspace } : {}), ...(config ? { config } : {}) };
+  const common = { workdir, quiet, inputs, noGlobal, ...(workspace ? { workspace } : {}), ...(config ? { config } : {}) };
 
   // `graph <file|name>` — emit the DAG instead of running. By-name when
   // `--workspace` is given (like `run`), else treat the target as a file path.
@@ -142,19 +144,10 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
-      `  ${prog} init [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
+      `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} doctor [--json]\n`,
   );
-}
-
-/** Resolve which config file to load: --config, then $PI_WORKFLOWS_CONFIG, then the default if it exists. */
-function resolveConfigPath(cliPath?: string): string | undefined {
-  if (cliPath) return resolve(cliPath);
-  const env = process.env["PI_WORKFLOWS_CONFIG"];
-  if (env) return resolve(env);
-  const def = resolve(DEFAULT_CONFIG_PATH);
-  return existsSync(def) ? def : undefined;
 }
 
 function fail(msg: string): never {
@@ -219,11 +212,11 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Load provider/model config (for agent steps). Absent config is fine until an
-  // agent step actually needs a model.
-  let config: PiWorkflowsConfig | undefined;
-  const configPath = resolveConfigPath(args.config);
-  if (configPath) config = await loadConfig(configPath);
+  // Load provider/model config (for agent steps), merging global + project
+  // layers (global is the creds home; the project layer overrides). Absent
+  // config is fine until an agent step actually needs a model.
+  const layers = resolveConfigLayers(args.config, { noGlobal: args.noGlobal });
+  const config: PiWorkflowsConfig | undefined = await loadMergedConfig(layers);
 
   const workRoot = args.workdir
     ? resolve(args.workdir)

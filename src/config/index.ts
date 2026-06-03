@@ -7,6 +7,9 @@
  * support `$VAR` / `${VAR}` env expansion so the file itself need not hold them.
  */
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { UserFacingError } from "../errors.ts";
 
 export interface ProviderConfig {
@@ -50,14 +53,21 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** Parse + validate a config object (shape only). */
-export function parseConfig(raw: unknown): PiWorkflowsConfig {
+/**
+ * Parse a config object's field types/shapes ONLY — deliberately no
+ * cross-references. Because config is layered (global + project), a model whose
+ * `provider` lives in a *different* layer must not be rejected here; cross-refs
+ * are checked once, post-merge, by `validateConfig`. `providers`/`models` are
+ * optional so a project layer can shrink to just `{ "defaultModel": "kimi" }`
+ * once global supplies the catalog.
+ */
+export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
   if (!isObject(raw)) throw new UserFacingError("config must be a JSON object");
-  if (!isObject(raw.providers)) throw new UserFacingError("config.providers must be an object");
-  if (!isObject(raw.models)) throw new UserFacingError("config.models must be an object");
+  if (raw.providers !== undefined && !isObject(raw.providers)) throw new UserFacingError("config.providers must be an object");
+  if (raw.models !== undefined && !isObject(raw.models)) throw new UserFacingError("config.models must be an object");
 
   const providers: Record<string, ProviderConfig> = {};
-  for (const [name, p] of Object.entries(raw.providers)) {
+  for (const [name, p] of Object.entries(raw.providers ?? {})) {
     if (!isObject(p) || typeof p.baseUrl !== "string" || typeof p.apiKey !== "string") {
       throw new UserFacingError(`config.providers.${name} needs string baseUrl and apiKey`);
     }
@@ -65,12 +75,9 @@ export function parseConfig(raw: unknown): PiWorkflowsConfig {
   }
 
   const models: Record<string, ModelConfig> = {};
-  for (const [alias, m] of Object.entries(raw.models)) {
+  for (const [alias, m] of Object.entries(raw.models ?? {})) {
     if (!isObject(m) || typeof m.provider !== "string" || typeof m.model !== "string") {
       throw new UserFacingError(`config.models.${alias} needs string provider and model`);
-    }
-    if (!(m.provider in providers)) {
-      throw new UserFacingError(`config.models.${alias} references unknown provider "${m.provider}"`);
     }
     const mc: ModelConfig = { provider: m.provider, model: m.model };
     if (typeof m.maxTokens === "number") mc.maxTokens = m.maxTokens;
@@ -80,7 +87,7 @@ export function parseConfig(raw: unknown): PiWorkflowsConfig {
 
   const config: PiWorkflowsConfig = { providers, models };
   if (raw.defaultModel !== undefined) {
-    if (typeof raw.defaultModel !== "string" || !(raw.defaultModel in models)) {
+    if (typeof raw.defaultModel !== "string") {
       throw new UserFacingError(`config.defaultModel must name a model in config.models`);
     }
     config.defaultModel = raw.defaultModel;
@@ -88,21 +95,131 @@ export function parseConfig(raw: unknown): PiWorkflowsConfig {
   return config;
 }
 
-/** Load + parse a config file. Throws UserFacingError on bad JSON/shape. */
+/**
+ * Merge two config layers — `over` wins. `providers`/`models` merge by key, with
+ * a colliding entry replaced *wholesale* (predictable beats field-merge); an
+ * omitted/empty map inherits the lower layer. `defaultModel` is last-writer-wins.
+ */
+export function mergeConfig(base: PiWorkflowsConfig, over: PiWorkflowsConfig): PiWorkflowsConfig {
+  const merged: PiWorkflowsConfig = {
+    providers: { ...base.providers, ...over.providers },
+    models: { ...base.models, ...over.models },
+  };
+  const defaultModel = over.defaultModel ?? base.defaultModel;
+  if (defaultModel !== undefined) merged.defaultModel = defaultModel;
+  return merged;
+}
+
+/** Cross-reference validation, run ONCE on the merged config. */
+export function validateConfig(config: PiWorkflowsConfig): PiWorkflowsConfig {
+  for (const [alias, m] of Object.entries(config.models)) {
+    if (!(m.provider in config.providers)) {
+      throw new UserFacingError(`config.models.${alias} references unknown provider "${m.provider}"`);
+    }
+  }
+  if (config.defaultModel !== undefined && !(config.defaultModel in config.models)) {
+    throw new UserFacingError(`config.defaultModel must name a model in config.models`);
+  }
+  return config;
+}
+
+/** Parse + validate a single config object (shape + cross-refs). */
+export function parseConfig(raw: unknown): PiWorkflowsConfig {
+  return validateConfig(parsePartialConfig(raw));
+}
+
+/** Project config filename — found with zero flags at the project root. */
+export const PROJECT_CONFIG_FILENAME = "pi-workflows.config.json";
+const GLOBAL_CONFIG_BASENAME = "config.json";
+
+/**
+ * Candidate global-config paths in read precedence (first existing wins):
+ * `$XDG_CONFIG_HOME/work/`, then `~/.config/work/` (the XDG default and CLI
+ * convention), then `~/.work/` as a read-only fallback for early adopters.
+ */
+export function globalConfigCandidates(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string[] {
+  const out: string[] = [];
+  const xdg = env["XDG_CONFIG_HOME"];
+  if (xdg) out.push(join(xdg, "work", GLOBAL_CONFIG_BASENAME));
+  out.push(join(home, ".config", "work", GLOBAL_CONFIG_BASENAME));
+  out.push(join(home, ".work", GLOBAL_CONFIG_BASENAME));
+  return out;
+}
+
+/** The global config path to READ (first existing candidate), or undefined. */
+export function resolveGlobalConfigPath(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string | undefined {
+  return globalConfigCandidates(env, home).find((p) => existsSync(p));
+}
+
+/** The global config path to WRITE — XDG-first, never the legacy `~/.work` fallback. */
+export function globalConfigWritePath(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const xdg = env["XDG_CONFIG_HOME"];
+  return join(xdg ?? join(home, ".config"), "work", GLOBAL_CONFIG_BASENAME);
+}
+
+/** One config file in the merge order, with whether its absence is an error. */
+export interface ConfigLayer {
+  path: string;
+  required: boolean;
+}
+
+/**
+ * The ordered config layers to load (lowest precedence first): the global file
+ * (optional), then exactly one project layer — `--config` > `$PI_WORKFLOWS_CONFIG`
+ * (both required-to-exist) > the default project file (optional). `--no-global`
+ * drops the global layer for a hermetic run.
+ */
+export function resolveConfigLayers(cliPath: string | undefined, opts: { noGlobal?: boolean } = {}): ConfigLayer[] {
+  const layers: ConfigLayer[] = [];
+  if (!opts.noGlobal) {
+    const g = resolveGlobalConfigPath();
+    if (g) layers.push({ path: g, required: false });
+  }
+  if (cliPath) {
+    layers.push({ path: resolve(cliPath), required: true });
+  } else if (process.env["PI_WORKFLOWS_CONFIG"]) {
+    layers.push({ path: resolve(process.env["PI_WORKFLOWS_CONFIG"]), required: true });
+  } else {
+    layers.push({ path: resolve(PROJECT_CONFIG_FILENAME), required: false });
+  }
+  return layers;
+}
+
+/**
+ * Read, merge, and validate config layers. Optional layers that don't exist are
+ * skipped; a required layer that's missing/unreadable throws. Cross-references
+ * are validated once on the merged result. Returns `undefined` when no layer
+ * loaded (so a project with no config behaves exactly as before).
+ */
+export async function loadMergedConfig(layers: ConfigLayer[]): Promise<PiWorkflowsConfig | undefined> {
+  let merged: PiWorkflowsConfig = { providers: {}, models: {} };
+  let loaded = false;
+  for (const layer of layers) {
+    if (!existsSync(layer.path)) {
+      if (layer.required) throw new UserFacingError(`cannot read config file: ${layer.path}`);
+      continue;
+    }
+    let text: string;
+    try {
+      text = await readFile(layer.path, "utf-8");
+    } catch {
+      throw new UserFacingError(`cannot read config file: ${layer.path}`);
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      throw new UserFacingError(`config file is not valid JSON: ${layer.path}`);
+    }
+    merged = mergeConfig(merged, parsePartialConfig(raw));
+    loaded = true;
+  }
+  return loaded ? validateConfig(merged) : undefined;
+}
+
+/** Load + validate a single config file. Throws on bad JSON/shape/cross-ref. */
 export async function loadConfig(path: string): Promise<PiWorkflowsConfig> {
-  let text: string;
-  try {
-    text = await readFile(path, "utf-8");
-  } catch {
-    throw new UserFacingError(`cannot read config file: ${path}`);
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    throw new UserFacingError(`config file is not valid JSON: ${path}`);
-  }
-  return parseConfig(raw);
+  return (await loadMergedConfig([{ path, required: true }]))!;
 }
 
 /** Resolve a model alias (or the default) to connection details. */
