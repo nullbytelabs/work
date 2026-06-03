@@ -9,6 +9,7 @@
  * width so nothing wraps (which would corrupt the in-place cursor math).
  */
 import type { JobPhase, JobState } from "./store.ts";
+import { CODE, RESET, paint } from "./palette.ts";
 
 export interface RenderOpts {
   /** Emit ANSI colour codes. */
@@ -23,24 +24,8 @@ export interface RenderOpts {
   final: boolean;
 }
 
-const ESC = "\x1b[";
-const RESET = `${ESC}0m`;
-const CODE = {
-  dim: `${ESC}2m`,
-  bold: `${ESC}1m`,
-  red: `${ESC}31m`,
-  green: `${ESC}32m`,
-  yellow: `${ESC}33m`,
-  cyan: `${ESC}36m`,
-  gray: `${ESC}90m`,
-};
-
 // eslint-disable-next-line no-control-regex -- matching ANSI SGR escape sequences requires the ESC byte
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
-
-function paint(on: boolean, code: string, s: string): string {
-  return on ? `${code}${s}${RESET}` : s;
-}
 
 function visLen(s: string): number {
   return s.replace(ANSI_RE, "").length;

@@ -8,3 +8,4 @@ export type { Presenter, SelectOptions } from "./presenter.ts";
 export { levelize, type Levels } from "./levels.ts";
 export { RunStore, shortStep, type JobState, type JobPhase } from "./store.ts";
 export { renderBoard, truncVisible, type RenderOpts } from "./render.ts";
+export { CODE, RESET, paint, shouldColor } from "./palette.ts";

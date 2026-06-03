@@ -21,6 +21,7 @@ import { createAgentUsesHandler, makeAgentEgressResolver } from "./agent/index.t
 import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "./project.ts";
 import { selectPresenter, detectCI } from "./tui/index.ts";
 import { emitGraph, isGraphFormat, GRAPH_FORMATS, type GraphFormat } from "./graph/index.ts";
+import { runDoctor } from "./doctor/index.ts";
 import { UserFacingError } from "./errors.ts";
 
 const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
@@ -138,7 +139,8 @@ function printUsage(): void {
       `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n` +
       `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
-      `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n`,
+      `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
+      `  ${prog} doctor [--json]\n`,
   );
 }
 
@@ -157,7 +159,15 @@ function fail(msg: string): never {
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  // Dispatch first, then per-command parse. `doctor` has a disjoint flag set
+  // (`--json`) from run/graph, so it owns its own parsing; everything else flows
+  // through the unchanged `parseArgs` (run / graph / bare-file path).
+  const argv = process.argv.slice(2);
+  if (argv[0] === "doctor") {
+    process.exit(await runDoctor(argv.slice(1)));
+  }
+
+  const args = parseArgs(argv);
 
   // Resolve where the workflow lives and what its checkout is. By name:
   // `<workspace>/.workflows/*.yaml` whose `name:` matches (workspace defaults to

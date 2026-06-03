@@ -1,0 +1,17 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#646cff"/>
+      <stop offset="1" stop-color="#9499ff"/>
+    </linearGradient>
+  </defs>
+  <!-- DAG: one source fanning out to two parallel jobs that converge -->
+  <line x1="30" y1="60" x2="60" y2="30" stroke="url(#g)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="30" y1="60" x2="60" y2="90" stroke="url(#g)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="60" y1="30" x2="90" y2="60" stroke="url(#g)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="60" y1="90" x2="90" y2="60" stroke="url(#g)" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="30" cy="60" r="12" fill="url(#g)"/>
+  <circle cx="60" cy="30" r="12" fill="url(#g)"/>
+  <circle cx="60" cy="90" r="12" fill="url(#g)"/>
+  <circle cx="90" cy="60" r="12" fill="url(#g)"/>
+</svg>
