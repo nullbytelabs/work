@@ -50,12 +50,12 @@ The output adapts to where it runs:
 
 - **On an interactive terminal**, you get a live, dependency-aware status board
   that updates as jobs start, stream output, and finish.
-- **In CI or a pipe**, it prints buffered per-job output and exits **non-zero** on
-  failure — so it slots into an existing pipeline cleanly.
+- **In a pipe or non-interactive runner**, it prints buffered per-job output and
+  exits **non-zero** on failure — so it drops into a script or scheduler cleanly.
 
 Pass [`--quiet`](../reference/cli#flags) to suppress the board entirely.
 
-## A pipeline with dependencies
+## Multiple jobs with dependencies
 
 Real workflows have more than one job. Use `needs` to order them; jobs without a
 dependency between them run **in parallel**:

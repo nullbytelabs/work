@@ -6,8 +6,8 @@ checkout — so it can read and edit the project's files directly. The model is
 reached only through the sandbox's mediated egress, and your API key is injected
 host-side and **never enters the guest**.
 
-An agent is the `uses:` unit of pi-workflows — the rough analog of a marketplace
-action in GitHub Actions, except it's an AI agent you define in your own project.
+An agent is the `uses:` unit of pi-workflows — a reusable AI step you define in
+your own project and drop into any workflow.
 
 ## 1. Configure a model
 
@@ -122,6 +122,6 @@ declared inputs/outputs. Multi-turn agents are not yet implemented.
 
 ::: tip Complete example
 [`test/e2e/agent-project/`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/agent-project)
-is a full, runnable example — a `ci.yaml` pipeline (install → typecheck → smoke
+is a full, runnable example — a verification workflow (install → typecheck → smoke
 test) and a separate `review.yaml` where an agent reviews the source.
 :::

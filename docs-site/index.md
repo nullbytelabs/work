@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "pi-workflows"
-  text: "CI on your own machine"
-  tagline: GitHub-Actions-style workflows where each job runs in its own secure micro-VM — durable, crash-resumable, and able to hand work to a real AI coding agent inside the sandbox.
+  text: "Sandboxed workflows with agents built in"
+  tagline: Define a workflow in YAML and run it on your own machine — every job isolated in a secure micro-VM, execution durable and crash-resumable, and any step able to hand off to a real AI agent working inside the sandbox.
   image:
     src: /logo.svg
     alt: pi-workflows
@@ -20,9 +20,9 @@ hero:
       link: https://github.com/nullbytelabs/pi-workflows
 
 features:
-  - icon: 🧱
-    title: Familiar YAML
-    details: Jobs, steps, needs, env, inputs, outputs, matrix, conditionals — it mirrors GitHub Actions, so most of it already looks familiar.
+  - icon: 🧩
+    title: Any workflow
+    details: Build-and-test, data processing, scheduled automation, deploys — anything you'd otherwise script. A small YAML surface of jobs, steps, dependencies, matrices, and conditionals.
     linkText: Writing a workflow
     link: /guide/writing-workflows
   - icon: 🔒
@@ -36,8 +36,8 @@ features:
     linkText: How it works
     link: /guide/how-it-works
   - icon: 🤖
-    title: AI agent steps
-    details: A step can hand work to a real Pi coding agent running inside the job's sandbox — rooted at the checkout, with your API key never entering the guest.
+    title: Agents as steps
+    details: Strap a real AI agent to any step. It runs inside the job's sandbox, rooted at the checkout with its full toolset — reading, editing, and deciding — while your API key never enters the guest.
     linkText: Agent steps
     link: /guide/agent-steps
 ---

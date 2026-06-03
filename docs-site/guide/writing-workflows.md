@@ -1,8 +1,8 @@
 # Writing a workflow
 
 A workflow is a YAML file describing a set of **jobs**, each a list of ordered
-**steps**. It mirrors GitHub Actions, so most of it will look familiar. This page
-walks through every building block; for the exhaustive field list, see the
+**steps**. The surface is small. This page walks through every building block; for
+the exhaustive field list, see the
 [Workflow syntax reference](../reference/workflow-syntax).
 
 Here's a workflow that uses most of the surface at once:
@@ -11,7 +11,7 @@ Here's a workflow that uses most of the surface at once:
 name: build-and-report
 
 env:
-  STAGE: ci                      # workflow-wide env (jobs/steps can override)
+  STAGE: nightly                 # workflow-wide env (jobs/steps can override)
 
 jobs:
   build:
@@ -102,12 +102,12 @@ Environment variables can be declared at three levels — **workflow**, **job**,
 
 ```yaml
 env:
-  STAGE: ci                 # all jobs/steps see STAGE=ci
+  STAGE: workflow           # all jobs/steps see STAGE=workflow
 jobs:
   build:
     runs-on: gondolin
     env:
-      STAGE: build          # overrides the workflow value for this job
+      STAGE: job            # overrides the workflow value for this job
     steps:
       - env:
           STAGE: step        # overrides again, just for this step

@@ -6,7 +6,7 @@ examples, read [Writing a workflow](../guide/writing-workflows) first.
 ## Top level
 
 ```yaml
-name: ci            # required — the workflow's name
+name: report        # required — the workflow's name
 on: …               # optional — parsed but not yet acted on
 inputs: …           # optional — typed run-time parameters
 env: …              # optional — base env for all jobs/steps
@@ -165,13 +165,11 @@ if: ${{ inputs.env == "prod" && success() }}
 ```
 
 ::: warning
-Use `if` **or** `when` on a given step/job, not both. The `github` expression
-context is not available.
+Use `if` **or** `when` on a given step/job, not both.
 :::
 
 ## Expressions
 
 <code v-pre>${{ … }}</code> interpolates values into env, `with`, `outputs`, and
-conditions. The available contexts are `inputs`, `matrix`, `needs`, and `steps`
-(as listed above).
-There is no `github` context.
+conditions. The available contexts are exactly `inputs`, `matrix`, `needs`, and
+`steps` (as listed above).

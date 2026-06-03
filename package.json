@@ -6,9 +6,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "work": "./bin/pi-workflows.mjs",
-    "workflow": "./bin/pi-workflows.mjs",
-    "pi-workflows": "./bin/pi-workflows.mjs"
+    "work": "./bin/pi-workflows.mjs"
   },
   "files": [
     "bin",
@@ -19,7 +17,7 @@
     "node": ">=23.6"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "restricted"
   },
   "repository": {
     "type": "git",

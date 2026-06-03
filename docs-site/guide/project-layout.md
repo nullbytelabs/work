@@ -1,15 +1,14 @@
 # Project layout
 
 For a one-off, a standalone `workflow.yaml` is fine. For a real project, keep your
-pipelines and agents in a `.workflows/` directory — the same idea as
-`.github/workflows/`.
+workflows and agents together in a `.workflows/` directory at the project root.
 
 ```
 my-project/
 ├── package.json
 ├── src/…
 └── .workflows/
-    ├── ci.yaml                 # a pipeline (name: ci)
+    ├── verify.yaml             # a workflow (name: verify)
     └── agents/
         └── review/             # a local agent package
             ├── agent.yaml
@@ -24,17 +23,17 @@ an `agents/<name>/` package like the one above. See the
 [CLI reference](../reference/cli#work-init).
 :::
 
-## Running a pipeline by name
+## Running a workflow by name
 
 When your workflows live in `.workflows/`, run one **by its `name:`** — the engine
 resolves the `.workflows/*.yaml` whose `name:` matches:
 
 ```bash
-work --workspace my-project run ci
+work --workspace my-project run verify
 ```
 
 `--workspace` points at the project root (it defaults to the current directory, so
-from inside the project you can just `work run ci`).
+from inside the project you can just `work run verify`).
 
 ## What gets checked out
 
@@ -51,8 +50,8 @@ are never staged, so every job installs its own dependencies — keeping jobs
 hermetic and independent.
 
 ```yaml
-# .workflows/ci.yaml — runs against the project root
-name: ci
+# .workflows/verify.yaml — runs against the project root
+name: verify
 jobs:
   verify:
     runs-on: gondolin
@@ -62,24 +61,24 @@ jobs:
       - run: npm start --silent
 ```
 
-## Multiple pipelines
+## Multiple workflows
 
-Keep separate pipelines side by side and run whichever you need. A common split is
-fast CI on every change and a heavier agent review on demand:
+Keep separate workflows side by side and run whichever you need. A common split is
+a quick check you run often and a heavier agent task on demand:
 
 ```
 .workflows/
-├── ci.yaml        # name: ci      — install, typecheck, smoke test
+├── verify.yaml    # name: verify  — install, typecheck, smoke test
 └── review.yaml    # name: review  — an agent reviews the source
 ```
 
 ```bash
-work run ci        # fast verification
+work run verify    # fast verification
 work run review    # agent review when you want one
 ```
 
 ::: tip Complete example
 [`test/e2e/agent-project/`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/agent-project)
-is a full, runnable project laid out exactly this way — a `ci.yaml` pipeline and a
+is a full, runnable project laid out this way — a verification workflow and a
 separate `review.yaml` that runs an [agent step](./agent-steps).
 :::

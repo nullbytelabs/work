@@ -4,26 +4,27 @@
 
 📖 **[Read the documentation →](https://nullbytelabs.github.io/pi-workflows/)**
 
-Run **GitHub-Actions-style workflows on your own machine**, with each job isolated in a secure micro-VM and durable, crash-resumable execution. Steps are shell commands — or **AI agent steps** that hand work to a real coding agent running inside the sandbox.
+Run **any workflow on your own machine**, with each job isolated in a secure micro-VM and durable, crash-resumable execution. Steps are shell commands — or **AI agent steps** that strap a real agent to the work, running inside the sandbox.
+
+It's a general workflow engine: anything you'd otherwise wire together with a shell script and a scheduler — build-and-test, data processing, a nightly report, a deploy, scrape-then-summarize — with structure, isolation, durability, and an agent on any step that needs judgment.
 
 ```yaml
-# .workflows/ci.yaml
-name: ci
+# .workflows/report.yaml
+name: report
 jobs:
-  build:
+  collect:
     runs-on: gondolin          # each job runs in its own micro-VM
     steps:
-      - run: npm install
-      - run: npm test
-  review:
-    needs: [build]
+      - run: node scripts/aggregate.js > data.json
+  summarize:
+    needs: [collect]
     runs-on: gondolin
     steps:
-      - uses: agent/review     # an AI agent reviews the checkout
+      - uses: agent/summarize  # an AI agent reads data.json and writes the summary
 ```
 
 ```bash
-work --workspace . run ci
+work --workspace . run report
 ```
 
 ---
@@ -80,7 +81,7 @@ EOF
 work hello.yaml
 ```
 
-On a terminal you get a live, dependency-aware status board; in CI or a pipe it prints buffered per-job output and exits non-zero on failure.
+On a terminal you get a live, dependency-aware status board; in a pipe or non-interactive runner it prints buffered per-job output and exits non-zero on failure.
 
 The [`test/e2e/`](test/e2e/) folder is a gallery of runnable examples (matrix builds, fan-out/fan-in, conditionals, typed inputs, an agent project, …) — clone the repo to run them directly.
 
@@ -88,13 +89,13 @@ The [`test/e2e/`](test/e2e/) folder is a gallery of runnable examples (matrix bu
 
 ## Writing a workflow
 
-A workflow is a YAML file: a set of **jobs**, each a list of ordered **steps**. It mirrors GitHub Actions, so most of it will look familiar.
+A workflow is a YAML file: a set of **jobs**, each a list of ordered **steps**. The surface is small.
 
 ```yaml
 name: build-and-report
 
 env:
-  STAGE: ci                      # workflow-wide env (jobs/steps can override)
+  STAGE: nightly                 # workflow-wide env (jobs/steps can override)
 
 jobs:
   build:
@@ -137,14 +138,14 @@ See [`test/e2e/`](test/e2e/) for a worked example of each.
 
 ## The `.workflows/` project layout
 
-For a real project, keep your pipelines and agents in a `.workflows/` directory — the same idea as `.github/workflows/`:
+For a real project, keep your workflows and agents together in a `.workflows/` directory at the project root:
 
 ```
 my-project/
 ├── package.json
 ├── src/…
 └── .workflows/
-    ├── ci.yaml                 # a pipeline (name: ci)
+    ├── verify.yaml             # a workflow (name: verify)
     └── agents/
         └── review/             # a local agent package
             ├── agent.yaml
@@ -152,10 +153,10 @@ my-project/
             └── task.md
 ```
 
-Run a pipeline **by its `name:`**:
+Run a workflow **by its `name:`**:
 
 ```bash
-work --workspace my-project run ci
+work --workspace my-project run verify
 ```
 
 When a workflow lives in `.workflows/`, the **project root** (the parent) is what gets checked out into each job's workspace — so `package.json`, your source, `npm install`, etc. are all there. Each job gets its own fresh copy (`.git/` and `node_modules/` are never staged, so jobs install their own deps). A standalone `workflow.yaml` outside `.workflows/` uses its own folder as the checkout instead.
@@ -207,7 +208,7 @@ jobs:
       - run: echo "review -> ${{ steps.summary.outputs.summary }}"
 ```
 
-The agent's final message becomes the step's declared output (e.g. `steps.summary.outputs.summary`). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a `ci.yaml` pipeline (install deps → typecheck → smoke test) and a separate `review.yaml` where an agent reviews the source.
+The agent's final message becomes the step's declared output (e.g. `steps.summary.outputs.summary`). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a verification workflow (install deps → typecheck → smoke test) and a separate `review.yaml` where an agent reviews the source.
 
 ---
 
@@ -217,7 +218,7 @@ The agent's final message becomes the step's declared output (e.g. `steps.summar
 # run a workflow file directly
 work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]
 
-# run a project pipeline by name (resolves .workflows/*.yaml whose `name:` matches)
+# run a project workflow by name (resolves .workflows/*.yaml whose `name:` matches)
 work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--quiet]
 
 # print the job DAG instead of running it
@@ -241,7 +242,7 @@ Under the hood, a workflow compiles to a graph of durable tasks: each **job** is
 
 The deep dives live in [`docs/`](docs/): [`phase-1.md`](docs/phase-1.md) (what's built + internals), [`absurd-durable-workflows.md`](docs/absurd-durable-workflows.md), [`gondolin-secure-execution.md`](docs/gondolin-secure-execution.md), [`pi-in-gondolin.md`](docs/pi-in-gondolin.md), and [`agent-uses-interface.md`](docs/agent-uses-interface.md).
 
-**Not yet:** `on:` triggers, multi-turn agents, cross-run `--resume`, matrix `max-parallel`/`fail-fast`, and the `github` expression context.
+**Not yet:** `on:` triggers, multi-turn agents, cross-run `--resume`, and matrix `max-parallel`/`fail-fast`.
 
 ## Development
 

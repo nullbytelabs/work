@@ -9,7 +9,7 @@ export default defineConfig({
   lang: "en-US",
   title: "pi-workflows",
   description:
-    "Run GitHub-Actions-style workflows on your own machine — each job isolated in a secure micro-VM, with durable execution and AI agent steps.",
+    "Run durable, sandboxed workflows on your own machine — each job isolated in a secure micro-VM, with AI agents as first-class steps.",
   cleanUrls: true,
   lastUpdated: true,
   ignoreDeadLinks: false,
@@ -24,7 +24,7 @@ export default defineConfig({
       {
         property: "og:description",
         content:
-          "GitHub-Actions-style workflows on your own machine, each job in a secure micro-VM — with durable execution and AI agent steps.",
+          "Durable, sandboxed workflows on your own machine — each job in a secure micro-VM, with AI agents as first-class steps.",
       },
     ],
   ],

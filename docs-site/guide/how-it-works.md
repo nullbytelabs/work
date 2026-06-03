@@ -1,7 +1,7 @@
 # How it works
 
 You don't need any of this to use pi-workflows — but if you're curious what
-happens between `work run ci` and a green check, here's the shape of it.
+happens between `work run <name>` and a finished run, here's the shape of it.
 
 ## From YAML to a durable graph
 
@@ -67,7 +67,6 @@ Some capabilities are designed but not yet wired into the engine:
 - `on:` triggers — the key is parsed but not acted on.
 - Multi-turn agents and cross-run `--resume`.
 - Matrix `max-parallel` / `fail-fast`.
-- The `github` expression context.
 
 ::: tip Deeper dives
 The repository's [`docs/`](https://github.com/nullbytelabs/pi-workflows/tree/main/docs)

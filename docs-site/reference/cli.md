@@ -102,12 +102,12 @@ otherwise the file's own folder is. See [Project layout](../guide/project-layout
 work [--workspace <dir>] run <name> [flags]
 ```
 
-Runs a project pipeline **by its `name:`** — the engine finds the
+Runs a project workflow **by its `name:`** — the engine finds the
 `.workflows/*.yaml` in the workspace whose `name:` matches `<name>`. `--workspace`
 sets the project root (default: current directory).
 
 ```bash
-work --workspace my-project run ci
+work --workspace my-project run report
 ```
 
 ### `work graph`
@@ -126,8 +126,8 @@ target by name.
 | `--steps` | Expand each job into its ordered steps. |
 
 ```bash
-work graph ci.yaml --format ascii --steps
-work --workspace my-project graph ci --format mermaid
+work graph report.yaml --format ascii --steps
+work --workspace my-project graph report --format mermaid
 ```
 
 ### `work doctor`
@@ -138,8 +138,8 @@ work doctor [--json]
 
 Checks that this machine can run `gondolin` workflows. It is **read-only by
 design** — it reports what's wrong and prints the exact remediation command, but
-never mutates your host (there is no `--fix`). That keeps it safe to use as a CI
-gate.
+never mutates your host (there is no `--fix`). That keeps it safe to drop into a
+setup script or a preflight check.
 
 It runs these checks:
 
@@ -165,7 +165,7 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 | `--workspace <dir>` | `run`, `graph` | Project root for resolving a workflow by name (default: current directory). |
 | `--inputs '<json>'` | run | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. |
 | `--config <file>` | run | Project-layer model/provider config file. Default: `./pi-workflows.config.json`, or `$PI_WORKFLOWS_CONFIG`. |
-| `--no-global` | run | Skip the machine-wide global config layer, for a hermetic run (e.g. CI). |
+| `--no-global` | run | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
 | `--workdir <dir>` | run | Where job workspaces are staged (default: a temp dir). |
 | `--quiet` | run | Suppress the live board / per-job output. |
 | `--format <fmt>` | `graph` | DAG output format: `mermaid`, `dot`, `json`, `ascii`. |
@@ -178,11 +178,11 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 When running a workflow, the presenter adapts to the environment:
 
 - **Interactive TTY** — a live, dependency-aware status board.
-- **CI or a pipe** — buffered per-job output blocks.
+- **A pipe or non-interactive runner** — buffered per-job output blocks.
 - **`--quiet`** — no board or per-job output.
 
 A run exits **`0`** on success and **non-zero** if any job fails — so it drops into
-an existing pipeline cleanly.
+a script or scheduler cleanly.
 
 ## Configuration discovery
 

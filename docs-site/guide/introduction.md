@@ -1,35 +1,40 @@
 # Introduction
 
-**pi-workflows** runs GitHub-Actions-style workflows on your own machine. Each job
-is isolated in a secure micro-VM, execution is durable and crash-resumable, and a
+**pi-workflows** runs YAML-defined workflows on your own machine. Each job is
+isolated in a secure micro-VM, execution is durable and crash-resumable, and any
 step can be a plain shell command — or an **AI agent step** that hands work to a
-real coding agent running inside the sandbox.
+real agent running inside the sandbox.
+
+It's a general workflow engine, not a single-purpose tool. If you'd reach for a
+shell script plus a scheduler — build-and-test, data processing, a nightly report,
+a deploy, scrape-then-summarize — you can express it here instead, with structure,
+isolation, durability, and an agent strapped to any step that needs judgment.
 
 ```yaml
-# .workflows/ci.yaml
-name: ci
+# .workflows/report.yaml
+name: report
 jobs:
-  build:
+  collect:
     runs-on: gondolin          # each job runs in its own micro-VM
     steps:
-      - run: npm install
-      - run: npm test
-  review:
-    needs: [build]
+      - run: node scripts/aggregate.js > data.json
+  summarize:
+    needs: [collect]
     runs-on: gondolin
     steps:
-      - uses: agent/review     # an AI agent reviews the checkout
+      - uses: agent/summarize  # an AI agent reads data.json and writes the summary
 ```
 
 ```bash
-work --workspace . run ci
+work --workspace . run report
 ```
 
 ## Why pi-workflows?
 
-CI pipelines are useful well before you push to a forge — but running them locally
-usually means either trusting arbitrary steps against your host, or standing up
-heavy infrastructure. pi-workflows takes a different stance:
+Plenty of work is worth automating right on your own machine — multi-step jobs
+you'd otherwise wire together by hand. But running arbitrary steps locally usually
+means either trusting them against your host or standing up heavy infrastructure.
+pi-workflows takes a different stance:
 
 - **Local-first.** No control plane, no external services, no account. The engine
   is a single CLI; durable state lives in an in-process Postgres.
@@ -38,40 +43,37 @@ heavy infrastructure. pi-workflows takes a different stance:
   machine, and network access is mediated.
 - **Durable.** A workflow compiles to a graph of durable tasks; each step is a
   journaled checkpoint, so the engine knows exactly what already ran.
-- **Agent-native.** An AI coding agent can be a first-class step, working inside
-  the same sandbox as the rest of the job with its full toolset rooted at the
-  checkout.
+- **Agent-native.** An AI agent can be a first-class step, working inside the same
+  sandbox as the rest of the job with its full toolset rooted at the checkout —
+  reading, editing, and making decisions in line with everything else.
 
-## How it maps to GitHub Actions
+## The shape of a workflow
 
-If you've written a GitHub Actions workflow, you already know most of this. A
-workflow is a YAML file describing **jobs**, each a list of ordered **steps**.
+A workflow is a single YAML file. The pieces:
 
-| Concept | pi-workflows | GitHub Actions |
-|---|---|---|
-| Pipeline file | `.workflows/ci.yaml` | `.github/workflows/ci.yaml` |
-| Where a job runs | `runs-on: gondolin` (a micro-VM) | `runs-on: ubuntu-latest` (a hosted runner) |
-| Job dependencies | `needs: [build]` | `needs: [build]` |
-| Reusable unit | `uses: agent/review` (an AI agent) | `uses: actions/checkout@v4` (an action) |
-| Run a pipeline | `work run ci` | push / dispatch on the forge |
+| Piece | What it is |
+|---|---|
+| **Workflow** | the file itself — a `name:` and a set of named jobs. |
+| **Job** | an isolated unit of work, run in its own micro-VM (`runs-on: gondolin`). |
+| **Step** | a shell command (`run:`) or an AI agent (`uses: agent/<name>`). |
+| **`needs`** | dependencies between jobs; independent jobs run in parallel. |
+| **Inputs / outputs / matrix / conditionals** | typed parameters, data passing between jobs, fan-out, and guards. |
 
-The differences that matter most: jobs run in **local micro-VMs** rather than
-hosted runners, and the reusable `uses:` unit is an **AI agent package** rather
-than a marketplace action.
+That's the whole surface. [Writing a workflow](./writing-workflows) walks through
+each piece with examples.
 
 ## What's here and what's next
 
 pi-workflows is young. The core engine — jobs, steps, the `needs` DAG, env,
 typed inputs, outputs, matrix, conditionals, and agent steps — is built and runs
-end to end. Some GitHub Actions features are deliberately **not yet** implemented:
+end to end. Some features are deliberately **not yet** implemented:
 
 - `on:` triggers (the key is parsed but not acted on)
 - multi-turn agents and cross-run `--resume`
 - matrix `max-parallel` / `fail-fast`
-- the `github` expression context
 
 ::: tip Where to go next
 New here? Start with [Requirements](./requirements), then [Installation](./installation)
-and the [Quickstart](./quickstart). Ready to write real pipelines? Jump to
+and the [Quickstart](./quickstart). Ready to write a real workflow? Jump to
 [Writing a workflow](./writing-workflows).
 :::
