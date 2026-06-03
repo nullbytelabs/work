@@ -22,13 +22,6 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
-# The official Pages actions (configure-pages, upload-pages-artifact, deploy-pages)
-# still bundle Node 20, which GitHub is retiring from the runners. They're already
-# at their latest majors, so opt them onto the Node 24 runtime explicitly rather
-# than wait for new tags — this is GitHub's documented forward-compat switch.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   build:
     name: build site
@@ -46,8 +39,8 @@ jobs:
       - run: npm ci
       - name: Build with VitePress
         run: npm run docs:build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs-site/.vitepress/dist
 
@@ -60,4 +53,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
