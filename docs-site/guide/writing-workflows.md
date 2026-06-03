@@ -116,8 +116,8 @@ jobs:
 
 ## Inputs
 
-`inputs:` declares typed parameters, passed at run time and read with
-`${{ inputs.<name> }}`. Each input has a `type` (`string`, `number`, or
+`inputs:` declares typed parameters, passed at run time and read via the
+`inputs.<name>` expression context. Each input has a `type` (`string`, `number`, or
 `boolean`) and may set `required`, `default`, `description`, `options` (an
 allow-list), and `pattern` (a regex the value must match).
 
@@ -173,14 +173,14 @@ jobs:
 ```
 
 Within the same job, a later step can read an earlier step's output directly via
-`${{ steps.<id>.outputs.<key> }}`. Across jobs, go through
-`${{ needs.<job>.outputs.<key> }}`.
+the `steps.<id>.outputs.<key>` context. Across jobs, go through
+`needs.<job>.outputs.<key>`.
 
 ## Matrix
 
 `strategy.matrix:` fans a job out into one independent leg per combination of axis
-values (the cartesian product). Read the current cell with `${{ matrix.<axis> }}`.
-`include` appends or extends cells; `exclude` prunes them.
+values (the cartesian product). Read the current cell with the `matrix.<axis>`
+context. `include` appends or extends cells; `exclude` prunes them.
 
 ```yaml
 jobs:

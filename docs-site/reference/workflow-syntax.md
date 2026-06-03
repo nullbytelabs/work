@@ -18,7 +18,7 @@ jobs: …             # required — the named jobs
 | `name` | string | **Required.** The workflow's name; also how `work run <name>` resolves it. |
 | `on` | any | Trigger declaration. **Parsed but not yet acted on** — triggers aren't implemented. |
 | `inputs` | map | Declared run-time inputs (see [Inputs](#inputs)). |
-| `env` | map<string,string> | Workflow-level environment, the base layer for every job and step. |
+| `env` | `map<string,string>` | Workflow-level environment, the base layer for every job and step. |
 | `jobs` | map | **Required.** The named jobs (see [Jobs](#jobs)). |
 
 ## Jobs
@@ -43,8 +43,8 @@ jobs:
 | `needs` | string \| string[] | Job ids that must succeed first. Independent jobs run in parallel. |
 | `if` / `when` | string | Conditional guard; a false result skips the job. Use one, not both. See [Conditionals](#conditionals). |
 | `strategy.matrix` | map | Fan-out into one leg per cell (see [Matrix](#matrix)). |
-| `env` | map<string,string> | Job-level env, layered over workflow env. |
-| `outputs` | map<string,string> | Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. |
+| `env` | `map<string,string>` | Job-level env, layered over workflow env. |
+| `outputs` | `map<string,string>` | Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. |
 | `steps` | list | **Required.** The ordered steps (see [Steps](#steps)). |
 
 ## Steps
@@ -69,9 +69,9 @@ steps:
 | `id` | string | Stable id. Required to read this step's outputs via `steps.<id>.outputs.*`. |
 | `run` | string | Shell command or multi-line script. Mutually exclusive with `uses`. |
 | `uses` | string | Agent reference, `agent/<name>`. Mutually exclusive with `run`. See [Agent steps](../guide/agent-steps). |
-| `with` | map | Inputs for a `uses` step; bound to `{{ placeholder }}` markers in the agent's `task.md`. |
+| `with` | map | Inputs for a `uses` step; bound to <code v-pre>{{ placeholder }}</code> markers in the agent's `task.md`. |
 | `if` / `when` | string | Conditional guard; a false result skips the step. Use one, not both. |
-| `env` | map<string,string> | Step-level env, layered over job and workflow env. |
+| `env` | `map<string,string>` | Step-level env, layered over job and workflow env. |
 
 ### Step outputs
 
@@ -83,14 +83,14 @@ A `run` step writes outputs by appending `key=value` lines to the file at the
   run: echo "version=1.4.2" >> "$PI_OUTPUT"
 ```
 
-Read them with `${{ steps.meta.outputs.version }}` (same job) or, after the job
-re-exposes them via `outputs:`, with `${{ needs.<job>.outputs.version }}`
-(downstream jobs).
+Read them inside an expression — `steps.meta.outputs.version` (same job) or, after
+the job re-exposes them via `outputs:`, `needs.<job>.outputs.version` (downstream
+jobs).
 
 ## Inputs
 
 `inputs:` declares typed parameters provided at run time via `--inputs '<json>'`
-and read with `${{ inputs.<name> }}`.
+and read with the `inputs.<name>` expression context.
 
 ```yaml
 inputs:
@@ -139,12 +139,12 @@ strategy:
 
 | Key | Type | Notes |
 |---|---|---|
-| *axes* | map<string, scalar[]> | Each named key is an axis; legs are the full cartesian product. |
-| `include` | list<map> | Appends cells, or extends matching cells with extra values. |
-| `exclude` | list<map> | Removes cells matching the given partial. |
+| *axes* | `map<string, scalar[]>` | Each named key is an axis; legs are the full cartesian product. |
+| `include` | `list<map>` | Appends cells, or extends matching cells with extra values. |
+| `exclude` | `list<map>` | Removes cells matching the given partial. |
 
-Read the current cell with `${{ matrix.<axis> }}`. A downstream `needs` on a matrix
-job waits for **every** leg.
+Read the current cell with the `matrix.<axis>` context. A downstream `needs` on a
+matrix job waits for **every** leg.
 
 ::: info Not yet
 `max-parallel` and `fail-fast` are not implemented.
@@ -171,6 +171,7 @@ context is not available.
 
 ## Expressions
 
-`${{ … }}` interpolates values into env, `with`, `outputs`, and conditions. The
-available contexts are `inputs`, `matrix`, `needs`, and `steps` (as listed above).
+<code v-pre>${{ … }}</code> interpolates values into env, `with`, `outputs`, and
+conditions. The available contexts are `inputs`, `matrix`, `needs`, and `steps`
+(as listed above).
 There is no `github` context.

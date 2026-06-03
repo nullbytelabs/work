@@ -67,8 +67,8 @@ outputs:
 
 **`instructions.md`** — the system prompt, the agent's standing role.
 
-**`task.md`** — the task prompt. It may contain `{{ placeholder }}` markers that
-are bound from the step's `with:` inputs:
+**`task.md`** — the task prompt. It may contain <code v-pre>{{ placeholder }}</code>
+markers that are bound from the step's `with:` inputs:
 
 ```markdown
 Read `main.ts` in your working directory and summarize what it does in one sentence.
@@ -94,7 +94,7 @@ jobs:
 ```
 
 Pass inputs to an agent via `with:`, the same way you'd pass inputs to any `uses:`
-step — each value binds to the matching `{{ placeholder }}` in `task.md`.
+step — each value binds to the matching <code v-pre>{{ placeholder }}</code> in `task.md`.
 
 ## How it runs
 
