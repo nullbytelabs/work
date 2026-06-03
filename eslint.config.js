@@ -6,7 +6,10 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["node_modules/", "dist/"] },
+  // `dist/` only matches a top-level dir; `**/dist/` also catches nested build
+  // output. `docs-site/` is an isolated VitePress project (own deps, own build
+  // + deploy in .github/workflows/docs.yml) — not part of the engine's lint.
+  { ignores: ["node_modules/", "**/dist/", "docs-site/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

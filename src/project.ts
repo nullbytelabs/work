@@ -90,3 +90,37 @@ export async function findWorkflowByName(workspace: string, name: string): Promi
   }
   return resolveWorkflowLayout(matches[0]!);
 }
+
+/**
+ * Map of declared `name:` -> file path for the top-level workflows in
+ * `<workspace>/.workflows/`. Empty when there's no `.workflows/` dir yet. Powers
+ * the `create` name-uniqueness guard (a duplicate `name:` makes `run` ambiguous),
+ * reusing the same top-level-YAML scan as `findWorkflowByName`.
+ */
+export async function listWorkflowNames(workspace: string): Promise<Map<string, string>> {
+  const dir = join(resolve(workspace), WORKFLOWS_DIR);
+  const names = new Map<string, string>();
+
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return names; // no .workflows/ yet — nothing to collide with
+  }
+
+  const files = entries
+    .filter((e) => e.isFile() && /\.ya?ml$/i.test(e.name))
+    .map((e) => join(dir, e.name))
+    .sort();
+
+  for (const file of files) {
+    let wfName: unknown;
+    try {
+      wfName = (parseYaml(await readFile(file, "utf-8")) as { name?: unknown } | null)?.name;
+    } catch {
+      continue; // malformed file isn't a real declaration
+    }
+    if (typeof wfName === "string" && wfName.length > 0 && !names.has(wfName)) names.set(wfName, file);
+  }
+  return names;
+}

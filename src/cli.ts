@@ -22,6 +22,7 @@ import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "
 import { selectPresenter, detectCI } from "./tui/index.ts";
 import { emitGraph, isGraphFormat, GRAPH_FORMATS, type GraphFormat } from "./graph/index.ts";
 import { runDoctor } from "./doctor/index.ts";
+import { runCreate } from "./scaffold/index.ts";
 import { UserFacingError } from "./errors.ts";
 
 const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
@@ -140,6 +141,7 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
+      `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} doctor [--json]\n`,
   );
 }
@@ -165,6 +167,9 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv[0] === "doctor") {
     process.exit(await runDoctor(argv.slice(1)));
+  }
+  if (argv[0] === "create") {
+    process.exit(await runCreate(argv.slice(1)));
   }
 
   const args = parseArgs(argv);

@@ -10,21 +10,11 @@
  *   exit 2  — a usage error (unknown flag), via the shared `fail`
  */
 import { CODE, paint, shouldColor } from "../tui/palette.ts";
+import { failUsage, prog } from "../cli-util.ts";
 import { type Check, type CheckStatus, type DoctorProbes, defaultProbes, overallStatus, runChecks } from "./checks.ts";
 
 interface DoctorOptions {
   json: boolean;
-}
-
-/** Invoked name (`work`/`workflow`/`pi-workflows`), plumbed by the bin shim. */
-function prog(): string {
-  return process.env["PI_WF_PROG"] ?? "pi-workflows";
-}
-
-/** A usage/argument error: prefix with the invoked name and exit 2 (like `fail`). */
-function failUsage(msg: string): never {
-  process.stderr.write(`${prog()}: ${msg}\n`);
-  process.exit(2);
 }
 
 function parseDoctorArgs(argv: string[]): DoctorOptions {
