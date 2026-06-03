@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/nullbytelabs/pi-workflows/actions/workflows/ci.yml/badge.svg)](https://github.com/nullbytelabs/pi-workflows/actions/workflows/ci.yml)
 
+📖 **[Read the documentation →](https://nullbytelabs.github.io/pi-workflows/)**
+
 Run **GitHub-Actions-style workflows on your own machine**, with each job isolated in a secure micro-VM and durable, crash-resumable execution. Steps are shell commands — or **AI agent steps** that hand work to a real coding agent running inside the sandbox.
 
 ```yaml
