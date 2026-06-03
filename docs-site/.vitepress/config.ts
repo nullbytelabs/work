@@ -36,7 +36,7 @@ export default defineConfig({
       { text: "Guide", link: "/guide/introduction", activeMatch: "/guide/" },
       { text: "Reference", link: "/reference/cli", activeMatch: "/reference/" },
       {
-        text: "v0.1.1",
+        text: "v0.1.2",
         items: [
           {
             text: "Changelog",
