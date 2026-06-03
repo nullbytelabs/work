@@ -62,15 +62,21 @@ A workflow is a single YAML file. The pieces:
 That's the whole surface. [Writing a workflow](./writing-workflows) walks through
 each piece with examples.
 
-## What's here and what's next
+## What you get
 
-pi-workflows is young. The core engine — jobs, steps, the `needs` DAG, env,
-typed inputs, outputs, matrix, conditionals, and agent steps — is built and runs
-end to end. Some features are deliberately **not yet** implemented:
+Everything in this guide is built and runs end to end:
 
-- `on:` triggers (the key is parsed but not acted on)
-- multi-turn agents and cross-run `--resume`
-- matrix `max-parallel` / `fail-fast`
+- **Named jobs** scheduled across a `needs` DAG, each isolated in its own micro-VM,
+  with independent jobs running in parallel.
+- **Layered env** at the workflow, job, and step level.
+- **Typed inputs** with validation, **outputs** passed between jobs, **matrix**
+  fan-out, and runtime **conditionals**.
+- **AI agent steps** that run a real agent inside the sandbox, rooted at the
+  checkout.
+- **Durable execution** journaled to an in-process Postgres, so a run knows exactly
+  what already happened.
+
+No control plane, no external services, no account — a single CLI on your machine.
 
 ::: tip Where to go next
 New here? Start with [Requirements](./requirements), then [Installation](./installation)

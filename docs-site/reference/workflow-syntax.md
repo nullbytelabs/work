@@ -7,7 +7,6 @@ examples, read [Writing a workflow](../guide/writing-workflows) first.
 
 ```yaml
 name: report        # required — the workflow's name
-on: …               # optional — parsed but not yet acted on
 inputs: …           # optional — typed run-time parameters
 env: …              # optional — base env for all jobs/steps
 jobs: …             # required — the named jobs
@@ -16,7 +15,6 @@ jobs: …             # required — the named jobs
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** The workflow's name; also how `work run <name>` resolves it. |
-| `on` | any | Trigger declaration. **Parsed but not yet acted on** — triggers aren't implemented. |
 | `inputs` | map | Declared run-time inputs (see [Inputs](#inputs)). |
 | `env` | `map<string,string>` | Workflow-level environment, the base layer for every job and step. |
 | `jobs` | map | **Required.** The named jobs (see [Jobs](#jobs)). |
@@ -145,10 +143,6 @@ strategy:
 
 Read the current cell with the `matrix.<axis>` context. A downstream `needs` on a
 matrix job waits for **every** leg.
-
-::: info Not yet
-`max-parallel` and `fail-fast` are not implemented.
-:::
 
 ## Conditionals
 

@@ -242,8 +242,6 @@ Under the hood, a workflow compiles to a graph of durable tasks: each **job** is
 
 The deep dives live in [`docs/`](docs/): [`phase-1.md`](docs/phase-1.md) (what's built + internals), [`absurd-durable-workflows.md`](docs/absurd-durable-workflows.md), [`gondolin-secure-execution.md`](docs/gondolin-secure-execution.md), [`pi-in-gondolin.md`](docs/pi-in-gondolin.md), and [`agent-uses-interface.md`](docs/agent-uses-interface.md).
 
-**Not yet:** `on:` triggers, multi-turn agents, cross-run `--resume`, and matrix `max-parallel`/`fail-fast`.
-
 ## Development
 
 ```bash

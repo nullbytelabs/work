@@ -60,14 +60,6 @@ so the agent can reach the model while the key never enters the guest. See
 | [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin) | The micro-VM every job runs in, with mediated egress. |
 | [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | The coding agent behind `uses: agent/<name>` steps. |
 
-## Not yet
-
-Some capabilities are designed but not yet wired into the engine:
-
-- `on:` triggers — the key is parsed but not acted on.
-- Multi-turn agents and cross-run `--resume`.
-- Matrix `max-parallel` / `fail-fast`.
-
 ::: tip Deeper dives
 The repository's [`docs/`](https://github.com/nullbytelabs/pi-workflows/tree/main/docs)
 folder holds internal design and research notes on these subsystems — the durable

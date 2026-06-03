@@ -199,11 +199,7 @@ jobs:
 ```
 
 Each leg is its own job — so a downstream `needs: [test]` waits for **every** leg.
-
-::: info Not yet
-Matrix `max-parallel` and `fail-fast` aren't implemented yet — all legs run, up
-to the engine's worker concurrency.
-:::
+All legs run in parallel, up to the engine's worker concurrency.
 
 ## Conditionals
 

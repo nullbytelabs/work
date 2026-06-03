@@ -115,9 +115,11 @@ the job, working directly against the job's checkout. The host resolves the mode
 endpoint, allowlists it through the sandbox's egress, and injects the API key —
 which is why the key reaches the model without ever being visible inside the guest.
 
-::: info Current scope
-Today's agent runner is a single-shot run using `instructions.md` + `task.md` +
-declared inputs/outputs. Multi-turn agents are not yet implemented.
+::: info How a run works
+Each agent step is a focused, self-contained run: the agent gets its
+`instructions.md`, its `task.md` (with any `with:` inputs bound), and its declared
+outputs — then it works in the sandbox and returns its final message as the step's
+output.
 :::
 
 ::: tip Complete example
