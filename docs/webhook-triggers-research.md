@@ -17,6 +17,51 @@
 > Tags used throughout: **VALIDATED** (grounded in our code, file:line) /
 > **VERIFIED** (cited external standard/vendor doc) / **PROPOSED** (a design choice)
 > / **NEEDS-BUILDING** (net-new engine work).
+>
+> **Implementation status (2026-06-03): trigger spine + Phase-0 receiver SHIPPED**
+> (zero new deps; `node:http` + `node:crypto`):
+> - **`event` context (§3):** `${{ event.* }}` with nested paths + array indexing
+>   (`event.alerts[0].labels.severity`) in BOTH the interpolation engine
+>   (compile-time bake) and the `if:`/`when:` condition engine (runtime, threaded
+>   via `plan.event` into the runtime's condition contexts). Stringification &
+>   deferral defined as proposed. Tests: `test/event-context.test.ts`,
+>   `test/runtime-event.test.ts`.
+> - **Trigger opt-in (§2):** typed `on: webhook` + `parseOn()` (`src/spec`).
+> - **Authenticated async receiver (§4/§7):** `POST /hooks/:name` on the `--web`
+>   server — **bearer** auth (constant-time) **and HMAC-SHA256** over the raw body
+>   (GitHub-style `sha256=` and Grafana-style bare hex; algorithm pinned),
+>   **fail-closed** (404 unless configured + opted-in + authenticated), 256KB body
+>   cap, ack-fast `202` + async dispatch reusing the `RunManager` (tagged
+>   `trigger:"webhook"`), exempt from the UI's loopback Host/CSRF guards. Tests:
+>   `test/webhook-receiver.test.ts`.
+> - **Generalized egress + config (§5/§8/§9):** `datasources`/`webhooks` config
+>   sections; `makeDatasourceEgressResolver` + `composeResolvers` (`src/egress`),
+>   now **wired into the run path** — `startRun` composes the agent + datasource
+>   resolvers, and a webhook's `datasources:` list scopes its triggered run's
+>   egress (deny-by-default). Validated through the runtime to the target boundary
+>   (`test/egress-wiring.test.ts`); the real host-side header-swap still wants a
+>   one-time **real-gondolin** confirmation (the test double doesn't implement it).
+> - **Delivery dedupe (§4 Mandatory / §7 step 2):** an identical re-delivery
+>   (retry / repeat send) within a 300s window — keyed `sha256(hook + raw body)`,
+>   since no sender supplies a delivery-id — returns the original runId (`200
+>   {deduped:true}`) and starts no second run. Test: `test/webhook-receiver.test.ts`.
+> - **Backpressure (§7/§12 #4):** a `RunManager` bounded run semaphore + FIFO
+>   queue — under `maxConcurrentRuns` a run starts, beyond it queues up to
+>   `maxQueuedRuns`, past that the receiver sheds with **429 + Retry-After**. So a
+>   trigger storm can't spawn unbounded gondolin VMs. Test:
+>   `test/run-concurrency.test.ts`.
+> - **Durable history (shared with web-ui §8):** the `work.runs` table + default
+>   `dataDir` now persist webhook-triggered runs too (`trigger:"webhook"`), so they
+>   survive a restart (`src/persistence/runs.ts`).
+> - **Multi-output agents (§8 ergonomics) SHIPPED:** an agent that declares 2+
+>   outputs and returns a JSON object maps each key to a named output (`${{
+>   needs.<job>.outputs.<name> }}`); single-output / non-JSON agents are unchanged
+>   (`src/agent/index.ts` `agentOutputs`; `test/agent-outputs.test.ts`). So the
+>   incident synthesis stage can emit `severity`/`root_cause`/`confidence` separately.
+> - **Deferred (Phase 1+):** Stripe/Slack timestamped-HMAC schemes (sign `{t}.{body}`,
+>   not raw body) + the signed-timestamp replay window they enable, per-hook rate
+>   limit, a dedicated `webhook_deliveries` **audit** log (every attempt, incl.
+>   rejects), dynamic (alert-derived) matrix, tunneling.
 
 ---
 

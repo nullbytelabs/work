@@ -124,3 +124,20 @@ export async function listWorkflowNames(workspace: string): Promise<Map<string, 
   }
   return names;
 }
+
+/**
+ * The declared workflows in `<workspace>/.workflows/`, as `{ name, file }` pairs
+ * sorted by name. Powers the web UI's workflow list (and any dispatch surface
+ * that enumerates *all* pipelines rather than resolving one by name). Reuses the
+ * exact top-level-`.workflows/*.yaml` scan as `listWorkflowNames`/`findWorkflowByName`
+ * — top-level YAML only (agents/ and other subdirs are never pipelines), files
+ * without a string `name:` skipped, first declaration of a duplicate name wins
+ * (so the result lines up with how `run <name>` would resolve). Empty when there's
+ * no `.workflows/` dir yet.
+ */
+export async function listWorkflows(workspace: string): Promise<{ name: string; file: string }[]> {
+  const names = await listWorkflowNames(workspace);
+  return [...names.entries()]
+    .map(([name, file]) => ({ name, file }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}

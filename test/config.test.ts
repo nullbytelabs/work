@@ -45,4 +45,22 @@ describe("config", () => {
       (e) => e instanceof UserFacingError && /not defined in config\.models/.test(e.message),
     );
   });
+
+  it("parses optional datasources/webhooks sections alongside providers/models", () => {
+    const c = parseConfig({
+      ...sample,
+      datasources: { grafana: { baseUrl: "https://grafana.internal", token: "$GRAFANA_TOKEN" } },
+      webhooks: { "deploy-incident": { workflow: "incident", auth: "hmac-sha256", datasources: ["grafana"] } },
+    });
+    assert.equal(c.datasources!["grafana"]!.baseUrl, "https://grafana.internal");
+    assert.equal(c.webhooks!["deploy-incident"]!.workflow, "incident");
+    // The model catalog is untouched by the new sections.
+    assert.equal(c.defaultModel, "kimi");
+  });
+
+  it("leaves datasources/webhooks undefined when absent", () => {
+    const c = parseConfig(sample);
+    assert.equal(c.datasources, undefined);
+    assert.equal(c.webhooks, undefined);
+  });
 });

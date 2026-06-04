@@ -6,7 +6,8 @@
  *
  *   - Context access:  inputs.<name>, matrix.<axis>,
  *                      needs.<job>.result, needs.<job>.outputs.<key>,
- *                      steps.<id>.result, steps.<id>.outputs.<key>
+ *                      steps.<id>.result, steps.<id>.outputs.<key>,
+ *                      event.<path> (incl. array indexing: event.alerts[0].labels.severity)
  *   - Literals:        'single' / "double" strings, numbers, true / false / null
  *   - Operators:       == != && || !  and parentheses
  *   - Status functions: success() failure() always() cancelled()
@@ -19,6 +20,7 @@
  * `<`, helper functions like `contains()`) raises a clear error rather than
  * silently passing, so an unsupported condition is never mistaken for `true`.
  */
+import { parseAccessPath, walkPath, type Segment } from "./expr.ts";
 
 /** A scalar value flowing through the evaluator. */
 type Value = string | number | boolean | null | undefined;
@@ -46,6 +48,12 @@ export interface ConditionContext {
   steps?: Record<string, ConditionBag>;
   /** Present only inside a matrix leg; referencing `matrix.*` elsewhere errors. */
   matrix?: Record<string, Value>;
+  /**
+   * The webhook/dispatch payload, readable as `event.<path>` (incl. array
+   * indexing) in `if:`/`when:`. Arbitrary nested JSON; a missing member yields
+   * undefined. Populated by the runtime from `plan.event` (wired separately).
+   */
+  event?: Record<string, unknown>;
   status?: ConditionStatus;
 }
 
@@ -141,8 +149,23 @@ function tokenize(src: string): Tok[] {
       continue;
     }
     if (IDENT_START.test(c)) {
+      // A context path: dotted keys plus optional `[...]` index/key segments,
+      // e.g. `event.alerts[0].labels.severity`. We consume the whole path as one
+      // ident token; parsePrimary tokenizes its internal structure. Bracket
+      // contents are slurped verbatim (they may hold quotes/spaces) up to `]`.
       let j = i + 1;
-      while (j < n && (IDENT_PART.test(src[j]!) || src[j] === ".")) j++;
+      while (j < n) {
+        const d = src[j]!;
+        if (IDENT_PART.test(d) || d === ".") {
+          j++;
+        } else if (d === "[") {
+          const close = src.indexOf("]", j);
+          if (close === -1) throw new ConditionError("unbalanced '[' in context path");
+          j = close + 1;
+        } else {
+          break;
+        }
+      }
       const word = src.slice(i, j);
       if (word === "true" || word === "false") toks.push({ t: "bool", v: word === "true" });
       else if (word === "null") toks.push({ t: "null" });
@@ -160,7 +183,7 @@ function tokenize(src: string): Tok[] {
 
 type Node =
   | { k: "lit"; v: Value }
-  | { k: "path"; segments: string[] }
+  | { k: "path"; segments: Segment[] }
   | { k: "call"; name: string }
   | { k: "not"; e: Node }
   | { k: "bin"; op: "==" | "!=" | "&&" | "||"; l: Node; r: Node };
@@ -245,7 +268,13 @@ class Parser {
           }
           return { k: "call", name: tok.v };
         }
-        return { k: "path", segments: tok.v.split(".") };
+        // Parse the dotted/bracketed path into structured segments (the same
+        // grammar `interpolate` uses), so array indexing works identically here.
+        try {
+          return { k: "path", segments: parseAccessPath(tok.v) };
+        } catch (err) {
+          throw new ConditionError((err as Error).message);
+        }
       }
       default:
         throw new ConditionError("unexpected token in condition");
@@ -255,7 +284,7 @@ class Parser {
 
 // --- Evaluation --------------------------------------------------------------
 
-const ROOTS = new Set(["inputs", "needs", "steps", "matrix"]);
+const ROOTS = new Set(["inputs", "needs", "steps", "matrix", "event"]);
 
 function truthy(v: Value): boolean {
   if (typeof v === "boolean") return v;
@@ -282,24 +311,23 @@ function numeric(v: Value): number | null {
   return null;
 }
 
-function resolvePath(segments: string[], ctx: ConditionContext): Value {
-  const root = segments[0]!;
+function resolvePath(segments: Segment[], ctx: ConditionContext): Value {
+  // The root is always a bare key (the tokenizer requires an identifier start).
+  const head = segments[0]!;
+  const root = head.kind === "key" ? head.name : String(head.index);
   if (!ROOTS.has(root)) {
     throw new ConditionError(
-      `unknown context "${root}" — supported: inputs, needs, steps, matrix (and success()/failure()/always()/cancelled())`,
+      `unknown context "${root}" — supported: inputs, needs, steps, matrix, event (and success()/failure()/always()/cancelled())`,
     );
   }
   if (root === "matrix" && ctx.matrix === undefined) {
     throw new ConditionError("matrix context is only available in a job with strategy.matrix");
   }
-  // Walk the remaining segments through plain objects; a missing property
-  // yields undefined (GHA returns null for missing context members).
-  let cur: unknown = (ctx as Record<string, unknown>)[root] ?? {};
-  for (let i = 1; i < segments.length; i++) {
-    if (cur === null || typeof cur !== "object") return undefined;
-    cur = (cur as Record<string, unknown>)[segments[i]!];
-  }
-  return cur as Value;
+  // Walk the remaining segments (keys + array indices) through plain objects and
+  // arrays; a missing property/index yields undefined (GHA returns null for a
+  // missing context member). The walk is shared with `interpolate`.
+  const base = (ctx as Record<string, unknown>)[root] ?? {};
+  return walkPath(base, segments.slice(1)) as Value;
 }
 
 function evalNode(node: Node, ctx: ConditionContext): Value {

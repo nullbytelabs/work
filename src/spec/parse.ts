@@ -6,7 +6,7 @@
  * parser does NOT execute anything — it only produces a validated spec object.
  */
 import { parse as parseYaml } from "yaml";
-import type { EnvMap, InputSpec, JobSpec, MatrixSpec, MatrixValue, StepSpec, StrategySpec, WorkflowSpec } from "./types.ts";
+import type { EnvMap, InputSpec, JobSpec, MatrixSpec, MatrixValue, OnSpec, StepSpec, StrategySpec, WebhookTrigger, WorkflowSpec } from "./types.ts";
 
 /** Thrown when a workflow file is structurally invalid. */
 export class WorkflowParseError extends Error {
@@ -189,6 +189,65 @@ function parseStrategy(raw: unknown, path: string): StrategySpec | undefined {
   return { matrix };
 }
 
+/**
+ * Parse the `on:` trigger block into a typed `OnSpec`.
+ *
+ * Accepted (GitHub-ish) forms, all opting the workflow in to webhook triggering:
+ *   - `on: webhook`                                    (string → `{ webhook: true }`)
+ *   - `on: { webhook: true }` / `on: { webhook: false }`
+ *   - `on: { webhook: { secret: "name", source: "alertmanager" } }`
+ *
+ * We are deliberately **liberal about unknown top-level keys** under `on:` — an
+ * older or future spec may carry other trigger names we don't model yet, and
+ * `on:` is non-load-bearing for execution, so we don't want to break those
+ * workflows. But once a `webhook` block is present we validate it **strictly**:
+ * a malformed webhook declaration is an authoring error worth surfacing, since
+ * it gates a security-sensitive remote trigger. Returns undefined when `on:` is
+ * absent so the caller can leave `spec.on` unset.
+ */
+function parseOn(raw: unknown, path: string): OnSpec | undefined {
+  if (raw === undefined || raw === null) return undefined;
+
+  // String shorthand: `on: webhook` — the only bare trigger name we recognise.
+  if (typeof raw === "string") {
+    if (raw === "webhook") return { webhook: true };
+    throw new WorkflowParseError(`unknown trigger "${raw}" (the only supported trigger is "webhook")`, path);
+  }
+
+  if (!isPlainObject(raw)) {
+    throw new WorkflowParseError('on must be "webhook" or a mapping of triggers', path);
+  }
+
+  // Be liberal: pass through unknown trigger keys untouched (we only model
+  // `webhook`). Absence of `webhook` is fine — it just means not webhook-triggerable.
+  if (raw.webhook === undefined) return {};
+
+  const wp = `${path}.webhook`;
+  const wh = raw.webhook;
+
+  // Boolean opt-in/out: `webhook: true` / `webhook: false`.
+  if (typeof wh === "boolean") return { webhook: wh };
+
+  if (!isPlainObject(wh)) {
+    throw new WorkflowParseError("webhook must be a boolean or a mapping (secret, source)", wp);
+  }
+
+  const trigger: WebhookTrigger = {};
+  if (wh.secret !== undefined) {
+    if (typeof wh.secret !== "string" || wh.secret.trim() === "") {
+      throw new WorkflowParseError("secret must be a non-empty string naming a config entry", `${wp}.secret`);
+    }
+    trigger.secret = wh.secret;
+  }
+  if (wh.source !== undefined) {
+    if (typeof wh.source !== "string" || wh.source.trim() === "") {
+      throw new WorkflowParseError("source must be a non-empty string", `${wp}.source`);
+    }
+    trigger.source = wh.source;
+  }
+  return { webhook: trigger };
+}
+
 function parseStep(raw: unknown, path: string): StepSpec {
   if (!isPlainObject(raw)) throw new WorkflowParseError("step must be a mapping", path);
 
@@ -315,7 +374,8 @@ export function parseWorkflow(yamlText: string): WorkflowSpec {
   }
 
   const spec: WorkflowSpec = { name: doc.name, jobs };
-  if (doc.on !== undefined) spec.on = doc.on;
+  const on = parseOn(doc.on, "on");
+  if (on !== undefined) spec.on = on;
   const inputs = parseInputs(doc.inputs, "inputs");
   if (inputs) spec.inputs = inputs;
   const env = parseEnv(doc.env, "env");

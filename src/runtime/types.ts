@@ -62,6 +62,12 @@ export interface RunContext {
    */
   workflowDir?: string;
   hooks?: RunHooks;
+  /**
+   * Caller-supplied stable run id. The web layer mints this up front so the HTTP
+   * route, the SSE stream, and the run record all key on the same id *before*
+   * `run()` returns. Defaults to a random UUID when omitted (the CLI path).
+   */
+  runId?: string;
 }
 
 export interface Runtime {

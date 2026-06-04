@@ -25,6 +25,14 @@ export const ABSURD_SCHEMA_VERSION = "0.4.0";
 export interface AbsurdEngine {
   /** The Absurd client, bound to a single-connection pool over PGLite. */
   readonly app: Absurd;
+  /**
+   * Run a SQL query against the underlying PGLite. The durable core uses Absurd's
+   * own tables for execution state; this seam is for engine-*adjacent* records the
+   * app owns (e.g. the `work.runs` history table). Shares the same single
+   * connection — fine because writes here are tiny and infrequent, and the runtime
+   * already interleaves polling queries on this pool during every run.
+   */
+  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
   /** Tear down the worker, pool, socket server, and database. */
   close(): Promise<void>;
 }
@@ -93,6 +101,10 @@ export async function createAbsurdEngine(opts: AbsurdEngineOptions = {}): Promis
 
   return {
     app,
+    async query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
+      const r = await pool.query(text, params as unknown[] | undefined);
+      return r.rows as T[];
+    },
     async close() {
       await app.close().catch(() => {});
       await pool.end().catch(() => {});

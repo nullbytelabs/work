@@ -132,8 +132,83 @@ export function buildAgentPrompt(agent: LoadedAgent, inputs: Record<string, stri
   return agent.task.replace(/\{\{\s*([A-Za-z_][\w-]*)\s*\}\}/g, (_m, key: string) => inputs[key] ?? "");
 }
 
-/** Map the final assistant text to the agent's declared outputs (first output). */
+/**
+ * Map the final assistant text to the agent's declared outputs.
+ *
+ * Two shapes, chosen by a backward-compatible convention so every existing
+ * agent keeps working byte-for-byte:
+ *
+ *  - **Single-output (the original behavior).** An agent that declares one (or
+ *    zero) output gets its whole final message as that one output. This is the
+ *    common case — e.g. `summarize` returns a prose sentence, not JSON — and
+ *    must never change, so it stays the default/fallback path.
+ *
+ *  - **Multi-output (the JSON convention).** When an agent declares 2+ outputs
+ *    AND its final message (trimmed) parses to a JSON *object*, we treat that
+ *    object as the structured result: each *declared* output name is filled from
+ *    the matching key. This lets a synthesis stage emit `severity`,
+ *    `root_cause`, `confidence`, … as separate `${{ steps.* }}` values. We only
+ *    read declared keys (undeclared JSON keys are ignored, declared-but-missing
+ *    keys become ""), so the manifest stays the contract — the agent can't
+ *    smuggle in extra outputs.
+ *
+ * The multi-output path is opt-in by *both* conditions, and never errors: if a
+ * 2+-output agent returns non-JSON (or a JSON array/number/string/null rather
+ * than an object — bad prompt, model didn't comply), we fall back to
+ * first-output-gets-everything. The author still gets a usable result and a clear
+ * signal to fix their agent's prompt, rather than a hard failure mid-pipeline.
+ *
+ * The change is purely additive: we do NOT touch `buildAgentPrompt` or the
+ * instructions. Authors instruct their agent to emit JSON themselves — that's a
+ * docs concern, not engine behavior.
+ */
 export function agentOutputs(agent: LoadedAgent, text: string): Record<string, string> {
+  const trimmed = text.trim();
+
+  // Multi-output path: only when 2+ outputs are declared. (One declared output
+  // can never benefit from JSON splitting, so we never even parse in that case —
+  // a single-output agent returning a JSON-looking string keeps it verbatim.)
+  if (agent.outputs.length >= 2) {
+    const obj = parseJsonObject(trimmed);
+    if (obj) {
+      const out: Record<string, string> = {};
+      for (const key of agent.outputs) {
+        const value = obj[key];
+        // Missing declared key → ""; scalars via String; objects/arrays
+        // re-serialized so the value round-trips as a usable string output.
+        out[key] =
+          value === undefined
+            ? ""
+            : value !== null && typeof value === "object"
+              ? JSON.stringify(value)
+              : String(value);
+      }
+      return out;
+    }
+    // Fall through: 2+ outputs but the text wasn't a JSON object → fallback below.
+  }
+
+  // Single-output / fallback path (the original behavior): the whole trimmed
+  // message becomes the first declared output (or "output" if none declared).
   const key = agent.outputs[0] ?? "output";
-  return { [key]: text.trim() };
+  return { [key]: trimmed };
+}
+
+/**
+ * Parse `text` as JSON and return it only if it's a plain object. Anything that
+ * throws, or that parses to an array/number/string/boolean/null, returns
+ * `undefined` so the caller takes the verbatim fallback path. (Arrays are
+ * `typeof "object"`, so we exclude them explicitly.)
+ */
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return undefined;
 }

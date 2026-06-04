@@ -60,6 +60,15 @@ export interface ExecutionPlan {
   /** Resolved workflow inputs, so the runtime can evaluate `if:` against them. */
   inputs?: Record<string, string | number | boolean>;
   /**
+   * The resolved webhook/dispatch payload (`event`), threaded through from
+   * `compile(spec, { event })`. Two roles: (1) `${{ event.* }}` references are
+   * baked into `run:`/`env:`/`with:`/`outputs:` strings at compile time, exactly
+   * like `inputs`; (2) the raw payload rides along so the runtime can evaluate
+   * `event.*` in deferred `if:`/`when:` conditions (that runtime wiring is added
+   * separately). Absent for non-webhook runs.
+   */
+  event?: Record<string, unknown>;
+  /**
    * Non-fatal authoring warnings raised at compile time (e.g. a deprecated or
    * implicit `runs-on`). The CLI surfaces these on stderr; the run proceeds.
    */

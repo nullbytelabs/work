@@ -28,6 +28,12 @@ import { expandMatrix, cellId, cellLabel, type MatrixCell } from "./matrix.ts";
 export interface CompileOptions {
   /** Raw input values (e.g. parsed from `--inputs '<json>'`), validated against the spec. */
   inputs?: Record<string, unknown>;
+  /**
+   * The resolved webhook/dispatch payload, exposed as `${{ event.* }}`. When
+   * provided, event expressions are baked into strings at compile time (just like
+   * `inputs`); when omitted, `${{ event.* }}` is left intact for a later phase.
+   */
+  event?: Record<string, unknown>;
 }
 
 export const DEFAULT_RUNS_ON = "gondolin";
@@ -75,10 +81,12 @@ function compileStep(
   baseEnv: Record<string, string>,
   inputs: ResolvedInputs,
   matrix: MatrixCell | undefined,
+  event: Record<string, unknown> | undefined,
 ): PlannedStep {
   const stepKey = step.id ?? String(index);
-  // Resolve ${{ inputs.x }} / ${{ matrix.x }} now; leave ${{ needs.* }} / ${{ steps.* }} for runtime.
-  const ictx = { inputs, ...(matrix ? { matrix } : {}) };
+  // Resolve ${{ inputs.x }} / ${{ matrix.x }} / ${{ event.* }} now; leave
+  // ${{ needs.* }} / ${{ steps.* }} for runtime.
+  const ictx = { inputs, ...(matrix ? { matrix } : {}), ...(event ? { event } : {}) };
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(mergeEnv(baseEnv, step.env))) {
     env[k] = interpolate(v, ictx);
@@ -113,21 +121,22 @@ function compileLeg(
   workflowEnv: Record<string, string>,
   inputs: ResolvedInputs,
   matrix: MatrixCell | undefined,
+  event: Record<string, unknown> | undefined,
 ): PlannedJob {
   const jobEnv = mergeEnv(workflowEnv, job.env);
   const planned: PlannedJob = {
     id: legId,
     runsOn: job.runsOn ?? DEFAULT_RUNS_ON,
     needs,
-    steps: job.steps.map((s, i) => compileStep(s, legId, i, jobEnv, inputs, matrix)),
+    steps: job.steps.map((s, i) => compileStep(s, legId, i, jobEnv, inputs, matrix, event)),
   };
   if (title !== undefined) planned.title = title;
   if (job.if !== undefined) planned.if = job.if;
   if (matrix !== undefined) planned.matrix = matrix;
   if (job.outputs !== undefined) {
     // Job output expressions resolve at runtime (steps.*/needs.*); resolve any
-    // inputs.*/matrix.* now, defer the rest.
-    const ictx = { inputs, ...(matrix ? { matrix } : {}) };
+    // inputs.*/matrix.*/event.* now, defer the rest.
+    const ictx = { inputs, ...(matrix ? { matrix } : {}), ...(event ? { event } : {}) };
     const outputs: Record<string, string> = {};
     for (const [k, v] of Object.entries(job.outputs)) {
       outputs[k] = interpolate(v, ictx);
@@ -206,6 +215,7 @@ function topoSort(jobs: Record<string, PlannedJob>): string[] {
 export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): ExecutionPlan {
   const inputs = resolveInputs(spec.inputs, opts.inputs ?? {});
   const workflowEnv = spec.env ?? {};
+  const event = opts.event;
 
   // First pass: expand each base job into its legs and record base -> leg ids,
   // so a dependency on a matrix base fans out to *all* its legs (converge).
@@ -225,11 +235,12 @@ export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): Executio
     if (w) warnings.push(w);
     const needs = (job.needs ?? []).flatMap(legsOf);
     for (const leg of expansions.get(jobId)!) {
-      jobs[leg.id] = compileLeg(leg.id, leg.title, job, needs, workflowEnv, inputs, leg.cell);
+      jobs[leg.id] = compileLeg(leg.id, leg.title, job, needs, workflowEnv, inputs, leg.cell, event);
     }
   }
 
   const plan: ExecutionPlan = { name: spec.name, jobs, jobOrder: topoSort(jobs), inputs };
+  if (event !== undefined) plan.event = event;
   if (warnings.length > 0) plan.warnings = warnings;
   return plan;
 }

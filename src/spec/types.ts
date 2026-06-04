@@ -96,12 +96,43 @@ export interface JobSpec {
   steps: StepSpec[];
 }
 
+/**
+ * A `webhook` trigger declaration under `on:`.
+ *
+ * `on: webhook` (string shorthand) opts the workflow in to remote, authenticated
+ * POST triggering with no further config. The expanded mapping form lets the
+ * author *name a config entry* that holds the actual secret — the workflow stays
+ * secret-free (`webhook: { secret: <name> }` references `webhooks.<name>` in the
+ * operator's config; this type does NOT resolve config, it only types the shape).
+ * `source` is a free-form hint of the expected sender (e.g. `alertmanager`) for a
+ * receiver to branch on. The interface is intentionally extensible — additional
+ * receiver-side fields land here as the trigger machinery grows.
+ */
+export interface WebhookTrigger {
+  /** Names a config entry (`webhooks.<name>`) holding the hook's auth secret. A reference, never a literal secret. */
+  secret?: string;
+  /** Free-form hint of the expected sender shape (e.g. "alertmanager", "grafana"). */
+  source?: string;
+}
+
+/**
+ * The typed `on:` trigger block. Currently only `webhook` is modeled. `true` is
+ * the opt-in with no options; a mapping carries `WebhookTrigger` details.
+ *
+ * NOTE: this is **not load-bearing for execution** — the compiler/runtime never
+ * read it. It is the opt-in gate the (later) webhook receiver consults to decide
+ * whether a workflow may be remotely triggered.
+ */
+export interface OnSpec {
+  webhook?: WebhookTrigger | boolean;
+}
+
 /** A whole workflow file. */
 export interface WorkflowSpec {
   /** Workflow name. */
   name: string;
-  /** Trigger declaration (`on:`). Parsed but not yet acted on. */
-  on?: unknown;
+  /** Trigger declaration (`on:`). Validated but not acted on by the engine; the webhook receiver reads it. */
+  on?: OnSpec;
   /** Declared inputs, provided at run time and read via `${{ inputs.<name> }}`. */
   inputs?: Record<string, InputSpec>;
   /** Workflow-level env, the base layer for all jobs/steps. */

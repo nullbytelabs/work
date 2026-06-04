@@ -4,5 +4,8 @@ dist/
 .DS_Store
 .pi-workflows-work/
 
+# Durable run-history DB the web UI (`work --web`) writes under a workspace.
+**/.workflows/db/
+
 # Local provider/model config (holds API keys). Commit the *.example.json instead.
 pi-workflows.config.json

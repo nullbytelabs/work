@@ -8,5 +8,7 @@ export type {
   StrategySpec,
   MatrixSpec,
   MatrixValue,
+  OnSpec,
+  WebhookTrigger,
 } from "./types.ts";
 export { parseWorkflow, WorkflowParseError } from "./parse.ts";

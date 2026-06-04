@@ -9,15 +9,15 @@
  * Pipeline: resolve -> read -> parseWorkflow -> compile -> AbsurdRuntime.run.
  * Streams step output live and exits non-zero if any job fails.
  */
-import { readFile, mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
-import { AbsurdRuntime } from "./runtime/index.ts";
-import { resolveConfigLayers, loadMergedConfig, type PiWorkflowsConfig } from "./config/index.ts";
-import { createAgentUsesHandler, makeAgentEgressResolver } from "./agent/index.ts";
+import { resolveConfigLayers, loadMergedConfig, PROJECT_CONFIG_FILENAME, type PiWorkflowsConfig } from "./config/index.ts";
 import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "./project.ts";
+import { startRun } from "./run.ts";
+import { startWebServer } from "./web/index.ts";
 import { selectPresenter, detectCI } from "./tui/index.ts";
 import { emitGraph, isGraphFormat, GRAPH_FORMATS, type GraphFormat } from "./graph/index.ts";
 import { runDoctor } from "./doctor/index.ts";
@@ -44,6 +44,10 @@ interface CliArgs {
   format?: GraphFormat;
   /** `graph --steps`: expand each job to its ordered steps. */
   steps?: boolean;
+  /** `--web`: boot the local web UI instead of running a single workflow. */
+  web?: boolean;
+  /** `--port <n>`: the web UI port (defaults to 4280). */
+  port?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -56,12 +60,22 @@ function parseArgs(argv: string[]): CliArgs {
   let noGlobal = false;
   let format: GraphFormat | undefined;
   let steps = false;
+  let web = false;
+  let port: number | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--workspace") {
       workspace = argv[++i];
       if (!workspace) fail("--workspace requires a directory path");
+    } else if (arg === "--web") {
+      web = true;
+    } else if (arg === "--port") {
+      const raw = argv[++i];
+      if (!raw) fail("--port requires a number");
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) fail("--port must be an integer between 1 and 65535");
+      port = n;
     } else if (arg === "--format") {
       const fmt = argv[++i];
       if (!fmt) fail("--format requires a value");
@@ -104,6 +118,17 @@ function parseArgs(argv: string[]): CliArgs {
 
   const common = { workdir, quiet, inputs, noGlobal, ...(workspace ? { workspace } : {}), ...(config ? { config } : {}) };
 
+  // `--web` — boot the local web UI over the workspace's `.workflows/` (it
+  // enumerates *all* pipelines, so it takes no workflow name/file). Allowed with
+  // `--workspace` and `--port`; rejects the run/graph-only flags.
+  if (web) {
+    if (positionals.length > 0) fail(`--web takes no positional arguments (got ${positionals[0]})`);
+    if (format) fail("--format only applies to `graph`");
+    if (steps) fail("--steps only applies to `graph`");
+    return { web: true, ...(port !== undefined ? { port } : {}), ...common };
+  }
+  if (port !== undefined) fail("--port only applies to `--web`");
+
   // `graph <file|name>` — emit the DAG instead of running. By-name when
   // `--workspace` is given (like `run`), else treat the target as a file path.
   if (positionals[0] === "graph") {
@@ -144,6 +169,7 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
+      `  ${prog} [--workspace <dir>] --web [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} doctor [--json]\n`,
@@ -171,6 +197,42 @@ async function main(): Promise<void> {
   }
 
   const args = parseArgs(argv);
+
+  // `--web` — boot the local web UI and keep the process alive (it does NOT
+  // resolve a single workflow; the UI enumerates every pipeline in the
+  // workspace). Branches before the single-workflow resolve below.
+  if (args.web) {
+    const workspace = args.workspace ?? process.cwd();
+    // Load config so agent steps AND the webhook receiver (`webhooks:` /
+    // `datasources:`) work. With no explicit `--config`, prefer the *workspace's*
+    // project config (the UI/webhooks are scoped to that workspace, which may
+    // differ from cwd), falling back to the cwd default otherwise.
+    const wsConfig = join(workspace, PROJECT_CONFIG_FILENAME);
+    const cfgPath = args.config ?? (existsSync(wsConfig) ? wsConfig : undefined);
+    const layers = resolveConfigLayers(cfgPath, { noGlobal: args.noGlobal });
+    const config: PiWorkflowsConfig | undefined = await loadMergedConfig(layers);
+    // Persist run history under the project so it survives restarts (the server is
+    // the sole owner of this dataDir — PGLite is single-process). Gitignore it.
+    const dataDir = join(workspace, ".workflows", "db");
+    const server = await startWebServer({
+      workspace,
+      config,
+      dataDir,
+      ...(args.port !== undefined ? { port: args.port } : {}),
+    });
+    process.stdout.write(`pi-workflows web UI: ${server.url}\n`);
+    process.stdout.write(`  workspace: ${workspace}\n`);
+    process.stdout.write(`  history:   ${dataDir}\n`);
+    process.stdout.write(`  auth token: ${server.token}\n`);
+    process.stdout.write("Press Ctrl-C to stop.\n");
+    // Stop cleanly on Ctrl-C (closes the server + the owned engine).
+    const shutdown = () => {
+      void server.close().then(() => process.exit(0));
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+    return; // keep the event loop alive on the listening server
+  }
 
   // Resolve where the workflow lives and what its checkout is. By name:
   // `<workspace>/.workflows/*.yaml` whose `name:` matches (workspace defaults to
@@ -218,10 +280,6 @@ async function main(): Promise<void> {
   const layers = resolveConfigLayers(args.config, { noGlobal: args.noGlobal });
   const config: PiWorkflowsConfig | undefined = await loadMergedConfig(layers);
 
-  const workRoot = args.workdir
-    ? resolve(args.workdir)
-    : await mkdtemp(join(tmpdir(), "pi-workflows-"));
-
   // Pick how to present the run: quiet (silent), a live DAG-aware board on an
   // interactive TTY, or the buffered per-job-block output everywhere else (CI,
   // pipes). The presenter is a pure consumer of the runtime's hooks.
@@ -234,25 +292,16 @@ async function main(): Promise<void> {
   });
   presenter.start(plan);
 
-  // Compose the agent uses-handler into the (agent-agnostic) runtime. For
-  // sandboxed jobs, `resolveJobNetwork` allowlists the model host and injects the
-  // API key so an in-guest agent can reach the model without the key entering the
-  // guest.
-  const runtime = new AbsurdRuntime({
-    usesHandlers: [createAgentUsesHandler({ config })],
-    resolveJobNetwork: makeAgentEgressResolver(config),
+  // The actual dispatch (config + work-root + agent-composed runtime + run +
+  // close) lives in `startRun`, shared with the web UI so both call one path.
+  const result = await startRun({
+    plan,
+    workspaceSource: layout.workspaceSource,
+    workflowDir: layout.workflowDir,
+    ...(presenter.hooks ? { hooks: presenter.hooks } : {}),
+    config,
+    ...(args.workdir ? { workdir: args.workdir } : {}),
   });
-  let result;
-  try {
-    result = await runtime.run(plan, {
-      workRoot,
-      workspaceSource: layout.workspaceSource,
-      workflowDir: layout.workflowDir,
-      hooks: presenter.hooks,
-    });
-  } finally {
-    await runtime.close();
-  }
 
   presenter.finish(result);
   process.exit(result.status === "success" ? 0 : 1);

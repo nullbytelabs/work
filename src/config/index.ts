@@ -28,11 +28,61 @@ export interface ModelConfig {
   temperature?: number;
 }
 
+/**
+ * A named external data source a plain `run:` step may reach with an injected
+ * header secret (e.g. grafana, an internal API). Like `providers`, the secret
+ * `token` is operator-owned and supports `$VAR` / `${VAR}` expansion so the file
+ * itself need not hold it. The `datasource` egress resolver derives the allowlist
+ * host from `baseUrl` and injects `token` host-side only — the guest references
+ * the placeholder env var (`tokenEnv`) but **never sees the real value** (Gondolin
+ * swaps it into the outbound header for the allowlisted host only).
+ */
+export interface DatasourceConfig {
+  /** Base URL; its host is the egress allowlist entry for this datasource. */
+  baseUrl: string;
+  /** Secret token; literal, or `$VAR` / `${VAR}` to read from the environment. */
+  token?: string;
+  /** Outbound header the swapped token rides in (default the target's default, e.g. Authorization). */
+  tokenHeader?: string;
+  /**
+   * Env-var name the `run:` step references (e.g. `$GRAFANA_TOKEN`). The resolver
+   * injects the real value under this name; the guest only ever sees the
+   * placeholder. Defaults (per the resolver) to `<NAME>_TOKEN` from the datasource key.
+   */
+  tokenEnv?: string;
+}
+
+/**
+ * A named webhook receiver entry (per §9). The committed workflow names this via
+ * `on: webhook: { secret: <name> }` — a *reference*, never a secret. Each hook
+ * carries its own `$ENV` secret (per-hook scoping) and may declare which
+ * `datasources` its triggered run is allowed to use (passed to the datasource
+ * egress resolver as the scoping allowlist).
+ */
+export interface WebhookConfig {
+  /** Workflow name this hook triggers. */
+  workflow: string;
+  /** Whether this hook is live; an operator toggle. Absent = enabled by convention. */
+  enabled?: boolean;
+  /** Delivery auth scheme. */
+  auth?: "hmac-sha256" | "bearer";
+  /** Per-hook secret; literal, or `$VAR` / `${VAR}` — never a committed literal in practice. */
+  secret?: string;
+  /** Header the delivery signature/token arrives in, e.g. `X-Hub-Signature-256`. */
+  signatureHeader?: string;
+  /** Datasource keys this hook's triggered run may use (scopes the egress resolver). */
+  datasources?: string[];
+}
+
 export interface PiWorkflowsConfig {
   providers: Record<string, ProviderConfig>;
   models: Record<string, ModelConfig>;
   /** Model alias used when an agent step doesn't specify `with.model`. */
   defaultModel?: string;
+  /** Named external data sources a plain `run:` step may reach (egress + header secret). */
+  datasources?: Record<string, DatasourceConfig>;
+  /** Named webhook receivers (operator-owned; referenced by `on: webhook`). */
+  webhooks?: Record<string, WebhookConfig>;
 }
 
 /** A model + its provider's connection details, ready to call. */
@@ -44,8 +94,13 @@ export interface ResolvedModel {
   temperature?: number;
 }
 
-/** Expand `$VAR` / `${VAR}` against the environment; pass literals through. */
-function expandEnv(value: string): string {
+/**
+ * Expand `$VAR` / `${VAR}` against the environment; pass literals through.
+ * Exported so the egress resolvers reuse the *same* secret-expansion semantics
+ * the model `apiKey` uses (one secret surface: `$ENV` in config -> real value
+ * injected host-side only).
+ */
+export function expandEnv(value: string): string {
   return value.replace(/\$\{([A-Z0-9_]+)\}|\$([A-Z0-9_]+)/gi, (_m, a, b) => process.env[a ?? b] ?? "");
 }
 
@@ -92,6 +147,73 @@ export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
     }
     config.defaultModel = raw.defaultModel;
   }
+
+  // `datasources`/`webhooks` are OPTIONAL — absent is fine. Shape-only validation
+  // here (no cross-refs): a webhook may name a datasource defined in a *different*
+  // layer, so we only reject malformed-in-isolation entries now; cross-refs live
+  // in `validateConfig` post-merge, matching the providers/models philosophy.
+  if (raw.datasources !== undefined) {
+    if (!isObject(raw.datasources)) throw new UserFacingError("config.datasources must be an object");
+    const datasources: Record<string, DatasourceConfig> = {};
+    for (const [name, d] of Object.entries(raw.datasources)) {
+      if (!isObject(d) || typeof d.baseUrl !== "string") {
+        throw new UserFacingError(`config.datasources.${name} needs a string baseUrl`);
+      }
+      const dc: DatasourceConfig = { baseUrl: d.baseUrl };
+      if (d.token !== undefined) {
+        if (typeof d.token !== "string") throw new UserFacingError(`config.datasources.${name}.token must be a string`);
+        dc.token = d.token;
+      }
+      if (d.tokenHeader !== undefined) {
+        if (typeof d.tokenHeader !== "string") throw new UserFacingError(`config.datasources.${name}.tokenHeader must be a string`);
+        dc.tokenHeader = d.tokenHeader;
+      }
+      if (d.tokenEnv !== undefined) {
+        if (typeof d.tokenEnv !== "string") throw new UserFacingError(`config.datasources.${name}.tokenEnv must be a string`);
+        dc.tokenEnv = d.tokenEnv;
+      }
+      datasources[name] = dc;
+    }
+    config.datasources = datasources;
+  }
+
+  if (raw.webhooks !== undefined) {
+    if (!isObject(raw.webhooks)) throw new UserFacingError("config.webhooks must be an object");
+    const webhooks: Record<string, WebhookConfig> = {};
+    for (const [name, w] of Object.entries(raw.webhooks)) {
+      if (!isObject(w) || typeof w.workflow !== "string") {
+        throw new UserFacingError(`config.webhooks.${name} needs a string workflow`);
+      }
+      const wc: WebhookConfig = { workflow: w.workflow };
+      if (w.enabled !== undefined) {
+        if (typeof w.enabled !== "boolean") throw new UserFacingError(`config.webhooks.${name}.enabled must be a boolean`);
+        wc.enabled = w.enabled;
+      }
+      if (w.auth !== undefined) {
+        if (w.auth !== "hmac-sha256" && w.auth !== "bearer") {
+          throw new UserFacingError(`config.webhooks.${name}.auth must be "hmac-sha256" or "bearer"`);
+        }
+        wc.auth = w.auth;
+      }
+      if (w.secret !== undefined) {
+        if (typeof w.secret !== "string") throw new UserFacingError(`config.webhooks.${name}.secret must be a string`);
+        wc.secret = w.secret;
+      }
+      if (w.signatureHeader !== undefined) {
+        if (typeof w.signatureHeader !== "string") throw new UserFacingError(`config.webhooks.${name}.signatureHeader must be a string`);
+        wc.signatureHeader = w.signatureHeader;
+      }
+      if (w.datasources !== undefined) {
+        if (!Array.isArray(w.datasources) || !w.datasources.every((s) => typeof s === "string")) {
+          throw new UserFacingError(`config.webhooks.${name}.datasources must be an array of strings`);
+        }
+        wc.datasources = w.datasources as string[];
+      }
+      webhooks[name] = wc;
+    }
+    config.webhooks = webhooks;
+  }
+
   return config;
 }
 
@@ -107,6 +229,16 @@ export function mergeConfig(base: PiWorkflowsConfig, over: PiWorkflowsConfig): P
   };
   const defaultModel = over.defaultModel ?? base.defaultModel;
   if (defaultModel !== undefined) merged.defaultModel = defaultModel;
+
+  // `datasources`/`webhooks` merge by key like providers/models — a colliding
+  // entry replaced wholesale; an omitted map inherits the lower layer (so we only
+  // set the merged key when at least one layer supplied it).
+  if (base.datasources || over.datasources) {
+    merged.datasources = { ...base.datasources, ...over.datasources };
+  }
+  if (base.webhooks || over.webhooks) {
+    merged.webhooks = { ...base.webhooks, ...over.webhooks };
+  }
   return merged;
 }
 
@@ -119,6 +251,24 @@ export function validateConfig(config: PiWorkflowsConfig): PiWorkflowsConfig {
   }
   if (config.defaultModel !== undefined && !(config.defaultModel in config.models)) {
     throw new UserFacingError(`config.defaultModel must name a model in config.models`);
+  }
+
+  // Cross-refs for the new sections, run once post-merge. Kept LENIENT: a webhook
+  // may legitimately reference a datasource defined in another layer, so we only
+  // validate a webhook's datasource refs when the merged config actually has a
+  // `datasources` map (i.e. some layer declared one) — otherwise we can't tell a
+  // typo from a still-to-be-merged layer and stay quiet.
+  for (const [name, w] of Object.entries(config.webhooks ?? {})) {
+    if (w.workflow.trim() === "") {
+      throw new UserFacingError(`config.webhooks.${name}.workflow must be a non-empty string`);
+    }
+    if (w.datasources && config.datasources) {
+      for (const ds of w.datasources) {
+        if (!(ds in config.datasources)) {
+          throw new UserFacingError(`config.webhooks.${name} references unknown datasource "${ds}"`);
+        }
+      }
+    }
   }
   return config;
 }

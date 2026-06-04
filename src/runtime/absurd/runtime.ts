@@ -95,6 +95,12 @@ interface JobDeps {
   usesHandlers: UsesHandler[];
   /** Resolved workflow inputs, for `if:` evaluation inside steps. */
   inputs: WorkflowInputs;
+  /**
+   * The webhook/dispatch payload, for `if: ${{ event.* }}` evaluation. Already
+   * baked into `run`/`with`/`env` strings at compile time; threaded here so the
+   * runtime-evaluated job/step conditions can read it too (parallel to `inputs`).
+   */
+  event?: Record<string, unknown>;
   /** Optional per-job sandbox network policy (allowlist + secrets). */
   resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
   /** Builds the ExecutionTarget for a job's `runs-on`. */
@@ -128,12 +134,13 @@ export class AbsurdRuntime implements Runtime {
 
   async run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult> {
     const { app } = await this.ensureEngine();
-    const runId = randomUUID();
+    const runId = ctx.runId ?? randomUUID();
     const deps: JobDeps = {
       ctx,
       usesHandlers: this.usesHandlers,
       inputs: plan.inputs ?? {},
       makeTarget: this.makeTarget,
+      ...(plan.event ? { event: plan.event } : {}),
       ...(this.resolveJobNetwork ? { resolveJobNetwork: this.resolveJobNetwork } : {}),
     };
 
@@ -174,6 +181,7 @@ export class AbsurdRuntime implements Runtime {
               run = evaluateCondition(job.if, {
                 inputs: deps.inputs,
                 needs: toConditionBags(needs),
+                ...(deps.event ? { event: deps.event } : {}),
                 ...(job.matrix ? { matrix: job.matrix } : {}),
                 status: { success: depsAllSucceeded, failure: depsSomeFailed },
               });
@@ -341,6 +349,7 @@ async function runJobInTask(
     inputs: deps.inputs,
     needs: toConditionBags(needs),
     steps: toConditionBags(stepOutputs),
+    ...(deps.event ? { event: deps.event } : {}),
     ...(job.matrix ? { matrix: job.matrix } : {}),
     status: { success: !failed, failure: failed },
   });

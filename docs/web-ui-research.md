@@ -11,6 +11,27 @@
 > engine already exposes. An MVP ships with **zero engine changes and zero new
 > dependencies**. The only genuine gaps are persistence-shaped (a queryable run
 > record + durable logs) and are cleanly deferrable to a later phase.
+>
+> **Implementation status (2026-06-03): Phase 0 SHIPPED + Phase 1 run history.**
+> Built with zero new dependencies: `src/web/{server,run-manager,web-presenter,
+> client,index}.ts`, the `listWorkflows` + `startRun` refactors, a caller-supplied
+> `runId` on `RunContext`, and `work --web [--workspace <dir>] [--port 4280]`.
+> Server is loopback-only with Host-header + `X-Work-Token` CSRF guards; routes
+> match §3; live updates over SSE. Covered by `test/web.test.ts`. The
+> hand-drawn-SVG frontend is the documented MVP (not pixel-polished).
+>
+> **Phase 1–3 SHIPPED.** An engine `query` seam (`AbsurdEngine.query`) backs two
+> engine-owned tables (`src/persistence/`): `work.runs` (option B — run metadata,
+> recorded at dispatch + finish) and `work.run_events` (every SSE frame, persisted
+> per-run with a synchronous seq). `work --web` defaults a persistent `dataDir`
+> (`<workspace>/.workflows/db`). So a restarted server not only **lists** past runs
+> (Phase 1) but **replays a finished run's full DAG + per-step logs** over the same
+> SSE endpoint (Phase 2 — `replayHistorical`), and a **Re-run** button /
+> `POST /api/runs/:id/rerun` recompiles a past run's stored inputs and dispatches
+> it (Phase 3). Proven by `test/persistence-runs.test.ts`, `test/run-events.test.ts`
+> (engine-restart durability) + `test/web-persistence.test.ts` / `test/web-logs.test.ts`
+> (server-restart log replay + re-run E2E). **Still deferred:** "re-run failed jobs"
+> (durable cross-job resume), live cancel.
 
 ---
 
