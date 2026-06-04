@@ -1141,7 +1141,7 @@ function viewRun(runId) {
   es.addEventListener('step-start', (e) => { const d = JSON.parse(e.data); ensureStep(d.jobId, d.stepName, d.title, d.ts); });
   es.addEventListener('step-output', (e) => {
     const d = JSON.parse(e.data);
-    const rec = ensureStep(d.jobId, d.stepName, d.stepName, d.ts);
+    const rec = ensureStep(d.jobId, d.stepName, d.title || d.stepName, d.ts);
     const pinned = isPinned(rec.body);
     const span = document.createElement('span');
     if (d.stream === 'stderr') span.className = 'stderr';
@@ -1152,7 +1152,7 @@ function viewRun(runId) {
   });
   es.addEventListener('step-end', (e) => {
     const d = JSON.parse(e.data);
-    const rec = ensureStep(d.jobId, d.stepName, d.stepName, d.ts);
+    const rec = ensureStep(d.jobId, d.stepName, d.title || d.stepName, d.ts);
     const cls = d.status;
     rec.summary.querySelector('.glyph').className = 'glyph ' + cls;
     rec.summary.querySelector('.glyph').textContent = GLYPH[cls] || '?';

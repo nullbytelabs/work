@@ -67,6 +67,7 @@ export default defineConfig({
             { text: "Writing a workflow", link: "/guide/writing-workflows" },
             { text: "Project layout", link: "/guide/project-layout" },
             { text: "Agent steps (AI)", link: "/guide/agent-steps" },
+            { text: "Web console", link: "/guide/web-ui" },
           ],
         },
         {

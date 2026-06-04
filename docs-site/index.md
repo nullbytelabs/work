@@ -40,4 +40,9 @@ features:
     details: Strap a real AI agent to any step. It runs inside the job's sandbox, rooted at the checkout with its full toolset — reading, editing, and deciding — while your API key never enters the guest.
     linkText: Agent steps
     link: /guide/agent-steps
+  - icon: 🖥️
+    title: Local web console
+    details: "`work --web` opens a loopback browser UI to run workflows from a form, watch them stream live, browse durable history, and receive authenticated webhook triggers — no extra dependencies, nothing leaves your machine."
+    linkText: Web console
+    link: /guide/web-ui
 ---

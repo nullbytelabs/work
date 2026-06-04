@@ -7,6 +7,7 @@ examples, read [Writing a workflow](../guide/writing-workflows) first.
 
 ```yaml
 name: report        # required — the workflow's name
+on: …               # optional — triggers (e.g. webhook)
 inputs: …           # optional — typed run-time parameters
 env: …              # optional — base env for all jobs/steps
 jobs: …             # required — the named jobs
@@ -15,9 +16,46 @@ jobs: …             # required — the named jobs
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** The workflow's name; also how `work run <name>` resolves it. |
+| `on` | string \| map | Trigger declaration (see [Triggers](#triggers)). Currently only `webhook`. |
 | `inputs` | map | Declared run-time inputs (see [Inputs](#inputs)). |
 | `env` | `map<string,string>` | Workflow-level environment, the base layer for every job and step. |
 | `jobs` | map | **Required.** The named jobs (see [Jobs](#jobs)). |
+
+## Triggers
+
+`on:` declares how a workflow may be triggered besides a direct `work run`. The
+only supported trigger is `webhook`, which opts the workflow in to remote,
+authenticated `POST` triggering by the [web console's](../guide/web-ui#webhook-triggers)
+receiver.
+
+```yaml
+on: webhook                  # string shorthand — opt in, no options
+```
+
+```yaml
+on:
+  webhook:
+    secret: alertmanager     # names webhooks.<name> in your config (a reference, never a literal secret)
+    source: alertmanager     # free-form hint of the expected sender shape
+```
+
+| Form | Meaning |
+|---|---|
+| `on: webhook` | Opt in with no options. |
+| `on: { webhook: true }` / `{ webhook: false }` | Explicit opt-in / opt-out. |
+| `on: { webhook: { secret, source } }` | Opt in and name the config hook / sender hint. |
+
+| Field | Type | Notes |
+|---|---|---|
+| `secret` | string | Names a `webhooks.<name>` config entry holding the hook's auth secret. A **reference**, never a literal secret. |
+| `source` | string | Free-form hint of the expected sender (e.g. `alertmanager`, `grafana`). |
+
+`on:` is the opt-in **gate**: a workflow with no `webhook` trigger can never be
+started by a `POST`, regardless of config. The trigger is validated but otherwise
+inert to the engine — the [webhook receiver](../guide/web-ui#webhook-triggers)
+reads it, and the matching `webhooks.<name>` entry in
+[config](./configuration#webhooks) supplies the secret and auth scheme. A
+webhook-triggered run reads the request body via the [`event` context](#expressions).
 
 ## Jobs
 
@@ -150,12 +188,14 @@ matrix job waits for **every** leg.
 
 **Available in expressions:**
 
-- Contexts: `inputs.*`, `matrix.*`, `needs.*`, `steps.*`
+- Contexts: `inputs.*`, `matrix.*`, `needs.*`, `steps.*`, and — for a
+  [webhook-triggered](#triggers) run — `event.*`
 - Operators: `==`, `!=`, `&&`, `||`, `!`
 - Status functions: `success()`, `failure()`, `always()`, `cancelled()`
 
 ```yaml
 if: ${{ inputs.env == "prod" && success() }}
+if: ${{ event.alerts[0].labels.severity == "critical" }}
 ```
 
 ::: warning
@@ -165,5 +205,23 @@ Use `if` **or** `when` on a given step/job, not both.
 ## Expressions
 
 <code v-pre>${{ … }}</code> interpolates values into env, `with`, `outputs`, and
-conditions. The available contexts are exactly `inputs`, `matrix`, `needs`, and
-`steps` (as listed above).
+conditions. The available contexts are `inputs`, `matrix`, `needs`, and `steps`
+(as listed above) — plus `event` on a [webhook-triggered](#triggers) run.
+
+### `event` (webhook runs)
+
+When a run is started by the [webhook receiver](../guide/web-ui#webhook-triggers),
+the parsed POST body is exposed as `event`. It supports **nested paths and array
+indexing**, in both interpolation and `if:` conditions:
+
+```yaml
+on: webhook
+jobs:
+  triage:
+    if: ${{ event.commonLabels.severity == "critical" }}
+    steps:
+      - run: echo "first alert: ${{ event.alerts[0].labels.alertname }}"
+```
+
+`event` is absent on a normal `work run`; reference it only from a webhook-triggered
+workflow.

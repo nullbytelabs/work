@@ -93,6 +93,18 @@ work graph build-and-report.yaml --steps     # expand each job into its steps
 
 Formats: `mermaid`, `dot`, `json`, `ascii`. See the [CLI reference](../reference/cli#work-graph).
 
+## Run it from the browser
+
+Prefer a UI? Open the local web console over the same project:
+
+```bash
+work --workspace . --web         # → http://127.0.0.1:4280/
+```
+
+Run workflows from an auto-generated form, watch them stream live, browse durable
+history, and receive webhook triggers — all loopback-only. See the
+[Web console guide](./web-ui).
+
 ## Explore the examples
 
 The repo's [`test/e2e/`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e)
@@ -104,4 +116,5 @@ directly.
 - Learn the full YAML surface in [Writing a workflow](./writing-workflows).
 - Organize a real project with the [`.workflows/` layout](./project-layout).
 - Add an [AI agent step](./agent-steps).
+- Drive it from the [web console](./web-ui).
 :::

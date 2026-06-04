@@ -21,6 +21,9 @@ work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--no-
 # print the job DAG instead of running it
 work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
 
+# open the local web console over a workspace's .workflows/
+work [--workspace <dir>] --web [--port <n>]
+
 # check the host can run sandboxed jobs
 work doctor [--json]
 ```
@@ -130,6 +133,35 @@ work graph report.yaml --format ascii --steps
 work --workspace my-project graph report --format mermaid
 ```
 
+### `work --web`
+
+```bash
+work [--workspace <dir>] --web [--port <n>]
+```
+
+Boots the **local web console** over the workspace's `.workflows/` instead of
+running a single workflow, and keeps the process alive until you stop it
+(`Ctrl-C`). It prints the URL it bound:
+
+```bash
+work --workspace . --web
+# pi-workflows web UI: http://127.0.0.1:4280/
+```
+
+From the browser you can run workflows from an auto-generated input form, watch
+runs stream live, browse durable history (and re-run), and manage
+[webhook triggers](../guide/web-ui#webhook-triggers). The server binds **loopback
+only** (`127.0.0.1`), validates the `Host` header, and requires a CSRF token on
+every mutating request. Run history lives under `<workspace>/.workflows/db/`. See
+the [Web console guide](../guide/web-ui) for the full tour.
+
+| Option | Effect |
+|---|---|
+| `--workspace <dir>` | Project root whose `.workflows/` the console serves (default: current directory). |
+| `--port <n>` | Port to bind (default `4280`; an integer `1`–`65535`). |
+
+`--web` takes no positional arguments, and `--port` only applies alongside `--web`.
+
 ### `work doctor`
 
 ```bash
@@ -162,7 +194,9 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 
 | Flag | Applies to | Effect |
 |---|---|---|
-| `--workspace <dir>` | `run`, `graph` | Project root for resolving a workflow by name (default: current directory). |
+| `--workspace <dir>` | `run`, `graph`, `--web` | Project root for resolving a workflow by name / serving the web console (default: current directory). |
+| `--web` | (standalone) | Open the local web console over the workspace's `.workflows/` instead of running a workflow. |
+| `--port <n>` | `--web` | Port the web console binds (default `4280`; `1`–`65535`). |
 | `--inputs '<json>'` | run | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. |
 | `--config <file>` | run | Project-layer model/provider config file. Default: `./pi-workflows.config.json`, or `$PI_WORKFLOWS_CONFIG`. |
 | `--no-global` | run | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
