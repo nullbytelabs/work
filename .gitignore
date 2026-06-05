@@ -14,3 +14,7 @@ pi-workflows.config.json
 # skill content or local Claude settings. Reinstall from the lock to restore.
 .agents/
 .claude/
+
+# Design-review screenshots are ephemeral verification artifacts (regenerated on
+# demand via headless Chrome); keep the markdown reports, drop the PNGs.
+.design-review/shots/
