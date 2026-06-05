@@ -59,7 +59,7 @@ This gives you `work` (and the alias `workflow`). Both still need **Node ≥ 23.
 git clone https://github.com/nullbytelabs/pi-workflows
 cd pi-workflows
 npm install
-./pi-workflows --help   # dev launcher: runs the TypeScript directly, no build
+./bin/pi-workflows.mjs --help   # runs src/cli.ts directly (no dist/), no build step
 ```
 
 </details>

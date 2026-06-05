@@ -9,3 +9,8 @@ dist/
 
 # Local provider/model config (holds API keys). Commit the *.example.json instead.
 pi-workflows.config.json
+
+# Installed skills: track only the lockfile (skills-lock.json), not the vendored
+# skill content or local Claude settings. Reinstall from the lock to restore.
+.agents/
+.claude/
