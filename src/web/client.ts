@@ -481,11 +481,15 @@ h1.run-state[data-status=skipped] { color: var(--skip); }
    DAG — faithful layered graph; status by glyph + color; fits its container.
    ======================================================================== */
 .dag-wrap {
+  /* Hug the graph: a small (1-2 job) graph gets a small box, not a full-width
+     frame around mostly-empty space. Caps at the card width; a wider graph's
+     svg shrinks to fit (svg.dag max-width:100%). */
+  width: fit-content; max-width: 100%;
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--surface-2);
   overflow-x: auto; padding: var(--space-2);
 }
-svg.dag { display: block; width: 100%; height: auto; max-width: 100%; }
+svg.dag { display: block; max-width: 100%; height: auto; }
 svg.dag path.edge {
   stroke: var(--border-strong); stroke-width: 2; fill: none; stroke-linecap: round;
   transition: stroke .25s;
@@ -1456,8 +1460,13 @@ function drawDag(container, init) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('class', 'dag');
-  // viewBox kept (fit-to-container); fixed width/height dropped so the graph
-  // scales down instead of forcing a horizontal scrollbar at every width.
+  // Render at the graph's INTRINSIC pixel size so nodes are a consistent size no
+  // matter how many jobs there are. The width/height attrs set that natural size;
+  // the viewBox + CSS (max-width:100%, height:auto) only ever scale the graph
+  // DOWN to fit a narrow card — never up. (Without this a 1-node graph stretched
+  // to fill the whole card, blowing the node up ~6x.)
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
   svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
   svg.setAttribute('preserveAspectRatio', 'xMinYMid meet');
   svg.setAttribute('role', 'img');
