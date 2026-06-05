@@ -393,15 +393,9 @@ h1.run-state[data-status=skipped] { color: var(--skip); }
 .run-sub[data-status=failure] .elapsed { color: var(--fail); }
 .run-sub[data-status=success] .elapsed { color: var(--ok); }
 
-/* Wide-screen run layout: sticky DAG pane beside a scroll-scoped logs pane. */
+/* Run layout: the graph is stacked OVER the step logs, both full-width, so the
+   DAG reads at full size and the page scrolls as one column. */
 .run-grid { display: grid; gap: var(--space-4); }
-@media (min-width: 960px) {
-  .run-grid { grid-template-columns: minmax(0, 380px) minmax(0, 1fr); align-items: start; }
-  .run-grid .dag-pane { position: sticky; top: 80px; }
-  .run-grid .logs-pane .logs {
-    max-height: calc(100vh - 200px); overflow-y: auto; padding-right: var(--space-1);
-  }
-}
 
 /* ========================================================================
    WEBHOOKS — hook cards + endpoint URL + hairline-divided deliveries list

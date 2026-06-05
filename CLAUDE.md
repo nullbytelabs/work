@@ -49,6 +49,10 @@ to strip types, so `prepack` runs `scripts/build.mjs`: esbuild bundles `src/cli.
 `schema.sql` and `guest-runner-script.mjs` — flat next to it. `bin/pi-workflows.mjs` prefers
 `dist/cli.js` if present, else falls back to `src/cli.ts`. Publishing needs npm 2FA (`--otp`).
 
+> **Footgun:** because the shim prefers `dist/`, running `npm run build` locally (e.g. to
+> verify packaging) leaves a `dist/` that **shadows your `src/` edits** for `./bin/pi-workflows.mjs`
+> until you `rm -rf dist`. During development keep `dist/` absent so the shim runs `src/` live.
+
 ## Architecture
 
 The CLI pipeline is a straight line (`src/cli.ts`): **resolve → read → parse → compile → run.**
