@@ -21,6 +21,12 @@ import type { ExecutionTarget, RunOptions, RunResult } from "./types.ts";
 /** The guest path the per-job working directory is mounted at. */
 const GUEST_WORKSPACE = "/workspace";
 
+// Gondolin's own default is "1G", which is too tight for some toolchains: knip's
+// parser (oxc) eagerly allocates a single ~4 GiB ArrayBuffer, so it OOMs at 1G
+// while lint/typecheck are fine. We boot every job at 6G so the common dev checks
+// run in-VM. (qemu memory syntax.)
+const GUEST_MEMORY = "6G";
+
 /**
  * Minimal structural shapes for the bits of the Gondolin SDK we use. We model
  * these locally (rather than importing the package's types) so `tsc` succeeds
@@ -98,6 +104,7 @@ export class GondolinTarget implements ExecutionTarget {
     await mkdir(this.cfg.workdir, { recursive: true });
 
     const createOpts: Record<string, unknown> = {
+      memory: GUEST_MEMORY,
       vfs: { mounts: { [GUEST_WORKSPACE]: new RealFSProvider(this.cfg.workdir) } },
     };
 
