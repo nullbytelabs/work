@@ -39,7 +39,7 @@ function parseEnv(raw: unknown, path: string): EnvMap | undefined {
 const INPUT_TYPES = new Set(["string", "boolean", "number"]);
 
 /** Parse the workflow `inputs:` block. `name:` (null) is shorthand for an optional string. */
-function parseInputs(raw: unknown, path: string): Record<string, InputSpec> | undefined {
+export function parseInputs(raw: unknown, path: string): Record<string, InputSpec> | undefined {
   if (raw === undefined) return undefined;
   if (!isPlainObject(raw)) throw new WorkflowParseError("inputs must be a mapping of name -> declaration", path);
 

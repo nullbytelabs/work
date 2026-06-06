@@ -1,8 +1,9 @@
 /**
  * Per-job sandbox egress for agent steps.
  *
- * When a `runs-on: gondolin` job contains `uses: agent/*` steps, the in-guest
- * Pi process must reach the model API — but Gondolin is deny-by-default. This
+ * When a `runs-on: gondolin` job contains agent steps (`uses: agent/*` or the
+ * `work/agent` primitive), the in-guest Pi process must reach the model API —
+ * but Gondolin is deny-by-default. This
  * builds the job's network policy from config: allowlist the model host(s) and
  * inject the API key as a header-only secret under `GUEST_MODEL_KEY_ENV`, so the
  * **real key never enters the guest** (Gondolin swaps the placeholder into the
@@ -38,6 +39,15 @@ function stepModelAlias(job: PlannedJob, i: number): string | undefined {
 }
 
 /**
+ * Whether a step reaches the model and so needs the egress allowlist + injected
+ * key: either an `agent/<name>` package step or the `work/agent` primitive. Both
+ * run a real Pi loop in-guest and reach the model the same way.
+ */
+function isModelStep(uses: string | undefined): boolean {
+  return uses === "work/agent" || (uses?.startsWith("agent/") ?? false);
+}
+
+/**
  * Build the `resolveJobNetwork` callback. Returns `undefined` for jobs that
  * need no mediated egress (no config, or no agent steps).
  */
@@ -47,10 +57,11 @@ export function makeAgentEgressResolver(
   return (job) => {
     if (!config) return undefined;
 
-    // Resolve every model an agent step in this job will call.
+    // Resolve every model an agent step in this job will call (agent/<name> or
+    // the work/agent primitive).
     const models: ResolvedModel[] = [];
     job.steps.forEach((step, i) => {
-      if (step.uses?.startsWith("agent/")) {
+      if (isModelStep(step.uses)) {
         models.push(resolveModel(config, stepModelAlias(job, i)));
       }
     });

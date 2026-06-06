@@ -15,7 +15,8 @@ import { join, resolve } from "node:path";
 import { AbsurdRuntime, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
 import type { ExecutionPlan } from "./compiler/index.ts";
 import type { TargetFactory } from "./targets/index.ts";
-import { createAgentUsesHandler, makeAgentEgressResolver } from "./agent/index.ts";
+import { createAgentUsesHandler, createWorkAgentHandler, makeAgentEgressResolver } from "./agent/index.ts";
+import { createActionUsesHandler } from "./actions/index.ts";
 import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.ts";
 import type { PiWorkflowsConfig } from "./config/index.ts";
 
@@ -74,7 +75,11 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
   // inject secrets host-side only — the real values never enter the guest. An
   // injected engine is shared (not closed per run).
   const runtime = new AbsurdRuntime({
-    usesHandlers: [createAgentUsesHandler({ config: opts.config })],
+    usesHandlers: [
+      createAgentUsesHandler({ config: opts.config }),
+      createWorkAgentHandler({ config: opts.config }),
+      createActionUsesHandler(),
+    ],
     resolveJobNetwork: composeResolvers(
       makeAgentEgressResolver(opts.config),
       makeDatasourceEgressResolver(opts.config, opts.datasources ? { datasources: opts.datasources } : {}),

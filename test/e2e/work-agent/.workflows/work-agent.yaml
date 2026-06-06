@@ -1,0 +1,20 @@
+# The dumb `work/agent` primitive: a Pi agent prompted entirely through `with:` —
+# no agent package, no instructions.md/task.md, no templating. Its final message
+# is the step's single `output`. (Under test the agent runner is mocked, so this
+# verifies the wiring without inference; a real model resolves from config.)
+name: work-agent
+jobs:
+  summarize:
+    runs-on: gondolin
+    steps:
+      - id: a
+        uses: work/agent
+        with:
+          instructions: You are terse.
+          prompt: Summarize what this project does in one line.
+      - name: assert the agent produced an output
+        env:
+          OUT: ${{ steps.a.outputs.output }}
+        run: |
+          echo "agent said: $OUT"
+          test -n "$OUT"

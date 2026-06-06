@@ -10,6 +10,8 @@ export type {
   UsesResult,
 } from "./types.ts";
 export { AbsurdRuntime, type AbsurdRuntimeOptions, type JobNetwork } from "./absurd/runtime.ts";
+// `$WORK_OUTPUT` ($GITHUB_OUTPUT-style) parsing — shared with the JS-action ABI.
+export { parseOutputFile } from "./output.ts";
 export {
   createAbsurdEngine,
   type AbsurdEngine,

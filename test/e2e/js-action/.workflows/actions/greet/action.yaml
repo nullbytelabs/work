@@ -1,0 +1,11 @@
+name: greet
+inputs:
+  name:
+    type: string
+    default: world
+outputs:
+  greeting:
+    description: the greeting line
+runs:
+  using: node
+  main: index.mjs

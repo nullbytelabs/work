@@ -13,4 +13,4 @@ export type {
   WebhookTrigger,
   WorkflowCallSpec,
 } from "./types.ts";
-export { parseWorkflow, WorkflowParseError } from "./parse.ts";
+export { parseWorkflow, parseInputs, WorkflowParseError } from "./parse.ts";

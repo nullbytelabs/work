@@ -13,7 +13,6 @@
 // `npm run typecheck` runs) via the LanguageService — no ts-morph, no second
 // vendored TS, no version skew.
 import ts from "typescript";
-import fs from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");

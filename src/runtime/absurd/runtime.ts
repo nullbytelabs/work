@@ -34,6 +34,7 @@ import {
 import { createAbsurdEngine, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
 import type { JobResult, RunContext, Runtime, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
+import { parseOutputFile } from "../output.ts";
 
 const QUEUE = "default";
 const DEFAULT_MAX_CONCURRENCY = 16;
@@ -257,38 +258,6 @@ async function awaitTaskTerminal(app: AbsurdEngine["app"], taskID: string) {
     }
     await new Promise((r) => setTimeout(r, 20));
   }
-}
-
-/**
- * Parse a step's $WORK_OUTPUT file (GitHub-Actions `$GITHUB_OUTPUT` semantics):
- *   - `key=value` for single-line values, and
- *   - a heredoc block for multi-line values:
- *         key<<DELIMITER
- *         line 1
- *         line 2
- *         DELIMITER
- *     (everything up to the line that exactly equals DELIMITER is the value).
- * A later write to the same key wins.
- */
-function parseOutputFile(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const heredoc = /^([A-Za-z_][\w-]*)<<(\S+)\s*$/.exec(line);
-    if (heredoc) {
-      const [, key, delimiter] = heredoc as unknown as [string, string, string];
-      const body: string[] = [];
-      i++;
-      while (i < lines.length && lines[i] !== delimiter) body.push(lines[i++]!);
-      out[key] = body.join("\n");
-      continue; // i sits on the delimiter line; the for-loop's i++ steps past it
-    }
-    const eq = line.indexOf("=");
-    if (eq <= 0) continue;
-    out[line.slice(0, eq).trim()] = line.slice(eq + 1);
-  }
-  return out;
 }
 
 /** Expression context shape threaded to the step runners (needs + step outputs). */

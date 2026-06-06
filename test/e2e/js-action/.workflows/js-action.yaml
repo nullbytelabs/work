@@ -1,0 +1,18 @@
+# A user-space JavaScript action: `uses: action/<name>` resolves a project-owned
+# package under `.workflows/actions/`, runs its `index.mjs` in-guest with the
+# INPUT_* / $WORK_OUTPUT ABI, and surfaces its declared outputs as steps.*.
+name: js-action
+jobs:
+  greet:
+    runs-on: gondolin
+    steps:
+      - id: g
+        uses: action/greet
+        with:
+          name: workflows
+      - name: assert the action output flowed through
+        env:
+          MSG: ${{ steps.g.outputs.greeting }}
+        run: |
+          echo "step saw: $MSG"
+          test "$MSG" = "hello, workflows"
