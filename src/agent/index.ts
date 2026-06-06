@@ -14,8 +14,10 @@
  *   instructions.md  — the system prompt (standing persona/policy)
  *   task.md          — the task prompt template; `{{ <input> }}` placeholders
  *                      bound from the step's `with`
- * (skills/, extension.ts are reserved for future agent skills/extensions.) This is the
- * package shape from docs/agent-uses-interface.md. Packages are NOT shipped in
+ * (skills/, extension.ts are reserved for future agent skills/extensions.) This
+ * is the currently-shipped `agent/<name>` package shape; the direction for richer
+ * agents (a dumb `work/agent` primitive + user-space actions) is in
+ * docs/agent-primitive-and-actions.md. Packages are NOT shipped in
  * the engine — they live in the project (the agent uses-handler points
  * `loadAgent` at `<projectDir>/agents/`). Remote `@ref` sourcing
  * (github/gitlab/codeberg) and project/user override search paths come later,

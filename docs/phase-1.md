@@ -245,9 +245,10 @@ dependency loaded lazily; needs Node ≥ 22.19): it registers an OpenAI-compatib
 provider in memory and drives `session.prompt()`, which resolves only after the
 full run **including retries**. The result is exposed as
 `steps.<id>.outputs.summary`; a `length` finish adds a truncation warning. The
-runner is injectable, so tests use a mock and never call inference. (Tool-using
-agents, `runs-on` tool∩target enforcement, and `@ref`/override paths are next —
-see `docs/agent-uses-interface.md`.)
+runner is injectable, so tests use a mock and never call inference. (Multi-turn,
+Pi resource pass-through, and remote action sourcing are next — see
+`docs/agent-primitive-and-actions.md`. Note: the engine deliberately does **not**
+police an agent's tools — they run VM-isolated in-guest.)
 
 **Config** (`--config <file>`, `$WORK_CONFIG`, or `./work.json`):
 
@@ -260,8 +261,9 @@ see `docs/agent-uses-interface.md`.)
 ```
 
 `apiKey` supports `$VAR`/`${VAR}` expansion. Today's agent runs Pi's full
-default toolset over the job's checkout; **multi-turn** orchestration and agent
-packages with manifests/lockfiles are designed in `docs/agent-uses-interface.md`.
+default toolset over the job's checkout; the direction for richer agents — a dumb
+`work/agent` primitive plus user-space (composite/JS) actions — is designed in
+`docs/agent-primitive-and-actions.md`.
 
 ## The Phase 2 upgrade path (deliberate boundaries)
 
@@ -282,9 +284,9 @@ rewrite:
   package (`instructions.md` + `task.md` + manifest), validates `with` against its
   declared inputs, and runs a real Pi session (full default toolset over the
   checkout) through a registered `uses:` handler — host-side or in-guest per
-  `runs-on`. Still ahead: `@ref` sourcing, multi-turn, and tool∩target
-  enforcement. (See `docs/agent-uses-interface.md` for the fuller interface,
-  `docs/pi-coding-agent-sdk.md` for the Pi surface.)
+  `runs-on`. Still ahead: a dumb `work/agent` primitive, user-space (composite/JS)
+  actions, and remote sourcing. (See `docs/agent-primitive-and-actions.md` for that
+  direction, `docs/pi-coding-agent-sdk.md` for the Pi surface.)
 - **`needs` DAG:** done — the runtime walks the dependency graph and runs
   independent jobs in parallel via worker `concurrency`. **`matrix` / `if`** are
   now executed too: the compiler expands `strategy.matrix` into one independent

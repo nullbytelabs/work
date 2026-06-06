@@ -154,4 +154,5 @@ live browser iteration) and should drive UI changes rather than ad-hoc edits.
 - Keep status comments truthful (project memory): scrub stale "not-yet/phase-N/no-tools" comments
   when you ship the thing they describe.
 - Deep-dive design docs live in `docs/` (e.g. `phase-1.md`, `gondolin-secure-execution.md`,
-  `pi-in-gondolin.md`, `absurd-durable-workflows.md`, `agent-uses-interface.md`).
+  `pi-in-gondolin.md`, `absurd-durable-workflows.md`, `agent-primitive-and-actions.md`,
+  `reusable-workflows.md`).

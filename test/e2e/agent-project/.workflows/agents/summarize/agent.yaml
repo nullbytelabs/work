@@ -1,5 +1,5 @@
 # Agent package manifest (the action.yml analog), supplied by THIS project — not
-# the engine. See docs/agent-uses-interface.md for the full design (skills/
+# the engine. See docs/agent-primitive-and-actions.md for the direction (skills/
 # extensions are future; today's runner uses instructions + task + inputs/outputs).
 name: summarize
 description: Read the project's source from the workspace and summarize it in one sentence.

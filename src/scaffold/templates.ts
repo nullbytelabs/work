@@ -82,7 +82,7 @@ jobs:
 `;
 
 const AGENT_MANIFEST_YAML = `# Agent package manifest for \`uses: agent/{{name}}\` — supplied by THIS project,
-# not the engine (the action.yml analog). See docs/agent-uses-interface.md.
+# not the engine (the action.yml analog).
 # Today's runner uses instructions + task + inputs/outputs; skills/extensions are future.
 name: {{name}}
 description: <one line describing what this agent does>

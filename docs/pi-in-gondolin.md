@@ -78,9 +78,10 @@ A `uses: agent` step is an LLM-driven loop. Today it runs host-side with:
 
 - **the host filesystem** — anything the agent's tools touch is the real host FS
   (the original host-side runner pinned `noTools: "all"`; the shipped agent is
-  shell- and file-capable and now runs in-guest on `gondolin`, per
-  [`agent-uses-interface.md`](agent-uses-interface.md) §7; the moment tools are
-  enabled, `bash`/`write`/`edit` execute on the host);
+  shell- and file-capable and now runs in-guest on `gondolin`, where tools are
+  VM-isolated and the engine doesn't police them — see
+  [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md); the moment
+  tools are enabled on a *host* runner, `bash`/`write`/`edit` execute on the host);
 - **the host network** — unmediated egress, no allowlist;
 - **the host's secrets** — the model API key sits in the host process env, and any
   host-side tool the agent runs can read it.
@@ -88,11 +89,10 @@ A `uses: agent` step is an LLM-driven loop. Today it runs host-side with:
 This is the same class of footgun the project once had for `runs-on: local`
 (host execution with no isolation) — the reason that mode was removed entirely —
 except here it happened **even when the author asked for `gondolin`**. The sandbox is
-provisioned for the job and then bypassed for its agent step. It is recorded as
-open question #6 in [`agent-uses-interface.md`](agent-uses-interface.md) (*"Agent
-inside VM vs host"*) and the **UNVERIFIED** note in
-[`gondolin-secure-execution.md`](gondolin-secure-execution.md) §5. This doc resolves
-the direction.
+provisioned for the job and then bypassed for its agent step. This is the
+*"agent inside VM vs host"* question (also the **UNVERIFIED** note in
+[`gondolin-secure-execution.md`](gondolin-secure-execution.md) §5), which this doc
+resolves: the agent runs **in-guest**.
 
 ### 1c. Goal
 
@@ -482,11 +482,12 @@ this specific package builds there.
 6. **One-exec-per-VM under Option A.** A held RPC `exec` and concurrent tool
    `exec`s contend on one VM; resolved only if tools run inside the RPC process.
    Confirm before pursuing A.
-7. **Tools ∩ target, revisited.** With the agent genuinely in-guest, the
-   `effective_tools = agent.tools ∩ target.allowed_tools` rule from
-   [`agent-uses-interface.md`](agent-uses-interface.md) §7 can finally **allow**
-   `bash`/`write`/`edit` on `gondolin` safely (they're VM-isolated). Wire the
-   policy to the runner placement.
+7. **Tools, revisited.** With the agent genuinely in-guest, `bash`/`write`/`edit`
+   are safe on `gondolin` (VM-isolated), so `work/agent` passes the tool set
+   through **unpoliced** rather than intersecting it against a target policy — the
+   engine doesn't govern agent permissions (see
+   [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md)). The VM is
+   the boundary, not a tool allowlist.
 8. **Streaming fidelity.** One-shot `pi --mode json` yields structured events the
    handler can forward through `emit`; confirm the JSON event schema
    (`/docs/latest/json`) covers what the CLI/TUI surfaces. **UNVERIFIED** detail.
@@ -503,8 +504,9 @@ this specific package builds there.
   (Pi modes/SDK/RPC, durability, auth), [`gondolin-secure-execution.md`](gondolin-secure-execution.md)
   (exec, fs/mounts, networking, secrets, MITM CA, the `pi-gondolin.ts` example),
   [`gondolin-custom-images.md`](gondolin-custom-images.md) (Node/Pi guest image),
-  [`agent-uses-interface.md`](agent-uses-interface.md) (agent package model,
-  tools∩target, open question #6). Code seams: `src/runtime/absurd/runtime.ts`
+  [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (the
+  `work/agent` primitive + user-space actions; in-guest tools, unpoliced). Code
+  seams: `src/runtime/absurd/runtime.ts`
   (`runJobInTask`, `runUsesStep`, `runShellStep`), `src/runtime/types.ts`
   (`UsesContext`/`UsesHandler`), `src/agent/uses-handler.ts`, `src/agent/pi-runner.ts`,
   `src/targets/types.ts` + `src/targets/gondolin.ts` (`ExecutionTarget`).
