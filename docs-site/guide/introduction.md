@@ -54,7 +54,7 @@ A workflow is a single YAML file. The pieces:
 | Piece | What it is |
 |---|---|
 | **Workflow** | the file itself — a `name:` and a set of named jobs. |
-| **Job** | an isolated unit of work, run in its own micro-VM (`runs-on: gondolin`). |
+| **Job** | an isolated unit of work, run in its own micro-VM (`runs-on: gondolin`), sized with `machine:`. |
 | **Step** | a shell command (`run:`) or an AI agent (`uses: agent/<name>`). |
 | **`needs`** | dependencies between jobs; independent jobs run in parallel. |
 | **Inputs / outputs / matrix / conditionals** | typed parameters, data passing between jobs, fan-out, and guards. |
@@ -68,6 +68,8 @@ Everything in this guide is built and runs end to end:
 
 - **Named jobs** scheduled across a `needs` DAG, each isolated in its own micro-VM,
   with independent jobs running in parallel.
+- **Per-job machine sizing** — pick a named type (`small`/`medium`/`large`/`xlarge`)
+  or set custom `cpus`/`memory` for the VM.
 - **Layered env** at the workflow, job, and step level.
 - **Typed inputs** with validation, **outputs** passed between jobs, **matrix**
   fan-out, and runtime **conditionals**.

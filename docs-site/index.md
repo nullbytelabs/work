@@ -27,7 +27,7 @@ features:
     link: /guide/writing-workflows
   - icon: 🔒
     title: Isolated micro-VMs
-    details: Every job runs in its own Gondolin micro-VM with mediated egress. There is no host-execution mode — your steps never touch the host directly.
+    details: Every job runs in its own Gondolin micro-VM with mediated egress, sized per job with machine types (small to xlarge, or custom cpus/memory). There is no host-execution mode — your steps never touch the host directly.
     linkText: How it works
     link: /guide/how-it-works
   - icon: ♻️

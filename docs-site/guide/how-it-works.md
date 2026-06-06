@@ -37,7 +37,9 @@ cell, and a downstream `needs` on it waits for every leg.
 Every job runs in its own [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin)
 micro-VM. There is no host-execution mode — your steps never run directly on your
 machine. Network access is **mediated**: a job only reaches what the engine
-allowlists for it.
+allowlists for it. Each VM is sized per job via
+[`machine:`](../reference/workflow-syntax#machine-types) — a named type or custom
+cpu/memory — defaulting to `medium`.
 
 Each job is checked out fresh, with `.git/` and `node_modules/` excluded, so jobs
 are hermetic and install their own dependencies.

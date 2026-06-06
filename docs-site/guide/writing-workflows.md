@@ -16,6 +16,7 @@ env:
 jobs:
   build:
     runs-on: gondolin            # where the job runs (default: gondolin)
+    machine: large               # how big the VM is (default: medium)
     steps:
       - name: install
         run: npm install
@@ -72,6 +73,34 @@ jobs:
 `runs-on` belongs on an individual job, not at the workflow level. The engine
 warns if you omit it (and applies `gondolin`); it errors if you put it at the
 top level or directly under `jobs:`.
+:::
+
+## `machine` — sizing the VM
+
+`machine` sets how big a job's micro-VM is — its vCPU count and RAM. Pick a
+**named type** from the built-in catalog, or specify dimensions **inline**.
+Omitting `machine:` uses `medium`.
+
+```yaml
+jobs:
+  lint:
+    machine: small               # a named type — light job
+    steps: [{ run: npm run lint }]
+  build:
+    machine:                     # custom — the unset dimension inherits medium
+      cpus: 8
+      memory: 16G
+    steps: [{ run: npm run build }]
+```
+
+The catalog: `small` (2 vCPU / 2G), `medium` (2 / 6G, the default), `large`
+(4 / 12G), `xlarge` (8 / 24G). A custom spec may set `cpus`, `memory`, or both;
+whatever you leave out is taken from `medium`. See the
+[reference](../reference/workflow-syntax#machine-types) for the full table.
+
+::: info Disk size isn't configurable yet
+`machine` sizes CPU and memory only. The guest image can't grow its root
+filesystem at boot, so disk size waits on a future custom image.
 :::
 
 ## `needs` — ordering and parallelism
