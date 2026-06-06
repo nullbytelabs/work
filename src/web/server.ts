@@ -709,6 +709,14 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   };
 }
 
+/** The dispatch `layout` fields, dropping undefined ones (one spot, four call sites). */
+function layoutFields(layout: { workspaceSource?: string; workflowDir?: string }): { workspaceSource?: string; workflowDir?: string } {
+  return {
+    ...(layout.workspaceSource !== undefined ? { workspaceSource: layout.workspaceSource } : {}),
+    ...(layout.workflowDir !== undefined ? { workflowDir: layout.workflowDir } : {}),
+  };
+}
+
 /** Bind, falling forward on EADDRINUSE (mirrors the engine's bind-with-retry). */
 function listen(server: ReturnType<typeof createServer>, startPort: number): Promise<number> {
   return new Promise((resolve, reject) => {
