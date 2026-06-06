@@ -1,0 +1,51 @@
+# step outputs
+# description: a `run` step exposes data by appending `key=value` lines to the
+#              file at $WORK_OUTPUT (GitHub-Actions $GITHUB_OUTPUT semantics). This
+#              exercises the full capture path on a real micro-VM: a single value,
+#              a multi-line heredoc value, a same-job read via steps.<id>.outputs,
+#              and a cross-job read via needs.<job>.outputs. Each consumer asserts
+#              the value it got, so a regression in output capture fails the run.
+# usage: ./pi-workflows ./test/e2e/step-outputs/workflow.yaml
+---
+name: step-outputs
+
+jobs:
+  produce:
+    runs-on: gondolin
+    machine: small
+    steps:
+      - id: meta
+        name: write outputs
+        run: |
+          echo "version=1.4.2" >> "$WORK_OUTPUT"
+          # multi-line value via a heredoc-style delimiter
+          {
+            echo "notes<<EOF"
+            echo "line one"
+            echo "line two"
+            echo "EOF"
+          } >> "$WORK_OUTPUT"
+      - name: same-job read
+        run: |
+          echo "same-job version=${{ steps.meta.outputs.version }}"
+          test "${{ steps.meta.outputs.version }}" = "1.4.2" \
+            || { echo "same-job version mismatch" >&2; exit 1; }
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      notes: ${{ steps.meta.outputs.notes }}
+
+  consume:
+    runs-on: gondolin
+    machine: small
+    needs: [produce]
+    steps:
+      - name: cross-job read
+        run: |
+          echo "downstream version=${{ needs.produce.outputs.version }}"
+          test "${{ needs.produce.outputs.version }}" = "1.4.2" \
+            || { echo "cross-job version mismatch" >&2; exit 1; }
+          # the multi-line value survived capture intact
+          got="${{ needs.produce.outputs.notes }}"
+          expected=$(printf 'line one\nline two')
+          test "$got" = "$expected" \
+            || { echo "multi-line notes mismatch: [$got]" >&2; exit 1; }
