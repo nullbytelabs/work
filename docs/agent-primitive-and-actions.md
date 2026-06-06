@@ -249,7 +249,11 @@ step granularity:
 > is mitigated by factoring the existing `runSteps` loop so the handler reuses it
 > rather than re-implementing. (Reusable *workflows* lean the opposite way —
 > inline — because they're parameterized by compile-time config, not mid-run data.
-> The asymmetry is intentional and worth stating.)
+> The asymmetry is intentional and worth stating: GHA supports runtime `with:` at
+> *both* levels, so leaning the runtime handler here keeps us **GHA-faithful** at
+> the step level, whereas reusable-workflow inlining is a deliberate **divergence**
+> from GHA — the one documented in that doc's §8. We match GHA where it's cheap and
+> diverge only where matching would cost us the flat-plan architecture.)
 
 Phase 3 is the largest piece and is optional: **Phases 1+2 already deliver the
 user's ask** ("dumb `work/agent` + bespoke JS in user space"). Composite actions

@@ -53,8 +53,10 @@ on:
     secrets: { token: { required: true } }
 ```
 
-The caller reads results as `needs.<callerJob>.outputs.<x>`. Nesting is capped at
-4 levels.
+The caller reads results as `needs.<callerJob>.outputs.<x>`. On GitHub.com nesting
+is now capped at **10 levels** (the older "4" survives only on GitHub Enterprise
+Server), and a single file may reference at most **50** reusable workflows. We set
+our own caps in §10 — the GHA numbers are reference points, not a contract we owe.
 
 **The pi-workflows decision falls out cleanly:** keep the two levels separate.
 Step-level `uses:` stays the agent surface; **job-level `uses:` becomes the
@@ -116,7 +118,10 @@ Two pieces of the contract:
 - **Inputs.** We already have a typed, validated top-level `inputs:` block
   (`string|number|boolean`, `required`, `default`, `options`, `pattern`). A
   called workflow reuses it verbatim — `with:` on the caller is validated against
-  it by the **existing `resolveInputs()`**. No new input machinery.
+  it by the **existing `resolveInputs()`**. No new input machinery. Note this is a
+  deliberate **superset** of GHA: `workflow_call` inputs there are
+  `boolean|number|string` only (no `choice`/`options` — that's `workflow_dispatch`
+  territory), whereas we reuse our richer `options`/`pattern` validation for free.
 - **Outputs.** Today outputs are *job*-level only; there is no workflow-level
   output. A callee needs to publish a flat output surface to its caller. Two
   options:
@@ -126,9 +131,12 @@ Two pieces of the contract:
   | **(a) explicit** *(recommended)* | `on: { workflow_call: { outputs: { version: ${{ jobs.compile.outputs.version }} } } }` | GHA-parity; the callee curates exactly what it exposes; one new parse path. |
   | **(b) implicit union** | callee's outputs = union of all its jobs' `outputs:` | zero ceremony; but leaks every job output and collides on duplicate keys. |
 
-  > **DECISION (proposed):** ship **(a)**. The callee should own its public
-  > surface, exactly as a job owns `outputs:` today. The expanded `workflow_call`
-  > mapping form is where workflow-level `outputs:` lives.
+  > **DECISION:** ship **(a)**, explicit only — no implicit union. The callee
+  > should own its public surface, exactly as a job owns `outputs:` today. This is
+  > GHA-confirmed: there is *no* implicit/union output behavior on GitHub — nothing
+  > leaves a reusable workflow unless mapped under `workflow_call.outputs`. (b) has
+  > no prior art, leaks every job output, and collides on duplicate keys; rejected.
+  > The expanded `workflow_call` mapping form is where workflow-level `outputs:` lives.
 
 The expanded form mirrors `webhook`:
 
@@ -150,10 +158,16 @@ on:
 | `strategy.matrix` | yes | fan the *call* out — one invocation per cell |
 | `steps` | **no** | a `uses:` job delegates; it has no steps |
 | `runs-on` / `machine` | **no** | sizing belongs to the callee's jobs |
-| `env` | **no** (v1) | env layering across the boundary is deferred (§8) |
+| `env` | **no** | env stays per-workflow; no cross-boundary inheritance (§14-Q4) |
 | `outputs` | **no** | outputs come *from* the callee, not declared here |
 
 This matches GitHub's allow-list for reusable-workflow caller jobs almost exactly.
+GHA's full list is `name, uses, with, secrets, strategy, needs, if, concurrency,
+permissions` — `steps`/`runs-on`/`env` are simply *absent* from it (not forbidden
+keywords so much as keys the call has no slot for), and GHA likewise does **not**
+propagate caller `env` into a called workflow. We drop `secrets` (egress is
+mediated, §9), `concurrency`, and `permissions` only because those are not engine
+concepts today; if they land later they slot straight into this allow-list.
 
 ## 6. Two implementation strategies
 
@@ -238,6 +252,14 @@ VM**. That is the *one* runtime change this design needs:
 > of step count. Small, contained, and arguably useful on its own (pure fan-in
 > nodes).
 
+**Env scope across the splice.** Each inlined sub-job's `env` must be layered from
+the **callee's** workflow `env` (then the callee job's `env`), *not* the caller's —
+env is per-workflow. This is GHA-parity (GitHub explicitly does not propagate caller
+`env` into a called workflow) and falls out naturally from recursively compiling the
+callee in step 4 with `mergeEnv` (`compile.ts`) seeded by the callee's own
+workflow-level env. The compiler must not leak the caller's `env` into the spliced
+jobs. (See the §14 decision on `env:`.)
+
 Net effect: a 3-job callee invoked once becomes 3 real `PlannedJob`s + 1 virtual
 join, all in the caller's flat map. `topoSort` orders them with everything else;
 `work graph` renders the whole thing; the durable runtime runs them as normal
@@ -263,6 +285,16 @@ matrix fan-out, `if:`, interpolation). A `needs.*`/`steps.*` value isn't known
 then. So **`with:` may reference only compile-time contexts** (`inputs`,
 `matrix`, `event`) — the compiler must reject `needs.*`/`steps.*` in `with:` with
 a clear error pointing here.
+
+> **DIVERGENCE FROM GHA (deliberate).** On GitHub this restriction does *not*
+> exist: GHA evaluates a caller job's `with:` at **runtime**, and its allowed
+> contexts for `jobs.<id>.with.<input>` explicitly include `needs` (along with
+> `github, strategy, matrix, inputs, vars`). So `with: { version: ${{
+> needs.build.outputs.version }} }` is legal there. We can't match that under
+> Strategy A because our inputs bind at compile time — this is the single concrete
+> behavioral difference between our reusable workflows and GHA's, and it's the
+> price of the flat-plan architecture. We document it rather than hide it; §14-Q3
+> records the decision and Strategy B (§6) is the escape hatch if it ever has to go.
 
 This sounds worse than it is. **Runtime data still flows** — just through the
 `needs` graph, not through inputs:
@@ -302,13 +334,19 @@ narrow" the safe direction. Out of scope for v1.
 ## 10. Recursion, cycles, depth
 
 - **Cycle detection:** track the chain of resolved callee file paths during
-  compilation; revisiting one is a compile error (`A → B → A`).
-- **Depth cap:** bound nesting (propose **5**, ≥ GitHub's 4) to stop runaway
-  expansion; exceeding it is a compile error naming the chain.
+  compilation; revisiting one is a compile error (`A → B → A`). (Note `topoSort`
+  already catches cycles in the *flattened* job DAG at `compile.ts:211`, but a
+  reusable-call cycle must be caught **earlier**, during resolution — by the time
+  it reaches `topoSort` it would already be an infinite expansion.)
+- **Depth cap:** bound nesting to stop runaway expansion; exceeding it is a compile
+  error naming the chain. Propose **10**, matching current GHA-cloud; since we
+  inline eagerly the cap is a real runaway guard, not just etiquette (§14-Q7).
 - **Fan-out interaction:** a `strategy.matrix` on a `uses:` job multiplies the
   whole inlined sub-DAG per cell. The id scheme (`C::<cell>::<subjob>`) stays
-  unique; worth a guard on total expanded job count so a matrix-of-callees can't
-  explode the plan silently.
+  unique. There is **no** expanded-job-count guard anywhere today — matrix itself
+  only checks for *zero* cells (`compile.ts:162`), nothing caps the maximum — so a
+  matrix-of-callees could explode the plan silently. Add one shared plan-size
+  ceiling that covers both matrix and reusable expansion (§14-Q7).
 
 ## 11. Project layout / checkout
 
@@ -393,32 +431,81 @@ After compile, the flat plan contains (ids illustrative):
 (outputs `{version}`), `deploy::<jobs…>`, a virtual `deploy` join — wired by one
 `needs` DAG that `work graph` renders end to end.
 
-## 14. Open design questions
+## 14. Design decisions (resolved)
 
-1. **Output declaration:** ship explicit `workflow_call.outputs` (§4a) only, or
-   also allow the implicit union as a shorthand?
-2. **Id separator:** `C::<subjob>` reuses matrix's `::`. Nested calls/matrix
-   produce `a::b::c` — readable enough, or do we want a distinct call separator?
-3. **The `needs`-leak in §8:** accept that callee jobs reference caller-side job
-   names for runtime data, or invest early in Strategy B / a hybrid to keep
-   callees fully encapsulated?
-4. **`env:` across the boundary:** v1 forbids `env:` on a `uses:` job. Do we want
-   workflow-call env layering (callee jobs inherit caller env), and if so with
-   what precedence?
-5. **Virtual-job generality:** expose `virtual`/output-only jobs as an authoring
-   primitive (pure fan-in nodes), or keep it compiler-internal?
-6. **Cross-repo reuse:** reserve `workflow@<repo>/...` syntax now, or defer the
-   whole remote story?
-7. **Depth cap value** (proposed 5) and **expanded-job-count guard** for
-   matrix-of-callees.
+Each former open question, now decided. Rationale is grounded in the GHA prior art
+(§2–§5) and the engine's actual seams (file:line refs verified against `main`).
+
+**Q1 — Output declaration. DECIDED: explicit `workflow_call.outputs` only; no
+implicit union.** GHA has no union behavior — nothing leaves a reusable workflow
+unless mapped — and a callee owning its public surface mirrors how a job owns
+`outputs:` today. The union form leaks every job output and collides on duplicate
+keys for zero real benefit. (See §4.)
+
+**Q2 — Id separator. DECIDED: reuse `::`.** It's the existing matrix convention
+(`compile.ts:170`, `${baseId}::${suffix}`), already path-safe for workdir naming.
+Nested calls/matrix yield `a::b::c`, which is consistent and readable. Introducing
+a second separator would add a concept for no gain; one expansion vocabulary covers
+matrix legs and inlined sub-jobs alike.
+
+**Q3 — The `needs`-leak (§8). DECIDED: accept for v1; Strategy B is the documented
+escape hatch.** Config flows through `with:` (compile-time); runtime *data* flows
+through `needs` exactly as it does between any two jobs. The cost is mild — a callee
+root job names a caller-side job — and it's the direct consequence of the flat-plan
+architecture, the same trade that buys us free durability/graph/TUI reuse. This is
+the one decision with genuine tension (GHA *doesn't* have this limit, §8 divergence
+callout); if clean runtime-valued **inputs** ever become a hard requirement, that
+single requirement is the trigger to adopt Strategy B or the inline-by-default /
+sub-run-on-runtime-`with:` hybrid — not before.
+
+**Q4 — `env:` across the boundary. DECIDED: forbid `env:` on a `uses:` job; env
+stays per-workflow; no cross-boundary inheritance.** This is GHA-parity (GitHub
+explicitly does not propagate caller `env` into a called workflow) and it's also the
+*correct* inlining semantics: each spliced sub-job layers the **callee's** workflow
+env via the existing `mergeEnv` (`compile.ts:74`), seeded by the callee file's own
+`env`, never the caller's (§7 "Env scope"). No new machinery, no precedence puzzle.
+
+**Q5 — Virtual-job generality. DECIDED: compiler-internal for v1.** `virtual?:
+boolean` on `PlannedJob` (§7) is synthesized by the compiler, not user-authorable.
+`needs` already expresses fan-in; a user-facing step-less output-only node is a niche
+without a demanding use case yet. Keeping it internal minimizes the authoring surface
+and lets us change the join representation freely. Promote it to a primitive only if
+real demand appears.
+
+**Q6 — Cross-repo reuse. DECIDED: reserve the grammar now, defer the implementation.**
+Parse a `workflow@<repo>/<name>@<ref>`-shaped ref (GHA's analog is
+`owner/repo/path@ref`) and fail with a clear "remote reuse not yet supported" error,
+rather than letting the syntax mean something else later. Reserving now prevents a
+breaking grammar change; the §3 scheme decision already left the room. Everything
+about fetching/pinning/caching a remote callee is out of scope for v1.
+
+**Q7 — Depth cap + plan-size guard. DECIDED: depth cap 10; add one shared
+expanded-job-count ceiling.** Cap nesting at **10** (current GHA-cloud parity; since
+we inline eagerly it's a genuine runaway guard). Separately, there is **no** maximum
+on expanded jobs today — matrix only rejects *zero* cells (`compile.ts:162`) — so add
+a single plan-size ceiling enforced after both matrix and reusable expansion, erroring
+with the offending chain. This retroactively closes the existing matrix-explosion gap
+too. Exact numeric limit (jobs-per-plan) is a tuning knob, not a design fork.
+
+### Still genuinely open (tuning, not architecture)
+
+- The numeric value of the plan-size ceiling (Q7) — pick once we have a sense of
+  realistic plan sizes.
+- Whether the depth-cap and cycle checks share one resolution-chain walk or stay
+  separate passes (implementation detail).
 
 ## 15. Sources
 
-- GitHub Actions — Reusing workflows (`uses:` at job level, `on: workflow_call`,
-  `with`/`secrets`/`outputs`, 4-level nesting cap):
-  https://docs.github.com/actions/sharing-automations/reusing-workflows
-- GitHub Actions — `workflow_call` event & `secrets: inherit`:
-  https://docs.github.com/actions/using-workflows/events-that-trigger-workflows#workflow_call
+- GitHub Actions — Reusing workflow configurations (caller-job allow-list,
+  `on: workflow_call` inputs/outputs/secrets, 10-level nesting + 50-ref-per-file
+  caps on GitHub.com, no implicit outputs, `secrets: inherit`, local vs `@ref`):
+  https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations
+- GitHub Actions — How-to: reuse workflows (matrix on a caller job; input types
+  limited to boolean/number/string):
+  https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows
+- GitHub Actions — Contexts reference (the §8 divergence: `jobs.<id>.with.<input>`
+  allows `github, needs, strategy, matrix, inputs, vars` — i.e. runtime `needs`):
+  https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
 - Internal seams: [`phase-1.md`](phase-1.md) (durability/orchestration caveat),
   [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (step-level `uses:`),
   `src/compiler/compile.ts` (`expandJob` matrix-flatten precedent, `topoSort`),
