@@ -132,60 +132,76 @@ function toMermaid(plan: ExecutionPlan, opts: GraphOptions): string {
  *  are drawn cluster-to-cluster via `compound=true` + `lhead`/`ltail`. Synthetic
  *  ids (`j0s1`, `cluster_0`) keep names valid regardless of job-id characters. */
 function toDot(plan: ExecutionPlan, opts: GraphOptions): string {
-  const idx = new Map<string, number>();
-  plan.jobOrder.forEach((id, i) => idx.set(id, i));
-
   const lines: string[] = [`digraph "${escapeDot(plan.name)}" {`, "  rankdir=TB;"];
   if (opts.steps) lines.push("  compound=true;");
   lines.push("  node [shape=box, style=rounded];");
-
-  if (!opts.steps) {
-    for (const id of plan.jobOrder) {
-      const m = metaOf(plan, id);
-      lines.push(`  "${escapeDot(id)}" [label="${escapeDot(id)}\\n${m.runsOn} · ${stepsLabel(m.steps)}"];`);
-    }
-    for (const id of plan.jobOrder) {
-      for (const need of plan.jobs[id]?.needs ?? []) {
-        lines.push(`  "${escapeDot(need)}" -> "${escapeDot(id)}";`);
-      }
-    }
-  } else {
-    for (const id of plan.jobOrder) {
-      const i = idx.get(id)!;
-      const m = metaOf(plan, id);
-      lines.push(`  subgraph cluster_${i} {`);
-      lines.push(`    label="${escapeDot(id)} · ${m.runsOn}";`);
-      lines.push(`    style=rounded;`);
-      const infos = stepInfos(plan, id);
-      if (infos.length === 0) {
-        lines.push(`    j${i}s0 [label="(no steps)"];`);
-      } else {
-        for (const s of infos) {
-          const tag = s.id !== undefined ? ` [${escapeDot(s.id)}]` : "";
-          const usesLine = s.kind === "uses" ? `\\n(uses ${escapeDot(s.uses ?? "")})` : "";
-          const style = s.kind === "uses" ? `, style="rounded,filled", fillcolor="#eaf2ff"` : "";
-          lines.push(`    j${i}s${s.ordinal} [label="${s.ordinal}. ${escapeDot(s.label)}${tag}${usesLine}"${style}];`);
-        }
-        for (let k = 0; k < infos.length - 1; k++) {
-          lines.push(`    j${i}s${infos[k]!.ordinal} -> j${i}s${infos[k + 1]!.ordinal};`);
-        }
-      }
-      lines.push(`  }`);
-    }
-    for (const id of plan.jobOrder) {
-      const ti = idx.get(id)!;
-      const toFirst = `j${ti}s${plan.jobs[id]!.steps.length === 0 ? 0 : 1}`;
-      for (const need of plan.jobs[id]?.needs ?? []) {
-        const fi = idx.get(need)!;
-        const fromSteps = plan.jobs[need]!.steps.length;
-        const fromLast = `j${fi}s${fromSteps === 0 ? 0 : fromSteps}`;
-        lines.push(`  ${fromLast} -> ${toFirst} [ltail=cluster_${fi}, lhead=cluster_${ti}];`);
-      }
-    }
-  }
-
+  lines.push(...(opts.steps ? dotClusters(plan) : dotJobsOnly(plan)));
   lines.push("}");
   return lines.join("\n") + "\n";
+}
+
+/** DOT body without `steps`: one node per job, plain job-to-job edges. */
+function dotJobsOnly(plan: ExecutionPlan): string[] {
+  const lines: string[] = [];
+  for (const id of plan.jobOrder) {
+    const m = metaOf(plan, id);
+    lines.push(`  "${escapeDot(id)}" [label="${escapeDot(id)}\\n${m.runsOn} · ${stepsLabel(m.steps)}"];`);
+  }
+  for (const id of plan.jobOrder) {
+    for (const need of plan.jobs[id]?.needs ?? []) {
+      lines.push(`  "${escapeDot(need)}" -> "${escapeDot(id)}";`);
+    }
+  }
+  return lines;
+}
+
+/** DOT body with `steps`: a `cluster_<i>` per job, then cluster-to-cluster edges. */
+function dotClusters(plan: ExecutionPlan): string[] {
+  const idx = new Map<string, number>();
+  plan.jobOrder.forEach((id, i) => idx.set(id, i));
+
+  const lines: string[] = [];
+  for (const id of plan.jobOrder) lines.push(...dotCluster(plan, id, idx.get(id)!));
+  lines.push(...dotClusterEdges(plan, idx));
+  return lines;
+}
+
+/** One job's `cluster_<i>` subgraph: its ordered step nodes, chained. */
+function dotCluster(plan: ExecutionPlan, id: string, i: number): string[] {
+  const m = metaOf(plan, id);
+  const lines: string[] = [`  subgraph cluster_${i} {`, `    label="${escapeDot(id)} · ${m.runsOn}";`, `    style=rounded;`];
+  const infos = stepInfos(plan, id);
+  if (infos.length === 0) {
+    lines.push(`    j${i}s0 [label="(no steps)"];`);
+  } else {
+    for (const s of infos) {
+      const tag = s.id !== undefined ? ` [${escapeDot(s.id)}]` : "";
+      const usesLine = s.kind === "uses" ? `\\n(uses ${escapeDot(s.uses ?? "")})` : "";
+      const style = s.kind === "uses" ? `, style="rounded,filled", fillcolor="#eaf2ff"` : "";
+      lines.push(`    j${i}s${s.ordinal} [label="${s.ordinal}. ${escapeDot(s.label)}${tag}${usesLine}"${style}];`);
+    }
+    for (let k = 0; k < infos.length - 1; k++) {
+      lines.push(`    j${i}s${infos[k]!.ordinal} -> j${i}s${infos[k + 1]!.ordinal};`);
+    }
+  }
+  lines.push(`  }`);
+  return lines;
+}
+
+/** Cross-cluster dependency edges (last step of `need` → first step of `id`). */
+function dotClusterEdges(plan: ExecutionPlan, idx: Map<string, number>): string[] {
+  const lines: string[] = [];
+  for (const id of plan.jobOrder) {
+    const ti = idx.get(id)!;
+    const toFirst = `j${ti}s${plan.jobs[id]!.steps.length === 0 ? 0 : 1}`;
+    for (const need of plan.jobs[id]?.needs ?? []) {
+      const fi = idx.get(need)!;
+      const fromSteps = plan.jobs[need]!.steps.length;
+      const fromLast = `j${fi}s${fromSteps === 0 ? 0 : fromSteps}`;
+      lines.push(`  ${fromLast} -> ${toFirst} [ltail=cluster_${fi}, lhead=cluster_${ti}];`);
+    }
+  }
+  return lines;
 }
 
 /** Structured form for tooling: the plan's shape plus computed levels. With
