@@ -41,69 +41,88 @@ export function interpolate(template: string, ctx: ExprContext): string {
   return template.replace(EXPR, (whole, raw: string) => resolveExpr(raw.trim(), ctx, whole));
 }
 
+/**
+ * A single context resolver: returns the resolved string for an expression it
+ * recognizes, or `null` if the expression isn't its pattern (so the next
+ * resolver gets a turn). A recognized-but-deferred expression returns `whole`
+ * (the verbatim `${{ … }}`); a recognized-but-invalid one throws.
+ */
+type Resolver = (expr: string, ctx: ExprContext, whole: string) => string | null;
+
+const resolveInputs: Resolver = (expr, ctx, whole) => {
+  const m = /^inputs\.([A-Za-z_][\w-]*)$/.exec(expr) ?? /^inputs\[\s*['"]([^'"]+)['"]\s*\]$/.exec(expr);
+  if (!m) return null;
+  if (!ctx.inputs) return whole; // defer
+  const name = m[1]!;
+  if (!Object.prototype.hasOwnProperty.call(ctx.inputs, name)) {
+    throw new WorkflowCompileError(`expression references undeclared input "${name}" (declare it under inputs:)`);
+  }
+  return String(ctx.inputs[name]);
+};
+
+const resolveMatrix: Resolver = (expr, ctx) => {
+  const m = /^matrix\.([A-Za-z_][\w-]*)$/.exec(expr) ?? /^matrix\[\s*['"]([^'"]+)['"]\s*\]$/.exec(expr);
+  if (!m) return null;
+  if (!ctx.matrix) {
+    throw new WorkflowCompileError(
+      `matrix context is only available in a job with strategy.matrix (saw "\${{ ${expr} }}")`,
+    );
+  }
+  const name = m[1]!;
+  // A matrix property absent from *this* cell resolves to empty — `include`
+  // routinely adds a key to only some legs (GHA semantics).
+  if (!Object.prototype.hasOwnProperty.call(ctx.matrix, name)) return "";
+  return String(ctx.matrix[name]);
+};
+
+const resolveNeeds: Resolver = (expr, ctx, whole) => {
+  const m = /^needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(expr);
+  if (!m) return null;
+  if (!ctx.needs) return whole; // defer to runtime
+  const job = m[1]!;
+  const key = m[2]!;
+  const bag = ctx.needs[job];
+  if (!bag || !Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
+    throw new WorkflowCompileError(`expression references missing output: needs.${job}.outputs.${key}`);
+  }
+  return bag.outputs[key]!;
+};
+
+const resolveSteps: Resolver = (expr, ctx, whole) => {
+  const m = /^steps\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(expr);
+  if (!m) return null;
+  if (!ctx.steps) return whole; // defer to runtime
+  const id = m[1]!;
+  const key = m[2]!;
+  const bag = ctx.steps[id];
+  if (!bag || !Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
+    throw new WorkflowCompileError(`expression references missing output: steps.${id}.outputs.${key}`);
+  }
+  return bag.outputs[key]!;
+};
+
+// `event` — the webhook/dispatch payload. Unlike the flat-regex roots above,
+// this supports arbitrary-depth path access AND array indexing, because a real
+// payload is deeply nested (`event.alerts[0].labels.severity`). We tokenize the
+// access path ourselves rather than bolt on more regexes.
+const resolveEvent: Resolver = (expr, ctx, whole) => {
+  if (expr !== "event" && !expr.startsWith("event.") && !expr.startsWith("event[")) return null;
+  // Defer, exactly like needs/steps, when no payload is supplied — a later
+  // phase (the ingress/receiver) will re-interpolate with `event` present.
+  if (ctx.event === undefined) return whole;
+  const segments = parseAccessPath(expr);
+  // segments[0] is the literal "event" root; walk the remainder.
+  const value = walkPath(ctx.event, segments.slice(1));
+  return stringifyValue(value);
+};
+
+const RESOLVERS: Resolver[] = [resolveInputs, resolveMatrix, resolveNeeds, resolveSteps, resolveEvent];
+
 function resolveExpr(expr: string, ctx: ExprContext, whole: string): string {
-  let m = /^inputs\.([A-Za-z_][\w-]*)$/.exec(expr) ?? /^inputs\[\s*['"]([^'"]+)['"]\s*\]$/.exec(expr);
-  if (m) {
-    if (!ctx.inputs) return whole; // defer
-    const name = m[1]!;
-    if (!Object.prototype.hasOwnProperty.call(ctx.inputs, name)) {
-      throw new WorkflowCompileError(`expression references undeclared input "${name}" (declare it under inputs:)`);
-    }
-    return String(ctx.inputs[name]);
+  for (const resolve of RESOLVERS) {
+    const out = resolve(expr, ctx, whole);
+    if (out !== null) return out;
   }
-
-  m = /^matrix\.([A-Za-z_][\w-]*)$/.exec(expr) ?? /^matrix\[\s*['"]([^'"]+)['"]\s*\]$/.exec(expr);
-  if (m) {
-    if (!ctx.matrix) {
-      throw new WorkflowCompileError(
-        `matrix context is only available in a job with strategy.matrix (saw "\${{ ${expr} }}")`,
-      );
-    }
-    const name = m[1]!;
-    // A matrix property absent from *this* cell resolves to empty — `include`
-    // routinely adds a key to only some legs (GHA semantics).
-    if (!Object.prototype.hasOwnProperty.call(ctx.matrix, name)) return "";
-    return String(ctx.matrix[name]);
-  }
-
-  m = /^needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(expr);
-  if (m) {
-    if (!ctx.needs) return whole; // defer to runtime
-    const job = m[1]!;
-    const key = m[2]!;
-    const bag = ctx.needs[job];
-    if (!bag || !Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
-      throw new WorkflowCompileError(`expression references missing output: needs.${job}.outputs.${key}`);
-    }
-    return bag.outputs[key]!;
-  }
-
-  m = /^steps\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(expr);
-  if (m) {
-    if (!ctx.steps) return whole; // defer to runtime
-    const id = m[1]!;
-    const key = m[2]!;
-    const bag = ctx.steps[id];
-    if (!bag || !Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
-      throw new WorkflowCompileError(`expression references missing output: steps.${id}.outputs.${key}`);
-    }
-    return bag.outputs[key]!;
-  }
-
-  // `event` — the webhook/dispatch payload. Unlike the flat-regex roots above,
-  // this supports arbitrary-depth path access AND array indexing, because a real
-  // payload is deeply nested (`event.alerts[0].labels.severity`). We tokenize the
-  // access path ourselves rather than bolt on more regexes.
-  if (expr === "event" || expr.startsWith("event.") || expr.startsWith("event[")) {
-    // Defer, exactly like needs/steps, when no payload is supplied — a later
-    // phase (the ingress/receiver) will re-interpolate with `event` present.
-    if (ctx.event === undefined) return whole;
-    const segments = parseAccessPath(expr);
-    // segments[0] is the literal "event" root; walk the remainder.
-    const value = walkPath(ctx.event, segments.slice(1));
-    return stringifyValue(value);
-  }
-
   throw new WorkflowCompileError(
     `unsupported expression "\${{ ${expr} }}" — supported: inputs.<name>, needs.<job>.outputs.<name>, steps.<id>.outputs.<key>, event.<path>`,
   );
