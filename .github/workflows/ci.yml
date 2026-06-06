@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   lint-and-typecheck:
-    name: lint + typecheck + knip
+    name: lint + typecheck + knip + fan-in
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -29,6 +29,9 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run knip
+      # Report-only: surfaces the afferent-coupling distribution in the CI log
+      # next to the gates. It always exits 0 — we read the tail, we don't fail on it.
+      - run: npm run fan-in
 
   test:
     name: test (full suite, incl. gondolin)
