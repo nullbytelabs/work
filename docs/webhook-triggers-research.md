@@ -418,7 +418,7 @@ jobs:
         run: |
           svc="${{ event.commonLabels.service }}"            ### NEEDS-BUILDING: event.*
           out=$(curl -s "https://deploys.internal?svc=$svc") ### NEEDS-BUILDING: run-step egress+secret
-          { echo "summary<<EOF"; echo "$out"; echo EOF; } >> "$PI_OUTPUT"   # SUPPORTED
+          { echo "summary<<EOF"; echo "$out"; echo EOF; } >> "$WORK_OUTPUT"   # SUPPORTED
   error_logs:   { runs-on: gondolin, outputs: { summary: "${{ steps.q.outputs.summary }}" }, steps: [ … ] }
   metrics:      { runs-on: gondolin, outputs: { summary: "${{ steps.q.outputs.summary }}" }, steps: [ … ] }
   related_alerts:{ runs-on: gondolin, outputs: { summary: "${{ steps.q.outputs.summary }}" }, steps: [ … ] }

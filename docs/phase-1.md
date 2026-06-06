@@ -161,7 +161,7 @@ for when steps need egress.
 
 GitHub-Actions-style, resolved at **runtime** (after the producing step/job runs):
 
-- A `run` step writes to **`$PI_OUTPUT`** (a file the engine reads back — it
+- A `run` step writes to **`$WORK_OUTPUT`** (a file the engine reads back — it
   lives in the shared job workspace, so capture works uniformly on both targets), using
   `$GITHUB_OUTPUT` syntax: `key=value` for single-line values, or a heredoc for
   multi-line values (e.g. a whole source file to hand an agent):
@@ -171,7 +171,7 @@ GitHub-Actions-style, resolved at **runtime** (after the producing step/job runs
     echo "source<<EOF"
     cat main.ts
     echo "EOF"
-  } >> "$PI_OUTPUT"
+  } >> "$WORK_OUTPUT"
   ```
 
 - A job exposes `outputs:` mapping names to `${{ steps.<id>.outputs.<key> }}`.

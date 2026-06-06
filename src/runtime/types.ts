@@ -16,7 +16,7 @@ export interface StepResult {
   exitCode: number;
   stdout: string;
   stderr: string;
-  /** Outputs this step produced ($PI_OUTPUT lines, or an agent's declared outputs). */
+  /** Outputs this step produced ($WORK_OUTPUT lines, or an agent's declared outputs). */
   outputs?: Record<string, string>;
 }
 

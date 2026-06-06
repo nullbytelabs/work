@@ -31,7 +31,7 @@ describe("HostTarget (test contract double)", () => {
     assert.equal(r.stdout.trim(), "hello");
   });
 
-  it("exposes the workdir as its workspacePath (where $PI_OUTPUT lives)", () => {
+  it("exposes the workdir as its workspacePath (where $WORK_OUTPUT lives)", () => {
     assert.equal(target.workspacePath, workdir);
   });
 

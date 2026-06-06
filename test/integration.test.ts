@@ -156,7 +156,7 @@ jobs:
       msg: \${{ steps.gen.outputs.msg }}
     steps:
       - id: gen
-        run: printf 'msg=%s\\n' "hello-from-upstream" >> "$PI_OUTPUT"
+        run: printf 'msg=%s\\n' "hello-from-upstream" >> "$WORK_OUTPUT"
   consume:
     runs-on: gondolin
     needs: [produce]
@@ -257,7 +257,7 @@ jobs:
 
 // The real-world shape: a project keeps its pipeline + agents in `.workflows/`
 // and the workflow operates on the PROJECT ROOT checkout. This proves the wiring
-// offline (mock agent, no npm): checkout == project root, multiline `$PI_OUTPUT`,
+// offline (mock agent, no npm): checkout == project root, multiline `$WORK_OUTPUT`,
 // and agent resolution from `.workflows/agents/`.
 describe("project layout (.workflows/): checkout is the project root", () => {
   it("stages the project root, captures multiline source, and resolves a .workflows agent", async () => {
@@ -277,7 +277,7 @@ jobs:
             echo "source<<__EOF__"
             printf '%s\\n' "$(cat main.ts)"
             echo "__EOF__"
-          } >> "$PI_OUTPUT"
+          } >> "$WORK_OUTPUT"
       - id: rev
         name: review with the project's own agent
         uses: agent/summarize
@@ -301,7 +301,7 @@ jobs:
       assert.match(output, /CHECKOUT_OK/); // run steps see the project root checkout
       assert.match(output, /review=MOCK SUMMARY/); // agent resolved from .workflows/agents/
 
-      // The multiline source survived $PI_OUTPUT heredoc capture intact.
+      // The multiline source survived $WORK_OUTPUT heredoc capture intact.
       const src = result.jobs[0]!.steps.find((s) => s.outputs?.["source"])?.outputs?.["source"] ?? "";
       assert.match(src, /function helloWorld/);
       assert.match(src, /console\.log\(helloWorld\("Josh"\)\)/);

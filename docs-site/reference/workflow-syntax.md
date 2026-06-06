@@ -149,11 +149,11 @@ steps:
 ### Step outputs
 
 A `run` step writes outputs by appending `key=value` lines to the file at the
-`$PI_OUTPUT` path:
+`$WORK_OUTPUT` path:
 
 ```yaml
 - id: meta
-  run: echo "version=1.4.2" >> "$PI_OUTPUT"
+  run: echo "version=1.4.2" >> "$WORK_OUTPUT"
 ```
 
 Read them inside an expression — `steps.meta.outputs.version` (same job) or, after

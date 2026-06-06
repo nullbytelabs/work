@@ -21,7 +21,7 @@ export const mockAgentRunner: AgentRunner = {
 /**
  * Test-only `ExecutionTarget` that runs commands as host child processes — the
  * lightweight double the runtime talks to so component/integration tests verify
- * the runtime↔target *contract* (provision → run → capture $PI_OUTPUT → dispose)
+ * the runtime↔target *contract* (provision → run → capture $WORK_OUTPUT → dispose)
  * without booting a real micro-VM. Production has no host target; this lives in
  * test code only and is reachable solely through the runtime's `makeTarget` hook,
  * never from a workflow. Real gondolin coverage lives in the e2e/VM-smoke tests.

@@ -105,7 +105,7 @@ jobs:
         run: npm install
       - id: meta                 # give a step an id to expose outputs
         name: record version
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$PI_OUTPUT"
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$WORK_OUTPUT"
 
   report:
     needs: [build]               # runs after build succeeds
@@ -128,7 +128,7 @@ The building blocks:
 | **`needs`** | `needs: [build]` — a job waits for its dependencies. Independent jobs run **in parallel**. |
 | **`env`** | declared at workflow, job, or step level; inner scopes override outer. |
 | **Inputs** | `inputs:` declares typed params (`string`/`number`/`boolean`, with `required`/`default`/`options`/`pattern`). Pass at run time with `--inputs '{"name":"ada"}'`, read via `${{ inputs.name }}`. |
-| **Outputs** | a step writes `key=value` to `$PI_OUTPUT`; a job re-exposes them via `outputs:`; downstream reads `${{ needs.<job>.outputs.<key> }}` or `${{ steps.<id>.outputs.<key> }}`. |
+| **Outputs** | a step writes `key=value` to `$WORK_OUTPUT`; a job re-exposes them via `outputs:`; downstream reads `${{ needs.<job>.outputs.<key> }}` or `${{ steps.<id>.outputs.<key> }}`. |
 | **Matrix** | `strategy.matrix:` fans a job out into one run per combination, with `include`/`exclude`; read the cell via `${{ matrix.<axis> }}`. |
 | **Conditionals** | `if:` (or `when:`) on a step or job — a false result skips it. Supports `inputs.*`, `matrix.*`, `needs.*`, `steps.*`, `==`/`!=`/`&&`/`||`/`!`, and `success()`/`failure()`/`always()`/`cancelled()`. |
 

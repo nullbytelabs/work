@@ -22,7 +22,7 @@ jobs:
         run: npm install
       - id: meta                 # give a step an id to expose outputs
         name: record version
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$PI_OUTPUT"
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$WORK_OUTPUT"
 
   report:
     needs: [build]               # runs after build succeeds
@@ -181,7 +181,7 @@ rules.
 
 ## Outputs
 
-A step exposes data by writing `key=value` lines to the file at `$PI_OUTPUT`. A
+A step exposes data by writing `key=value` lines to the file at `$WORK_OUTPUT`. A
 job re-exposes selected step outputs via its own `outputs:` block. Downstream jobs
 read them through `needs`:
 
@@ -191,7 +191,7 @@ jobs:
     runs-on: gondolin
     steps:
       - id: meta
-        run: echo "version=1.4.2" >> "$PI_OUTPUT"
+        run: echo "version=1.4.2" >> "$WORK_OUTPUT"
     outputs:
       version: ${{ steps.meta.outputs.version }}
   report:

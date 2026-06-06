@@ -260,7 +260,7 @@ async function awaitTaskTerminal(app: AbsurdEngine["app"], taskID: string) {
 }
 
 /**
- * Parse a step's $PI_OUTPUT file (GitHub-Actions `$GITHUB_OUTPUT` semantics):
+ * Parse a step's $WORK_OUTPUT file (GitHub-Actions `$GITHUB_OUTPUT` semantics):
  *   - `key=value` for single-line values, and
  *   - a heredoc block for multi-line values:
  *         key<<DELIMITER
@@ -473,11 +473,11 @@ async function runJobInTask(
 }
 
 /**
- * A shell `run` step on the ExecutionTarget; captures `$PI_OUTPUT`.
+ * A shell `run` step on the ExecutionTarget; captures `$WORK_OUTPUT`.
  *
  * The output file lives in the staged job workspace, which the target shares
  * with the host (the `/workspace` mount for the gondolin guest; the workdir
- * directly for a test host double). So `$PI_OUTPUT` points at the path *the
+ * directly for a test host double). So `$WORK_OUTPUT` points at the path *the
  * command sees* (`target.workspacePath`) while the host reads the same file back
  * from `workdir` — making output capture work uniformly across targets.
  */
@@ -493,9 +493,9 @@ async function runShellStep(
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(step.env)) env[k] = interpolate(v, expr);
 
-  const outName = `.pi-output-${step.name.replace(/[^\w-]/g, "_")}`;
+  const outName = `.work-output-${step.name.replace(/[^\w-]/g, "_")}`;
   const hostOutFile = join(workdir, outName); // host reads here
-  env["PI_OUTPUT"] = `${target.workspacePath}/${outName}`; // the command writes here
+  env["WORK_OUTPUT"] = `${target.workspacePath}/${outName}`; // the command writes here
   await rm(hostOutFile, { force: true });
 
   const run = await target.run(command, {
