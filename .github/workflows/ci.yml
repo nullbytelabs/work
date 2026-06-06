@@ -21,8 +21,11 @@ jobs:
         with:
           node-version: "25"
           cache: npm
-      # --omit=optional skips @earendil-works/gondolin (not needed to lint/typecheck).
-      - run: npm ci --omit=optional
+      # Full install: --omit=optional would strip knip's native parser binding
+      # (oxc-parser ships its platform binary as a transitive optional dep), and
+      # npm can't omit only our own optional deps (@earendil-works/*). They install
+      # fine on ubuntu — installing is not running — so the cost is just download time.
+      - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run knip

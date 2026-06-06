@@ -207,6 +207,14 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   // The valid Host header values for the bound port (loopback only).
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
+  /** A route handler. `params` are the regex capture groups, each decodeURIComponent'd. */
+  type RouteHandler = (req: IncomingMessage, res: ServerResponse, params: string[]) => Promise<void> | void;
+  interface Route {
+    method: string;
+    pattern: RegExp;
+    handler: RouteHandler;
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? "GET";
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
@@ -233,207 +241,195 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       return;
     }
 
-    // GET / → the HTML shell.
-    if (method === "GET" && path === "/") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(html);
+    for (const route of ROUTES) {
+      if (route.method !== method) continue;
+      const m = route.pattern.exec(path);
+      if (!m) continue;
+      await route.handler(req, res, m.slice(1).map((s) => decodeURIComponent(s)));
       return;
     }
-
-    // GET /api/workflows → { name, file }[].
-    if (method === "GET" && path === "/api/workflows") {
-      sendJson(res, 200, await listWorkflows(opts.workspace));
-      return;
-    }
-
-    // GET /api/workflows/:name/form → the InputSpec map ({} if none).
-    const formMatch = /^\/api\/workflows\/([^/]+)\/form$/.exec(path);
-    if (method === "GET" && formMatch) {
-      const name = decodeURIComponent(formMatch[1]!);
-      const spec = await loadSpec(name);
-      if (!spec) { sendJson(res, 404, { error: `no workflow named "${name}"` }); return; }
-      sendJson(res, 200, spec.inputs ?? {});
-      return;
-    }
-
-    // GET /api/workflows/:name/graph → emitGraph json (already JSON text).
-    const graphMatch = /^\/api\/workflows\/([^/]+)\/graph$/.exec(path);
-    if (method === "GET" && graphMatch) {
-      const name = decodeURIComponent(graphMatch[1]!);
-      const spec = await loadSpec(name);
-      if (!spec) { sendJson(res, 404, { error: `no workflow named "${name}"` }); return; }
-      try {
-        const plan = compile(spec, {});
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(emitGraph(plan, "json", { steps: true }));
-      } catch (err) {
-        sendCompileError(res, err);
-      }
-      return;
-    }
-
-    // POST /api/runs → compile + dispatch → 202 { runId }.
-    if (method === "POST" && path === "/api/runs") {
-      let body: { name?: unknown; inputs?: unknown };
-      try {
-        body = JSON.parse(await readBody(req));
-      } catch {
-        sendJson(res, 400, { error: "body must be JSON" });
-        return;
-      }
-      if (typeof body.name !== "string") { sendJson(res, 400, { error: "body.name is required" }); return; }
-      const inputs =
-        body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)
-          ? (body.inputs as Record<string, unknown>)
-          : {};
-
-      const layout = await resolveLayout(body.name);
-      if (!layout) { sendJson(res, 404, { error: `no workflow named "${body.name}"` }); return; }
-
-      let plan;
-      try {
-        const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
-        plan = compile(spec, { inputs });
-      } catch (err) {
-        sendCompileError(res, err);
-        return;
-      }
-      const result = runManager.dispatch({
-        name: body.name,
-        layout: {
-          ...(layout.workspaceSource !== undefined ? { workspaceSource: layout.workspaceSource } : {}),
-          ...(layout.workflowDir !== undefined ? { workflowDir: layout.workflowDir } : {}),
-        },
-        plan,
-      });
-      if (!result.accepted) { sendJson(res, 429, { error: "server at run capacity — retry shortly" }); return; }
-      sendJson(res, 202, { runId: result.record.id });
-      return;
-    }
-
-    // POST /hooks/:name → authenticated, async webhook trigger (webhook §7).
-    const hookMatch = /^\/hooks\/([^/]+)$/.exec(path);
-    if (method === "POST" && hookMatch) {
-      await handleHook(decodeURIComponent(hookMatch[1]!), req, res);
-      return;
-    }
-
-    // GET /api/webhooks → the configured hooks (NEVER any secret). Just a listing,
-    // so an empty/absent `webhooks` config is a plain `[]` (no 404). `configured`
-    // tells the UI whether the hook's secret actually resolves (else it's a
-    // fail-closed 404 at delivery time).
-    if (method === "GET" && path === "/api/webhooks") {
-      const hooks = opts.config?.webhooks ?? {};
-      sendJson(
-        res,
-        200,
-        Object.entries(hooks).map(([name, entry]) => ({
-          name,
-          workflow: entry.workflow,
-          enabled: entry.enabled !== false,
-          auth: entry.auth ?? "bearer",
-          datasources: entry.datasources ?? [],
-          configured: (entry.secret ? expandEnv(entry.secret) : "").length > 0,
-        })),
-      );
-      return;
-    }
-
-    // GET /api/webhooks/:name/deliveries → audited deliveries, newest-first,
-    // capped. 404 a name that isn't a configured webhook (don't leak the ring for
-    // arbitrary keys). NEVER includes the payload or secret.
-    const deliveriesMatch = /^\/api\/webhooks\/([^/]+)\/deliveries$/.exec(path);
-    if (method === "GET" && deliveriesMatch) {
-      const name = decodeURIComponent(deliveriesMatch[1]!);
-      if (!opts.config?.webhooks?.[name]) { sendJson(res, 404, { error: `no webhook named "${name}"` }); return; }
-      sendJson(res, 200, await listDeliveries(name, 50));
-      return;
-    }
-
-    // POST /api/webhooks/:name/test → an authenticated (token-gated) UI action
-    // that fires the hook's workflow with a synthetic payload, bypassing signature
-    // auth precisely because the browser already proved itself via X-Work-Token.
-    const testMatch = /^\/api\/webhooks\/([^/]+)\/test$/.exec(path);
-    if (method === "POST" && testMatch) {
-      await handleWebhookTest(decodeURIComponent(testMatch[1]!), req, res);
-      return;
-    }
-
-    // GET /api/runs → history (newest-first).
-    if (method === "GET" && path === "/api/runs") {
-      sendJson(res, 200, await runManager.list());
-      return;
-    }
-
-    // GET /api/runs/:id/events → SSE stream.
-    const eventsMatch = /^\/api\/runs\/([^/]+)\/events$/.exec(path);
-    if (method === "GET" && eventsMatch) {
-      const runId = decodeURIComponent(eventsMatch[1]!);
-
-      if (runManager.get(runId)) {
-        // Live, in-memory run: replay the ring then tail live (unchanged path).
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        });
-        res.flushHeaders?.();
-        sseResponses.add(res);
-        runManager.subscribe(runId, res);
-        // Heartbeat so proxies/clients keep the connection open.
-        const beat = setInterval(() => res.write(": ping\n\n"), HEARTBEAT_MS);
-        beat.unref?.();
-        heartbeats.add(beat);
-        res.on("close", () => {
-          clearInterval(beat);
-          heartbeats.delete(beat);
-          sseResponses.delete(res);
-        });
-        return;
-      }
-
-      // Not live: try replaying a *past* run's persisted log (Phase 2). On a hit
-      // `replayHistorical` writes the SSE headers + every stored frame in order
-      // and ends the stream. On a miss it touches nothing, so we can still send a
-      // clean JSON 404 (preserving the legacy no-store behavior).
-      if (await runManager.replayHistorical(runId, res)) return;
-      sendJson(res, 404, { error: `no run "${runId}"` });
-      return;
-    }
-
-    // POST /api/runs/:id/rerun → re-dispatch a past run with its stored inputs.
-    const rerunMatch = /^\/api\/runs\/([^/]+)\/rerun$/.exec(path);
-    if (method === "POST" && rerunMatch) {
-      const id = decodeURIComponent(rerunMatch[1]!);
-      const stored = await runManager.getStored(id);
-      if (!stored) { sendJson(res, 404, { error: `no run "${id}"` }); return; }
-
-      const layout = await resolveLayout(stored.name);
-      if (!layout) { sendJson(res, 404, { error: `no workflow named "${stored.name}"` }); return; }
-
-      let plan;
-      try {
-        const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
-        plan = compile(spec, { inputs: stored.inputs ?? {} });
-      } catch (err) {
-        sendCompileError(res, err);
-        return;
-      }
-      const result = runManager.dispatch({
-        name: stored.name,
-        layout: {
-          ...(layout.workspaceSource !== undefined ? { workspaceSource: layout.workspaceSource } : {}),
-          ...(layout.workflowDir !== undefined ? { workflowDir: layout.workflowDir } : {}),
-        },
-        plan,
-        trigger: "dispatch",
-      });
-      if (!result.accepted) { sendJson(res, 429, { error: "server at run capacity — retry shortly" }); return; }
-      sendJson(res, 202, { runId: result.record.id });
-      return;
-    }
-
     sendJson(res, 404, { error: `not found: ${method} ${path}` });
+  }
+
+  // The route table, scanned in order by `handle`. Patterns are anchored and
+  // disjoint, so order is for readability, not disambiguation. The two `/hooks/`
+  // / `/test` entries delegate to the dedicated handlers below.
+  const ROUTES: Route[] = [
+    { method: "GET", pattern: /^\/$/, handler: serveShell },
+    { method: "GET", pattern: /^\/api\/workflows$/, handler: getWorkflows },
+    { method: "GET", pattern: /^\/api\/workflows\/([^/]+)\/form$/, handler: getForm },
+    { method: "GET", pattern: /^\/api\/workflows\/([^/]+)\/graph$/, handler: getGraph },
+    { method: "POST", pattern: /^\/api\/runs$/, handler: postRuns },
+    { method: "POST", pattern: /^\/hooks\/([^/]+)$/, handler: (req, res, p) => handleHook(p[0]!, req, res) },
+    { method: "GET", pattern: /^\/api\/webhooks$/, handler: getWebhooks },
+    { method: "GET", pattern: /^\/api\/webhooks\/([^/]+)\/deliveries$/, handler: getDeliveries },
+    { method: "POST", pattern: /^\/api\/webhooks\/([^/]+)\/test$/, handler: (req, res, p) => handleWebhookTest(p[0]!, req, res) },
+    { method: "GET", pattern: /^\/api\/runs$/, handler: getRuns },
+    { method: "GET", pattern: /^\/api\/runs\/([^/]+)\/events$/, handler: getEvents },
+    { method: "POST", pattern: /^\/api\/runs\/([^/]+)\/rerun$/, handler: postRerun },
+  ];
+
+  // GET / → the HTML shell.
+  function serveShell(_req: IncomingMessage, res: ServerResponse): void {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
+  }
+
+  // GET /api/workflows → { name, file }[].
+  async function getWorkflows(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    sendJson(res, 200, await listWorkflows(opts.workspace));
+  }
+
+  // GET /api/workflows/:name/form → the InputSpec map ({} if none).
+  async function getForm(_req: IncomingMessage, res: ServerResponse, p: string[]): Promise<void> {
+    const name = p[0]!;
+    const spec = await loadSpec(name);
+    if (!spec) { sendJson(res, 404, { error: `no workflow named "${name}"` }); return; }
+    sendJson(res, 200, spec.inputs ?? {});
+  }
+
+  // GET /api/workflows/:name/graph → emitGraph json (already JSON text).
+  async function getGraph(_req: IncomingMessage, res: ServerResponse, p: string[]): Promise<void> {
+    const name = p[0]!;
+    const spec = await loadSpec(name);
+    if (!spec) { sendJson(res, 404, { error: `no workflow named "${name}"` }); return; }
+    try {
+      const plan = compile(spec, {});
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(emitGraph(plan, "json", { steps: true }));
+    } catch (err) {
+      sendCompileError(res, err);
+    }
+  }
+
+  // POST /api/runs → compile + dispatch → 202 { runId }.
+  async function postRuns(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let body: { name?: unknown; inputs?: unknown };
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      sendJson(res, 400, { error: "body must be JSON" });
+      return;
+    }
+    if (typeof body.name !== "string") { sendJson(res, 400, { error: "body.name is required" }); return; }
+    const inputs =
+      body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)
+        ? (body.inputs as Record<string, unknown>)
+        : {};
+
+    const layout = await resolveLayout(body.name);
+    if (!layout) { sendJson(res, 404, { error: `no workflow named "${body.name}"` }); return; }
+
+    let plan;
+    try {
+      const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
+      plan = compile(spec, { inputs });
+    } catch (err) {
+      sendCompileError(res, err);
+      return;
+    }
+    const result = runManager.dispatch({
+      name: body.name,
+      layout: layoutFields(layout),
+      plan,
+    });
+    if (!result.accepted) { sendJson(res, 429, { error: "server at run capacity — retry shortly" }); return; }
+    sendJson(res, 202, { runId: result.record.id });
+  }
+
+  // GET /api/webhooks → the configured hooks (NEVER any secret). Just a listing,
+  // so an empty/absent `webhooks` config is a plain `[]` (no 404). `configured`
+  // tells the UI whether the hook's secret actually resolves (else it's a
+  // fail-closed 404 at delivery time).
+  function getWebhooks(_req: IncomingMessage, res: ServerResponse): void {
+    const hooks = opts.config?.webhooks ?? {};
+    sendJson(
+      res,
+      200,
+      Object.entries(hooks).map(([name, entry]) => ({
+        name,
+        workflow: entry.workflow,
+        enabled: entry.enabled !== false,
+        auth: entry.auth ?? "bearer",
+        datasources: entry.datasources ?? [],
+        configured: (entry.secret ? expandEnv(entry.secret) : "").length > 0,
+      })),
+    );
+  }
+
+  // GET /api/webhooks/:name/deliveries → audited deliveries, newest-first, capped.
+  // 404 a name that isn't a configured webhook (don't leak the ring for arbitrary
+  // keys). NEVER includes the payload or secret.
+  async function getDeliveries(_req: IncomingMessage, res: ServerResponse, p: string[]): Promise<void> {
+    const name = p[0]!;
+    if (!opts.config?.webhooks?.[name]) { sendJson(res, 404, { error: `no webhook named "${name}"` }); return; }
+    sendJson(res, 200, await listDeliveries(name, 50));
+  }
+
+  // GET /api/runs → history (newest-first).
+  async function getRuns(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    sendJson(res, 200, await runManager.list());
+  }
+
+  // GET /api/runs/:id/events → SSE stream (live tail, else replay a past run).
+  async function getEvents(_req: IncomingMessage, res: ServerResponse, p: string[]): Promise<void> {
+    const runId = p[0]!;
+
+    if (runManager.get(runId)) {
+      // Live, in-memory run: replay the ring then tail live (unchanged path).
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      res.flushHeaders?.();
+      sseResponses.add(res);
+      runManager.subscribe(runId, res);
+      // Heartbeat so proxies/clients keep the connection open.
+      const beat = setInterval(() => res.write(": ping\n\n"), HEARTBEAT_MS);
+      beat.unref?.();
+      heartbeats.add(beat);
+      res.on("close", () => {
+        clearInterval(beat);
+        heartbeats.delete(beat);
+        sseResponses.delete(res);
+      });
+      return;
+    }
+
+    // Not live: try replaying a *past* run's persisted log (Phase 2). On a hit
+    // `replayHistorical` writes the SSE headers + every stored frame in order
+    // and ends the stream. On a miss it touches nothing, so we can still send a
+    // clean JSON 404 (preserving the legacy no-store behavior).
+    if (await runManager.replayHistorical(runId, res)) return;
+    sendJson(res, 404, { error: `no run "${runId}"` });
+  }
+
+  // POST /api/runs/:id/rerun → re-dispatch a past run with its stored inputs.
+  async function postRerun(_req: IncomingMessage, res: ServerResponse, p: string[]): Promise<void> {
+    const id = p[0]!;
+    const stored = await runManager.getStored(id);
+    if (!stored) { sendJson(res, 404, { error: `no run "${id}"` }); return; }
+
+    const layout = await resolveLayout(stored.name);
+    if (!layout) { sendJson(res, 404, { error: `no workflow named "${stored.name}"` }); return; }
+
+    let plan;
+    try {
+      const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
+      plan = compile(spec, { inputs: stored.inputs ?? {} });
+    } catch (err) {
+      sendCompileError(res, err);
+      return;
+    }
+    const result = runManager.dispatch({
+      name: stored.name,
+      layout: layoutFields(layout),
+      plan,
+      trigger: "dispatch",
+    });
+    if (!result.accepted) { sendJson(res, 429, { error: "server at run capacity — retry shortly" }); return; }
+    sendJson(res, 202, { runId: result.record.id });
   }
 
   /** Resolve a workflow name to its layout, or undefined if absent. */
