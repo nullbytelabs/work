@@ -291,58 +291,106 @@ function parseOutputFile(text: string): Record<string, string> {
   return out;
 }
 
-async function runJobInTask(
+/** Expression context shape threaded to the step runners (needs + step outputs). */
+type StepExprCtx = { needs: NeedsContext; steps: Record<string, OutputBag> };
+
+/**
+ * Stage the job's checkout into `workdir` like a fresh `git checkout`: never carry
+ * a foreign `node_modules` (a job installs its own — copying one across platforms
+ * breaks native deps) or `.git`. Keeps staging fast and reproducible.
+ */
+async function stageWorkspace(ctx: RunContext, workdir: string): Promise<void> {
+  await mkdir(workdir, { recursive: true });
+  if (!ctx.workspaceSource) return;
+  await cp(ctx.workspaceSource, workdir, {
+    recursive: true,
+    filter: (src) => {
+      const b = basename(src);
+      return b !== "node_modules" && b !== ".git";
+    },
+  });
+}
+
+/**
+ * Build + provision the job's target. On success returns the target; on failure
+ * returns the synthetic `provision` step result so the caller can report it.
+ */
+async function provisionTarget(
   job: PlannedJob,
   deps: JobDeps,
-  taskCtx: TaskContext,
-  needs: NeedsContext,
-): Promise<JobResult> {
-  const { ctx } = deps;
-  ctx.hooks?.onJobStart?.(job.id);
-  const workdir = join(ctx.workRoot, job.id);
-
-  await mkdir(workdir, { recursive: true });
-  if (ctx.workspaceSource) {
-    // Stage the checkout like a fresh `git checkout`: never carry a foreign
-    // `node_modules` (a job installs its own — copying one across platforms
-    // breaks native deps) or `.git`. Keeps staging fast and reproducible.
-    await cp(ctx.workspaceSource, workdir, {
-      recursive: true,
-      filter: (src) => {
-        const b = basename(src);
-        return b !== "node_modules" && b !== ".git";
-      },
-    });
-  }
-
-  let target;
+  workdir: string,
+): Promise<{ target: ExecutionTarget } | { failure: StepResult }> {
   try {
     // A sandbox target may need mediated egress (e.g. an in-guest agent reaching
     // the model API). The composition root supplies this per job; the core stays
     // agent-agnostic — it just forwards the allowlist/secrets to the target.
     const network = deps.resolveJobNetwork?.(job);
-    target = deps.makeTarget(job.runsOn, { workdir, ...(network ?? {}) });
+    const target = deps.makeTarget(job.runsOn, { workdir, ...(network ?? {}) });
     await target.provision();
+    return { target };
   } catch (err) {
-    const result: StepResult = {
-      name: `${job.id}/provision`,
-      status: "failure",
-      exitCode: 1,
-      stdout: "",
-      stderr: (err as Error).message,
+    return {
+      failure: { name: `${job.id}/provision`, status: "failure", exitCode: 1, stdout: "", stderr: (err as Error).message },
     };
-    ctx.hooks?.onStepEnd?.(job.id, result);
-    const jobResult: JobResult = { id: job.id, status: "failure", steps: [result] };
-    ctx.hooks?.onJobEnd?.(job.id, jobResult);
-    return jobResult;
   }
+}
 
+/** Whether (and how) a step runs: with no `if`, it runs while the job is healthy;
+ *  an `if:` takes over (so `always()`/`failure()` can run after a failure). A
+ *  malformed `if:` is itself a step failure. */
+type StepDecision = { kind: "run" | "skip" } | { kind: "error"; result: StepResult };
+
+function decideStep(step: PlannedStep, condCtx: ConditionContext, failed: boolean): StepDecision {
+  if (step.if === undefined) return { kind: failed ? "skip" : "run" };
+  try {
+    return { kind: evaluateCondition(step.if, condCtx) ? "run" : "skip" };
+  } catch (err) {
+    if (!(err instanceof ConditionError)) throw err;
+    return { kind: "error", result: { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: `if: ${err.message}` } };
+  }
+}
+
+/** Run one step as a durable checkpoint, dispatching `uses:` vs `run:`. */
+function executeStep(
+  step: PlannedStep,
+  job: PlannedJob,
+  target: ExecutionTarget,
+  workdir: string,
+  deps: JobDeps,
+  taskCtx: TaskContext,
+  expr: StepExprCtx,
+): Promise<StepResult> {
+  return taskCtx.step<StepResult>(step.name, async () => {
+    if (step.uses !== undefined) return runUsesStep(step, job, target, workdir, deps, expr);
+    return runShellStep(step, job, target, workdir, deps.ctx, expr);
+  });
+}
+
+/** Outcome of running a job's steps: the results, their captured outputs, and
+ *  whether anything failed (used to gate job-output resolution). */
+interface StepsOutcome {
+  steps: StepResult[];
+  stepOutputs: Record<string, OutputBag & { result?: string }>;
+  failed: boolean;
+}
+
+/** Run a job's steps in order on the provisioned target, applying `if:`/skip
+ *  gating and capturing per-step outputs. Disposes the target when done. */
+async function runSteps(
+  job: PlannedJob,
+  deps: JobDeps,
+  target: ExecutionTarget,
+  workdir: string,
+  taskCtx: TaskContext,
+  needs: NeedsContext,
+): Promise<StepsOutcome> {
+  const { ctx } = deps;
   const steps: StepResult[] = [];
   // by step id, for steps.<id>.outputs / steps.<id>.result
   const stepOutputs: Record<string, OutputBag & { result?: string }> = {};
   let failed = false;
 
-  const exprCtx = () => ({ needs, steps: stepOutputs });
+  const exprCtx = (): StepExprCtx => ({ needs, steps: stepOutputs });
 
   /** Build the condition context as of "now" (current failed-state + outputs). */
   const condCtx = (): ConditionContext => ({
@@ -354,66 +402,67 @@ async function runJobInTask(
     status: { success: !failed, failure: failed },
   });
 
+  /** Record a step's result: capture outputs/result for `id`ed steps, mark the job failed. */
+  const recordStep = (step: PlannedStep, result: StepResult): void => {
+    if (step.id) stepOutputs[step.id] = { outputs: result.outputs ?? {}, result: result.status };
+    steps.push(result);
+    if (result.status === "failure") failed = true;
+  };
+
   try {
     for (const step of job.steps) {
-      // Decide whether this step runs. With no `if`, a step runs only while the
-      // job is still healthy (skip once something failed). An `if:` takes over:
-      // `always()` / `failure()` let a step run after an earlier failure.
-      let shouldRun: boolean;
-      if (step.if !== undefined) {
-        try {
-          shouldRun = evaluateCondition(step.if, condCtx());
-        } catch (err) {
-          if (!(err instanceof ConditionError)) throw err;
-          const result: StepResult = {
-            name: step.name,
-            status: "failure",
-            exitCode: 1,
-            stdout: "",
-            stderr: `if: ${err.message}`,
-          };
-          ctx.hooks?.onStepStart?.(job.id, step.name);
-          ctx.hooks?.onStepEnd?.(job.id, result);
-          steps.push(result);
-          if (step.id) stepOutputs[step.id] = { outputs: {}, result: "failure" };
-          failed = true;
-          continue;
-        }
-      } else {
-        shouldRun = !failed;
+      const decision = decideStep(step, condCtx(), failed);
+      if (decision.kind === "error") {
+        ctx.hooks?.onStepStart?.(job.id, step.name);
+        ctx.hooks?.onStepEnd?.(job.id, decision.result);
+        recordStep(step, decision.result);
+        continue;
       }
-
-      if (!shouldRun) {
-        steps.push({ name: step.name, status: "skipped", exitCode: 0, stdout: "", stderr: "" });
-        if (step.id) stepOutputs[step.id] = { outputs: {}, result: "skipped" };
+      if (decision.kind === "skip") {
+        recordStep(step, { name: step.name, status: "skipped", exitCode: 0, stdout: "", stderr: "" });
         continue;
       }
 
       ctx.hooks?.onStepStart?.(job.id, step.name);
-
-      const result = await taskCtx.step<StepResult>(step.name, async () => {
-        if (step.uses !== undefined) {
-          return runUsesStep(step, job, target!, workdir, deps, exprCtx());
-        }
-        return runShellStep(step, job, target!, workdir, ctx, exprCtx());
-      });
-
-      // Capture declared outputs + result for steps with an id.
-      if (step.id) stepOutputs[step.id] = { outputs: result.outputs ?? {}, result: result.status };
+      const result = await executeStep(step, job, target, workdir, deps, taskCtx, exprCtx());
       ctx.hooks?.onStepEnd?.(job.id, result);
-      steps.push(result);
-      if (result.status === "failure") failed = true;
+      recordStep(step, result);
     }
   } finally {
     await target.dispose();
   }
+
+  return { steps, stepOutputs, failed };
+}
+
+async function runJobInTask(
+  job: PlannedJob,
+  deps: JobDeps,
+  taskCtx: TaskContext,
+  needs: NeedsContext,
+): Promise<JobResult> {
+  const { ctx } = deps;
+  ctx.hooks?.onJobStart?.(job.id);
+  const workdir = join(ctx.workRoot, job.id);
+
+  await stageWorkspace(ctx, workdir);
+
+  const prov = await provisionTarget(job, deps, workdir);
+  if ("failure" in prov) {
+    ctx.hooks?.onStepEnd?.(job.id, prov.failure);
+    const jobResult: JobResult = { id: job.id, status: "failure", steps: [prov.failure] };
+    ctx.hooks?.onJobEnd?.(job.id, jobResult);
+    return jobResult;
+  }
+
+  const { steps, stepOutputs, failed } = await runSteps(job, deps, prov.target, workdir, taskCtx, needs);
 
   // Resolve job outputs from collected step outputs (and needs).
   let outputs: Record<string, string> | undefined;
   if (job.outputs && !failed) {
     outputs = {};
     for (const [k, expr] of Object.entries(job.outputs)) {
-      outputs[k] = interpolate(expr, exprCtx());
+      outputs[k] = interpolate(expr, { needs, steps: stepOutputs });
     }
   }
 
