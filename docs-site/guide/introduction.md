@@ -59,8 +59,10 @@ A workflow is a single YAML file. The pieces:
 | **`needs`** | dependencies between jobs; independent jobs run in parallel. |
 | **Inputs / outputs / matrix / conditionals** | typed parameters, data passing between jobs, fan-out, and guards. |
 
-That's the whole surface. [Writing a workflow](./writing-workflows) walks through
-each piece with examples.
+That's the whole surface — and a job can even be a call to *another* whole
+workflow, so you compose pipelines from smaller ones (see
+[Reusable workflows](./reusable-workflows)). [Writing a workflow](./writing-workflows)
+walks through each piece with examples.
 
 ## What you get
 

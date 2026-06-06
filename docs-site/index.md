@@ -25,6 +25,11 @@ features:
     details: Build-and-test, data processing, scheduled automation, deploys — anything you'd otherwise script. A small YAML surface of jobs, steps, dependencies, matrices, and conditionals.
     linkText: Writing a workflow
     link: /guide/writing-workflows
+  - icon: 🧱
+    title: Compose, don't copy-paste
+    details: "A job can call another whole workflow with `uses: workflow/<name>`, so a shared lint or build sequence lives in one file and your pipelines reference it — inlined into one graph at compile time."
+    linkText: Reusable workflows
+    link: /guide/reusable-workflows
   - icon: 🔒
     title: Isolated micro-VMs
     details: Every job runs in its own Gondolin micro-VM with mediated egress, sized per job with machine types (small to xlarge, or custom cpus/memory). There is no host-execution mode — your steps never touch the host directly.

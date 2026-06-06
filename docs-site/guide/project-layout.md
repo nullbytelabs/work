@@ -77,6 +77,10 @@ work run verify    # fast verification
 work run review    # agent review when you want one
 ```
 
+Workflows in the same `.workflows/` can also **call each other**: a `release`
+workflow can pull in `verify` as one job and add deploy steps after it, rather
+than duplicating the checks. See [Reusable workflows](./reusable-workflows).
+
 ::: tip Complete example
 [`test/e2e/agent-project/`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/agent-project)
 is a full, runnable project laid out this way — a verification workflow and a

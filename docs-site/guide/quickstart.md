@@ -115,6 +115,7 @@ directly.
 ::: tip Next steps
 - Learn the full YAML surface in [Writing a workflow](./writing-workflows).
 - Organize a real project with the [`.workflows/` layout](./project-layout).
+- Compose pipelines from smaller ones with [Reusable workflows](./reusable-workflows).
 - Add an [AI agent step](./agent-steps).
 - Drive it from the [web console](./web-ui).
 :::

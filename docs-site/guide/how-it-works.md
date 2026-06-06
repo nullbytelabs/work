@@ -25,6 +25,12 @@ durable task graph  ──run──▶  Gondolin micro-VMs (one per job)
    └─ journaled to PGLite (in-process Postgres)
 ```
 
+Compilation also **inlines reusable workflows**: a job that calls another workflow
+with `uses: workflow/<name>` has the callee's jobs spliced into this same flat
+graph, so the scheduler, the durable runtime, and `work graph` treat a composed
+pipeline exactly like a hand-written one — no special runtime path. See
+[Reusable workflows](../guide/reusable-workflows).
+
 ## Scheduling
 
 The `needs` DAG drives **parallel scheduling**: a job becomes runnable the moment
