@@ -50,113 +50,168 @@ interface CliArgs {
   port?: number;
 }
 
-function parseArgs(argv: string[]): CliArgs {
-  const positionals: string[] = [];
-  let workspace: string | undefined;
-  let workdir: string | undefined;
-  let quiet = false;
-  let inputs: Record<string, unknown> = {};
-  let config: string | undefined;
-  let noGlobal = false;
-  let format: GraphFormat | undefined;
-  let steps = false;
-  let web = false;
-  let port: number | undefined;
+/** Mutable accumulator filled by the flag handlers, resolved into CliArgs after. */
+interface FlagState {
+  positionals: string[];
+  workspace?: string;
+  workdir?: string;
+  quiet: boolean;
+  inputs: Record<string, unknown>;
+  config?: string;
+  noGlobal: boolean;
+  format?: GraphFormat;
+  steps: boolean;
+  web: boolean;
+  port?: number;
+}
 
+/** A flag handler: consumes from `argv` starting at `i` and returns the new index. */
+type FlagHandler = (argv: string[], i: number, s: FlagState) => number;
+
+const FLAG_HANDLERS: Record<string, FlagHandler> = {
+  "--workspace": (argv, i, s) => {
+    s.workspace = argv[++i];
+    if (!s.workspace) fail("--workspace requires a directory path");
+    return i;
+  },
+  "--web": (_argv, i, s) => {
+    s.web = true;
+    return i;
+  },
+  "--port": (argv, i, s) => {
+    const raw = argv[++i];
+    if (!raw) fail("--port requires a number");
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1 || n > 65535) fail("--port must be an integer between 1 and 65535");
+    s.port = n;
+    return i;
+  },
+  "--format": (argv, i, s) => {
+    const fmt = argv[++i];
+    if (!fmt) fail("--format requires a value");
+    if (!isGraphFormat(fmt)) fail(`--format must be one of: ${GRAPH_FORMATS.join(", ")}`);
+    s.format = fmt;
+    return i;
+  },
+  "--steps": (_argv, i, s) => {
+    s.steps = true;
+    return i;
+  },
+  "--workdir": (argv, i, s) => {
+    s.workdir = argv[++i];
+    if (!s.workdir) fail("--workdir requires a directory path");
+    return i;
+  },
+  "--config": (argv, i, s) => {
+    s.config = argv[++i];
+    if (!s.config) fail("--config requires a path");
+    return i;
+  },
+  "--inputs": (argv, i, s) => parseInputsFlag(argv, i, s),
+  "--quiet": (_argv, i, s) => {
+    s.quiet = true;
+    return i;
+  },
+  "--no-global": (_argv, i, s) => {
+    s.noGlobal = true;
+    return i;
+  },
+};
+
+/** `--inputs '<json>'` — parse and validate the JSON-object payload. */
+function parseInputsFlag(argv: string[], i: number, s: FlagState): number {
+  const json = argv[++i];
+  if (!json) fail("--inputs requires a JSON object string");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    fail("--inputs must be valid JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    fail("--inputs must be a JSON object, e.g. '{\"name\":\"ada\"}'");
+  }
+  s.inputs = parsed as Record<string, unknown>;
+  return i;
+}
+
+/** Tokenize argv into a FlagState (flags + positionals); `-h`/`--help` exits. */
+function parseFlags(argv: string[]): FlagState {
+  const s: FlagState = { positionals: [], quiet: false, inputs: {}, noGlobal: false, steps: false, web: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === "--workspace") {
-      workspace = argv[++i];
-      if (!workspace) fail("--workspace requires a directory path");
-    } else if (arg === "--web") {
-      web = true;
-    } else if (arg === "--port") {
-      const raw = argv[++i];
-      if (!raw) fail("--port requires a number");
-      const n = Number(raw);
-      if (!Number.isInteger(n) || n < 1 || n > 65535) fail("--port must be an integer between 1 and 65535");
-      port = n;
-    } else if (arg === "--format") {
-      const fmt = argv[++i];
-      if (!fmt) fail("--format requires a value");
-      if (!isGraphFormat(fmt)) fail(`--format must be one of: ${GRAPH_FORMATS.join(", ")}`);
-      format = fmt;
-    } else if (arg === "--steps") {
-      steps = true;
-    } else if (arg === "--workdir") {
-      workdir = argv[++i];
-      if (!workdir) fail("--workdir requires a directory path");
-    } else if (arg === "--config") {
-      config = argv[++i];
-      if (!config) fail("--config requires a path");
-    } else if (arg === "--inputs") {
-      const json = argv[++i];
-      if (!json) fail("--inputs requires a JSON object string");
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(json);
-      } catch {
-        fail("--inputs must be valid JSON");
-      }
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        fail("--inputs must be a JSON object, e.g. '{\"name\":\"ada\"}'");
-      }
-      inputs = parsed as Record<string, unknown>;
-    } else if (arg === "--quiet") {
-      quiet = true;
-    } else if (arg === "--no-global") {
-      noGlobal = true;
+    const handler = FLAG_HANDLERS[arg];
+    if (handler) {
+      i = handler(argv, i, s);
     } else if (arg === "-h" || arg === "--help") {
       printUsage();
       process.exit(0);
     } else if (arg.startsWith("-")) {
       fail(`unknown flag: ${arg}`);
     } else {
-      positionals.push(arg);
+      s.positionals.push(arg);
     }
   }
+  return s;
+}
 
-  const common = { workdir, quiet, inputs, noGlobal, ...(workspace ? { workspace } : {}), ...(config ? { config } : {}) };
+/** The flags shared by every command form. */
+function buildCommon(s: FlagState) {
+  return { workdir: s.workdir, quiet: s.quiet, inputs: s.inputs, noGlobal: s.noGlobal, ...(s.workspace ? { workspace: s.workspace } : {}), ...(s.config ? { config: s.config } : {}) };
+}
+type CommonArgs = ReturnType<typeof buildCommon>;
 
-  // `--web` — boot the local web UI over the workspace's `.workflows/` (it
-  // enumerates *all* pipelines, so it takes no workflow name/file). Allowed with
-  // `--workspace` and `--port`; rejects the run/graph-only flags.
-  if (web) {
-    if (positionals.length > 0) fail(`--web takes no positional arguments (got ${positionals[0]})`);
-    if (format) fail("--format only applies to `graph`");
-    if (steps) fail("--steps only applies to `graph`");
-    return { web: true, ...(port !== undefined ? { port } : {}), ...common };
-  }
-  if (port !== undefined) fail("--port only applies to `--web`");
+function parseArgs(argv: string[]): CliArgs {
+  const s = parseFlags(argv);
+  const common = buildCommon(s);
+  if (s.web) return resolveWeb(s, common);
+  if (s.port !== undefined) fail("--port only applies to `--web`");
+  if (s.positionals[0] === "graph") return resolveGraph(s, common);
+  if (s.positionals[0] === "run") return resolveRun(s, common);
+  return resolveFile(s, common);
+}
 
-  // `graph <file|name>` — emit the DAG instead of running. By-name when
-  // `--workspace` is given (like `run`), else treat the target as a file path.
-  if (positionals[0] === "graph") {
-    const target = positionals[1];
-    if (!target) fail("graph requires a workflow file or name, e.g. `pi-workflows graph ci.yaml`");
-    if (positionals.length > 2) fail(`unexpected argument: ${positionals[2]}`);
-    const fmt = format ?? "mermaid";
-    return workspace
-      ? { graph: true, format: fmt, steps, name: target, ...common }
-      : { graph: true, format: fmt, steps, file: target, ...common };
-  }
+// `--web` — boot the local web UI over the workspace's `.workflows/` (it
+// enumerates *all* pipelines, so it takes no workflow name/file). Allowed with
+// `--workspace` and `--port`; rejects the run/graph-only flags.
+function resolveWeb(s: FlagState, common: CommonArgs): CliArgs {
+  if (s.positionals.length > 0) fail(`--web takes no positional arguments (got ${s.positionals[0]})`);
+  if (s.format) fail("--format only applies to `graph`");
+  if (s.steps) fail("--steps only applies to `graph`");
+  return { web: true, ...(s.port !== undefined ? { port: s.port } : {}), ...common };
+}
 
-  // `run <name>` (by-name) vs. a bare `<workflow.yaml>` path (ad-hoc).
-  if (positionals[0] === "run") {
-    const name = positionals[1];
-    if (!name) fail("run requires a workflow name, e.g. `pi-workflows run ci`");
-    if (positionals.length > 2) fail(`unexpected argument: ${positionals[2]}`);
-    return { name, ...common };
-  }
-  if (workspace) fail("--workspace only applies to `run <name>` / `graph <name>`; pass a file path directly instead");
-  if (format) fail("--format only applies to `graph`");
-  if (steps) fail("--steps only applies to `graph`");
-  if (positionals.length === 0) {
+// `graph <file|name>` — emit the DAG instead of running. By-name when
+// `--workspace` is given (like `run`), else treat the target as a file path.
+function resolveGraph(s: FlagState, common: CommonArgs): CliArgs {
+  const target = s.positionals[1];
+  if (!target) fail("graph requires a workflow file or name, e.g. `pi-workflows graph ci.yaml`");
+  if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
+  const fmt = s.format ?? "mermaid";
+  return s.workspace
+    ? { graph: true, format: fmt, steps: s.steps, name: target, ...common }
+    : { graph: true, format: fmt, steps: s.steps, file: target, ...common };
+}
+
+// `run <name>` — by-name workflow.
+function resolveRun(s: FlagState, common: CommonArgs): CliArgs {
+  const name = s.positionals[1];
+  if (!name) fail("run requires a workflow name, e.g. `pi-workflows run ci`");
+  if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
+  return { name, ...common };
+}
+
+// A bare `<workflow.yaml>` path (ad-hoc), the default when no subcommand matched.
+function resolveFile(s: FlagState, common: CommonArgs): CliArgs {
+  if (s.workspace) fail("--workspace only applies to `run <name>` / `graph <name>`; pass a file path directly instead");
+  if (s.format) fail("--format only applies to `graph`");
+  if (s.steps) fail("--steps only applies to `graph`");
+  if (s.positionals.length === 0) {
     printUsage();
     process.exit(2);
   }
-  if (positionals.length > 1) fail(`unexpected argument: ${positionals[1]}`);
-  return { file: positionals[0]!, ...common };
+  if (s.positionals.length > 1) fail(`unexpected argument: ${s.positionals[1]}`);
+  return { file: s.positionals[0]!, ...common };
 }
 
 function printUsage(): void {
@@ -181,6 +236,41 @@ function fail(msg: string): never {
   process.exit(2);
 }
 
+/**
+ * Boot the local web UI over the workspace's `.workflows/` and keep the process
+ * alive on the listening server (Ctrl-C closes it + the owned engine).
+ */
+async function runWebServer(args: CliArgs): Promise<void> {
+  const workspace = args.workspace ?? process.cwd();
+  // Load config so agent steps AND the webhook receiver (`webhooks:` /
+  // `datasources:`) work. With no explicit `--config`, prefer the *workspace's*
+  // project config (the UI/webhooks are scoped to that workspace, which may
+  // differ from cwd), falling back to the cwd default otherwise.
+  const wsConfig = join(workspace, PROJECT_CONFIG_FILENAME);
+  const cfgPath = args.config ?? (existsSync(wsConfig) ? wsConfig : undefined);
+  const layers = resolveConfigLayers(cfgPath, { noGlobal: args.noGlobal });
+  const config: PiWorkflowsConfig | undefined = await loadMergedConfig(layers);
+  // Persist run history under the project so it survives restarts (the server is
+  // the sole owner of this dataDir — PGLite is single-process). Gitignore it.
+  const dataDir = join(workspace, ".workflows", "db");
+  const server = await startWebServer({
+    workspace,
+    config,
+    dataDir,
+    ...(args.port !== undefined ? { port: args.port } : {}),
+  });
+  process.stdout.write(`pi-workflows web UI: ${server.url}\n`);
+  process.stdout.write(`  workspace: ${workspace}\n`);
+  process.stdout.write(`  history:   ${dataDir}\n`);
+  process.stdout.write(`  auth token: ${server.token}\n`);
+  process.stdout.write("Press Ctrl-C to stop.\n");
+  const shutdown = () => {
+    void server.close().then(() => process.exit(0));
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
 async function main(): Promise<void> {
   // Dispatch first, then per-command parse. `doctor` has a disjoint flag set
   // (`--json`) from run/graph, so it owns its own parsing; everything else flows
@@ -202,35 +292,7 @@ async function main(): Promise<void> {
   // resolve a single workflow; the UI enumerates every pipeline in the
   // workspace). Branches before the single-workflow resolve below.
   if (args.web) {
-    const workspace = args.workspace ?? process.cwd();
-    // Load config so agent steps AND the webhook receiver (`webhooks:` /
-    // `datasources:`) work. With no explicit `--config`, prefer the *workspace's*
-    // project config (the UI/webhooks are scoped to that workspace, which may
-    // differ from cwd), falling back to the cwd default otherwise.
-    const wsConfig = join(workspace, PROJECT_CONFIG_FILENAME);
-    const cfgPath = args.config ?? (existsSync(wsConfig) ? wsConfig : undefined);
-    const layers = resolveConfigLayers(cfgPath, { noGlobal: args.noGlobal });
-    const config: PiWorkflowsConfig | undefined = await loadMergedConfig(layers);
-    // Persist run history under the project so it survives restarts (the server is
-    // the sole owner of this dataDir — PGLite is single-process). Gitignore it.
-    const dataDir = join(workspace, ".workflows", "db");
-    const server = await startWebServer({
-      workspace,
-      config,
-      dataDir,
-      ...(args.port !== undefined ? { port: args.port } : {}),
-    });
-    process.stdout.write(`pi-workflows web UI: ${server.url}\n`);
-    process.stdout.write(`  workspace: ${workspace}\n`);
-    process.stdout.write(`  history:   ${dataDir}\n`);
-    process.stdout.write(`  auth token: ${server.token}\n`);
-    process.stdout.write("Press Ctrl-C to stop.\n");
-    // Stop cleanly on Ctrl-C (closes the server + the owned engine).
-    const shutdown = () => {
-      void server.close().then(() => process.exit(0));
-    };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+    await runWebServer(args);
     return; // keep the event loop alive on the listening server
   }
 
