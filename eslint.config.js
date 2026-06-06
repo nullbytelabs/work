@@ -28,6 +28,10 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+      // Cyclomatic-complexity guardrail. `warn`, not `error`, so it surfaces
+      // creeping complexity in lint output without failing CI on the existing
+      // branch-heavy spots (arg parsing, the request router, config validation).
+      complexity: ["warn", 20],
     },
   },
 );
