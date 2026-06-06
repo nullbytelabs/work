@@ -118,9 +118,33 @@ function isObject(v: unknown): v is Record<string, unknown> {
  */
 export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
   if (!isObject(raw)) throw new UserFacingError("config must be a JSON object");
-  if (raw.providers !== undefined && !isObject(raw.providers)) throw new UserFacingError("config.providers must be an object");
-  if (raw.models !== undefined && !isObject(raw.models)) throw new UserFacingError("config.models must be an object");
 
+  const config: PiWorkflowsConfig = {
+    providers: parseProviders(raw),
+    models: parseModels(raw),
+  };
+  const defaultModel = parseDefaultModel(raw);
+  if (defaultModel !== undefined) config.defaultModel = defaultModel;
+  // `datasources`/`webhooks` are OPTIONAL — absent is fine. Shape-only validation
+  // here (no cross-refs): a webhook may name a datasource defined in a *different*
+  // layer, so we only reject malformed-in-isolation entries now; cross-refs live
+  // in `validateConfig` post-merge, matching the providers/models philosophy.
+  const datasources = parseDatasources(raw);
+  if (datasources) config.datasources = datasources;
+  const webhooks = parseWebhooks(raw);
+  if (webhooks) config.webhooks = webhooks;
+  return config;
+}
+
+/** Validate an optional string field; throws `<label> must be a string` if present but not a string. */
+function optStr(v: unknown, label: string): string | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== "string") throw new UserFacingError(`${label} must be a string`);
+  return v;
+}
+
+function parseProviders(raw: Record<string, unknown>): Record<string, ProviderConfig> {
+  if (raw.providers !== undefined && !isObject(raw.providers)) throw new UserFacingError("config.providers must be an object");
   const providers: Record<string, ProviderConfig> = {};
   for (const [name, p] of Object.entries(raw.providers ?? {})) {
     if (!isObject(p) || typeof p.baseUrl !== "string" || typeof p.apiKey !== "string") {
@@ -128,7 +152,11 @@ export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
     }
     providers[name] = { baseUrl: p.baseUrl, apiKey: p.apiKey };
   }
+  return providers;
+}
 
+function parseModels(raw: Record<string, unknown>): Record<string, ModelConfig> {
+  if (raw.models !== undefined && !isObject(raw.models)) throw new UserFacingError("config.models must be an object");
   const models: Record<string, ModelConfig> = {};
   for (const [alias, m] of Object.entries(raw.models ?? {})) {
     if (!isObject(m) || typeof m.provider !== "string" || typeof m.model !== "string") {
@@ -139,82 +167,75 @@ export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
     if (typeof m.temperature === "number") mc.temperature = m.temperature;
     models[alias] = mc;
   }
+  return models;
+}
 
-  const config: PiWorkflowsConfig = { providers, models };
-  if (raw.defaultModel !== undefined) {
-    if (typeof raw.defaultModel !== "string") {
-      throw new UserFacingError(`config.defaultModel must name a model in config.models`);
-    }
-    config.defaultModel = raw.defaultModel;
+function parseDefaultModel(raw: Record<string, unknown>): string | undefined {
+  if (raw.defaultModel === undefined) return undefined;
+  if (typeof raw.defaultModel !== "string") {
+    throw new UserFacingError(`config.defaultModel must name a model in config.models`);
   }
+  return raw.defaultModel;
+}
 
-  // `datasources`/`webhooks` are OPTIONAL — absent is fine. Shape-only validation
-  // here (no cross-refs): a webhook may name a datasource defined in a *different*
-  // layer, so we only reject malformed-in-isolation entries now; cross-refs live
-  // in `validateConfig` post-merge, matching the providers/models philosophy.
-  if (raw.datasources !== undefined) {
-    if (!isObject(raw.datasources)) throw new UserFacingError("config.datasources must be an object");
-    const datasources: Record<string, DatasourceConfig> = {};
-    for (const [name, d] of Object.entries(raw.datasources)) {
-      if (!isObject(d) || typeof d.baseUrl !== "string") {
-        throw new UserFacingError(`config.datasources.${name} needs a string baseUrl`);
-      }
-      const dc: DatasourceConfig = { baseUrl: d.baseUrl };
-      if (d.token !== undefined) {
-        if (typeof d.token !== "string") throw new UserFacingError(`config.datasources.${name}.token must be a string`);
-        dc.token = d.token;
-      }
-      if (d.tokenHeader !== undefined) {
-        if (typeof d.tokenHeader !== "string") throw new UserFacingError(`config.datasources.${name}.tokenHeader must be a string`);
-        dc.tokenHeader = d.tokenHeader;
-      }
-      if (d.tokenEnv !== undefined) {
-        if (typeof d.tokenEnv !== "string") throw new UserFacingError(`config.datasources.${name}.tokenEnv must be a string`);
-        dc.tokenEnv = d.tokenEnv;
-      }
-      datasources[name] = dc;
+function parseDatasources(raw: Record<string, unknown>): Record<string, DatasourceConfig> | undefined {
+  if (raw.datasources === undefined) return undefined;
+  if (!isObject(raw.datasources)) throw new UserFacingError("config.datasources must be an object");
+  const datasources: Record<string, DatasourceConfig> = {};
+  for (const [name, d] of Object.entries(raw.datasources)) {
+    if (!isObject(d) || typeof d.baseUrl !== "string") {
+      throw new UserFacingError(`config.datasources.${name} needs a string baseUrl`);
     }
-    config.datasources = datasources;
+    const label = `config.datasources.${name}`;
+    const dc: DatasourceConfig = { baseUrl: d.baseUrl };
+    const token = optStr(d.token, `${label}.token`);
+    if (token !== undefined) dc.token = token;
+    const tokenHeader = optStr(d.tokenHeader, `${label}.tokenHeader`);
+    if (tokenHeader !== undefined) dc.tokenHeader = tokenHeader;
+    const tokenEnv = optStr(d.tokenEnv, `${label}.tokenEnv`);
+    if (tokenEnv !== undefined) dc.tokenEnv = tokenEnv;
+    datasources[name] = dc;
   }
+  return datasources;
+}
 
-  if (raw.webhooks !== undefined) {
-    if (!isObject(raw.webhooks)) throw new UserFacingError("config.webhooks must be an object");
-    const webhooks: Record<string, WebhookConfig> = {};
-    for (const [name, w] of Object.entries(raw.webhooks)) {
-      if (!isObject(w) || typeof w.workflow !== "string") {
-        throw new UserFacingError(`config.webhooks.${name} needs a string workflow`);
-      }
-      const wc: WebhookConfig = { workflow: w.workflow };
-      if (w.enabled !== undefined) {
-        if (typeof w.enabled !== "boolean") throw new UserFacingError(`config.webhooks.${name}.enabled must be a boolean`);
-        wc.enabled = w.enabled;
-      }
-      if (w.auth !== undefined) {
-        if (w.auth !== "hmac-sha256" && w.auth !== "bearer") {
-          throw new UserFacingError(`config.webhooks.${name}.auth must be "hmac-sha256" or "bearer"`);
-        }
-        wc.auth = w.auth;
-      }
-      if (w.secret !== undefined) {
-        if (typeof w.secret !== "string") throw new UserFacingError(`config.webhooks.${name}.secret must be a string`);
-        wc.secret = w.secret;
-      }
-      if (w.signatureHeader !== undefined) {
-        if (typeof w.signatureHeader !== "string") throw new UserFacingError(`config.webhooks.${name}.signatureHeader must be a string`);
-        wc.signatureHeader = w.signatureHeader;
-      }
-      if (w.datasources !== undefined) {
-        if (!Array.isArray(w.datasources) || !w.datasources.every((s) => typeof s === "string")) {
-          throw new UserFacingError(`config.webhooks.${name}.datasources must be an array of strings`);
-        }
-        wc.datasources = w.datasources as string[];
-      }
-      webhooks[name] = wc;
+function parseWebhooks(raw: Record<string, unknown>): Record<string, WebhookConfig> | undefined {
+  if (raw.webhooks === undefined) return undefined;
+  if (!isObject(raw.webhooks)) throw new UserFacingError("config.webhooks must be an object");
+  const webhooks: Record<string, WebhookConfig> = {};
+  for (const [name, w] of Object.entries(raw.webhooks)) {
+    webhooks[name] = parseWebhookEntry(name, w);
+  }
+  return webhooks;
+}
+
+function parseWebhookEntry(name: string, w: unknown): WebhookConfig {
+  if (!isObject(w) || typeof w.workflow !== "string") {
+    throw new UserFacingError(`config.webhooks.${name} needs a string workflow`);
+  }
+  const label = `config.webhooks.${name}`;
+  const wc: WebhookConfig = { workflow: w.workflow };
+  if (w.enabled !== undefined) {
+    if (typeof w.enabled !== "boolean") throw new UserFacingError(`${label}.enabled must be a boolean`);
+    wc.enabled = w.enabled;
+  }
+  if (w.auth !== undefined) {
+    if (w.auth !== "hmac-sha256" && w.auth !== "bearer") {
+      throw new UserFacingError(`${label}.auth must be "hmac-sha256" or "bearer"`);
     }
-    config.webhooks = webhooks;
+    wc.auth = w.auth;
   }
-
-  return config;
+  const secret = optStr(w.secret, `${label}.secret`);
+  if (secret !== undefined) wc.secret = secret;
+  const signatureHeader = optStr(w.signatureHeader, `${label}.signatureHeader`);
+  if (signatureHeader !== undefined) wc.signatureHeader = signatureHeader;
+  if (w.datasources !== undefined) {
+    if (!Array.isArray(w.datasources) || !w.datasources.every((s) => typeof s === "string")) {
+      throw new UserFacingError(`${label}.datasources must be an array of strings`);
+    }
+    wc.datasources = w.datasources as string[];
+  }
+  return wc;
 }
 
 /**
