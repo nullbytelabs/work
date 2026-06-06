@@ -40,7 +40,7 @@ describe("WebPresenter step labels", () => {
     // run-init seeds steps with the stable name AND the human title.
     const init = frames.find((f) => f.event === "run-init");
     assert.ok(init, "run-init emitted");
-    const steps = (init!.data.jobs as Record<string, { steps: { name: string; title: string }[] }>).verify.steps;
+    const steps = (init!.data.jobs as Record<string, { steps: { name: string; title: string }[] }>).verify!.steps;
     assert.deepEqual(
       steps.map((s) => s.name),
       ["verify/0", "verify/1", "verify/2"],

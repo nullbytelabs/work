@@ -9,7 +9,9 @@ export default tseslint.config(
   // `dist/` only matches a top-level dir; `**/dist/` also catches nested build
   // output. `docs-site/` is an isolated VitePress project (own deps, own build
   // + deploy in .github/workflows/docs.yml) — not part of the engine's lint.
-  { ignores: ["node_modules/", "**/dist/", "docs-site/"] },
+  // `.agents/` (vendored skill content) and `.design-review/` are gitignored —
+  // absent in CI, but present locally; ignore them so `npm run lint` matches CI.
+  { ignores: ["node_modules/", "**/dist/", "docs-site/", ".agents/", ".design-review/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
