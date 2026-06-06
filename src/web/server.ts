@@ -462,105 +462,27 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
    */
   async function handleHook(name: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
     // L1 fail-closed gate: the hook must exist, be enabled, and have a usable
-    // secret. A missing/disabled/secret-less hook is invisible (generic 404). The
-    // audit log is scoped to *configured* hooks — an unknown-name hit is NOT
-    // audited (an attacker probing random paths can't spam the log), but once we
-    // have a real `entry` every subsequent fail-closed exit is recorded.
+    // secret. A missing hook is invisible (generic 404) and — being unconfigured —
+    // is NOT audited (an attacker probing random paths can't spam the log). Once
+    // we have a real `entry`, every subsequent fail-closed exit is recorded.
     const entry: WebhookConfig | undefined = opts.config?.webhooks?.[name];
     if (!entry) return notFoundHook(res);
     const sourceIp = req.socket.remoteAddress ?? undefined;
-    // From here on `name`/`entry` are known, so every exit audits a row.
-    if (entry.enabled === false) {
-      recordDelivery({ hook: name, workflow: entry.workflow, result: "disabled", httpStatus: 404, sourceIp });
-      return notFoundHook(res);
-    }
-    const secret = entry.secret ? expandEnv(entry.secret) : "";
-    if (!secret) {
-      // A secret-less configured hook is fail-closed (no auth ⇒ disabled), but
-      // it IS a configured name, so we audit the rejection for the operator.
-      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
-      return notFoundHook(res);
-    }
 
-    // Auth mode: bearer (default) or HMAC-SHA256 over the raw body. Anything else
-    // isn't satisfiable in this build (e.g. Stripe/Slack's timestamped schemes) —
-    // fail closed and warn the operator rather than disclosing the hook.
-    const mode = entry.auth ?? "bearer";
-    if (mode !== "bearer" && mode !== "hmac-sha256") {
-      process.stderr.write(`work: webhook "${name}" uses unsupported auth "${mode}" — rejecting\n`);
-      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
-      return notFoundHook(res);
-    }
+    const gate = checkHookConfig(name, entry, res, sourceIp);
+    if (!gate) return;
+    const { secret, mode } = gate;
 
     // Opt-in gate (defense-in-depth), before buffering any body: the target
     // workflow must itself declare `on: webhook`, so a config entry alone can't
     // make an un-opted workflow remotely triggerable.
-    const layout = await resolveLayout(entry.workflow);
-    if (!layout) {
-      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
-      return notFoundHook(res);
-    }
-    let spec;
-    try {
-      spec = parseWorkflow(await readFile(layout.file, "utf-8"));
-    } catch (err) {
-      recordDelivery({ hook: name, workflow: entry.workflow, result: "bad_request", httpStatus: 400, sourceIp });
-      sendCompileError(res, err);
-      return;
-    }
-    if (!spec.on?.webhook) {
-      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
-      return notFoundHook(res);
-    }
+    const opted = await loadOptedInSpec(name, entry, res, sourceIp);
+    if (!opted) return;
+    const { spec, layout } = opted;
 
-    // Authenticate (L4). Bearer is header-only, so it's checked BEFORE reading the
-    // body. HMAC must hash the RAW bytes the sender signed, so for it we read the
-    // (capped) body first and verify over exactly those bytes — re-serializing
-    // would break the signature (the #1 webhook bug). Either way the body is
-    // parsed only after auth succeeds.
-    let raw: string;
-    if (mode === "bearer") {
-      const presented = bearerToken(req, entry.signatureHeader);
-      if (!presented) {
-        recordDelivery({ hook: name, workflow: entry.workflow, result: "unauthorized", httpStatus: 401, sourceIp });
-        sendJson(res, 401, { error: "missing credentials" });
-        return;
-      }
-      if (!constantTimeEqual(presented, secret)) {
-        recordDelivery({ hook: name, workflow: entry.workflow, result: "forbidden", httpStatus: 403, sourceIp });
-        sendJson(res, 403, { error: "invalid credentials" });
-        return;
-      }
-      try {
-        raw = await readBodyCapped(req, MAX_HOOK_BODY_BYTES);
-      } catch {
-        recordDelivery({ hook: name, workflow: entry.workflow, result: "too_large", httpStatus: 413, sourceIp });
-        sendJson(res, 413, { error: "payload too large" });
-        return;
-      }
-    } else {
-      try {
-        raw = await readBodyCapped(req, MAX_HOOK_BODY_BYTES);
-      } catch {
-        recordDelivery({ hook: name, workflow: entry.workflow, result: "too_large", httpStatus: 413, sourceIp });
-        sendJson(res, 413, { error: "payload too large" });
-        return;
-      }
-      // Default to GitHub's header name; Grafana operators set
-      // `signatureHeader: X-Grafana-Alerting-Signature` (bare hex, no scheme prefix).
-      const header = entry.signatureHeader ?? "X-Hub-Signature-256";
-      const presented = req.headers[header.toLowerCase()];
-      if (typeof presented !== "string" || presented.length === 0) {
-        recordDelivery({ hook: name, workflow: entry.workflow, result: "unauthorized", httpStatus: 401, sourceIp });
-        sendJson(res, 401, { error: "missing signature" });
-        return;
-      }
-      if (!verifyHmacSha256(secret, raw, presented)) {
-        recordDelivery({ hook: name, workflow: entry.workflow, result: "forbidden", httpStatus: 403, sourceIp });
-        sendJson(res, 403, { error: "invalid signature" });
-        return;
-      }
-    }
+    const auth = await authorizeHook({ name, entry, secret, mode, req, res, sourceIp });
+    if (!auth) return;
+    const raw = auth.raw;
 
     // Dedupe an identical re-delivery (retry / repeat send) within the window —
     // return the original run, start nothing. Keyed on the authenticated raw body.
@@ -572,20 +494,8 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       return;
     }
 
-    let event: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(raw);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        recordDelivery({ hook: name, workflow: entry.workflow, result: "bad_request", httpStatus: 400, sourceIp });
-        sendJson(res, 400, { error: "webhook body must be a JSON object" });
-        return;
-      }
-      event = parsed as Record<string, unknown>;
-    } catch {
-      recordDelivery({ hook: name, workflow: entry.workflow, result: "bad_request", httpStatus: 400, sourceIp });
-      sendJson(res, 400, { error: "webhook body must be valid JSON" });
-      return;
-    }
+    const event = parseEventBody(name, entry, raw, res, sourceIp);
+    if (!event) return;
 
     // Bake the payload into the plan (`${{ event.* }}`) and dispatch async.
     let plan;
@@ -598,10 +508,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     }
     const result = runManager.dispatch({
       name: entry.workflow,
-      layout: {
-        ...(layout.workspaceSource !== undefined ? { workspaceSource: layout.workspaceSource } : {}),
-        ...(layout.workflowDir !== undefined ? { workflowDir: layout.workflowDir } : {}),
-      },
+      layout: layoutFields(layout),
       plan,
       trigger: "webhook",
       // Scope this run's datasource egress to exactly what the hook declares, so
@@ -622,6 +529,165 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     // L7 ack-fast: the sender gets the run id immediately; the UI can watch it
     // live over SSE via the returned `eventsUrl`.
     sendJson(res, 202, { runId: result.record.id, eventsUrl: `/api/runs/${result.record.id}/events` });
+  }
+
+  /**
+   * Config gate for a known hook: enabled + a usable secret + a supported auth
+   * mode (bearer/HMAC). Each failure audits a row and sends a generic 404; returns
+   * the resolved `{ secret, mode }` only when the hook is fully usable.
+   */
+  function checkHookConfig(
+    name: string,
+    entry: WebhookConfig,
+    res: ServerResponse,
+    sourceIp: string | undefined,
+  ): { secret: string; mode: "bearer" | "hmac-sha256" } | null {
+    if (entry.enabled === false) {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "disabled", httpStatus: 404, sourceIp });
+      notFoundHook(res);
+      return null;
+    }
+    const secret = entry.secret ? expandEnv(entry.secret) : "";
+    if (!secret) {
+      // A secret-less configured hook is fail-closed (no auth ⇒ disabled), but
+      // it IS a configured name, so we audit the rejection for the operator.
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
+      notFoundHook(res);
+      return null;
+    }
+    // Auth mode: bearer (default) or HMAC-SHA256 over the raw body. Anything else
+    // isn't satisfiable in this build (e.g. Stripe/Slack's timestamped schemes) —
+    // fail closed and warn the operator rather than disclosing the hook.
+    const mode = entry.auth ?? "bearer";
+    if (mode !== "bearer" && mode !== "hmac-sha256") {
+      process.stderr.write(`work: webhook "${name}" uses unsupported auth "${mode}" — rejecting\n`);
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
+      notFoundHook(res);
+      return null;
+    }
+    return { secret, mode };
+  }
+
+  /** Resolve, read, and parse the target workflow; it must declare `on: webhook`. */
+  async function loadOptedInSpec(
+    name: string,
+    entry: WebhookConfig,
+    res: ServerResponse,
+    sourceIp: string | undefined,
+  ): Promise<{ spec: ReturnType<typeof parseWorkflow>; layout: NonNullable<Awaited<ReturnType<typeof resolveLayout>>> } | null> {
+    const layout = await resolveLayout(entry.workflow);
+    if (!layout) {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
+      notFoundHook(res);
+      return null;
+    }
+    let spec;
+    try {
+      spec = parseWorkflow(await readFile(layout.file, "utf-8"));
+    } catch (err) {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "bad_request", httpStatus: 400, sourceIp });
+      sendCompileError(res, err);
+      return null;
+    }
+    if (!spec.on?.webhook) {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "not_opted_in", httpStatus: 404, sourceIp });
+      notFoundHook(res);
+      return null;
+    }
+    return { spec, layout };
+  }
+
+  /**
+   * Authenticate (L4) and return the raw body. Bearer is header-only, so it's
+   * checked BEFORE reading the body. HMAC must hash the RAW bytes the sender
+   * signed, so we read the (capped) body first and verify over exactly those
+   * bytes — re-serializing would break the signature (the #1 webhook bug). Each
+   * failure audits a row + sends the response; returns the raw body on success.
+   */
+  async function authorizeHook(a: {
+    name: string;
+    entry: WebhookConfig;
+    secret: string;
+    mode: "bearer" | "hmac-sha256";
+    req: IncomingMessage;
+    res: ServerResponse;
+    sourceIp: string | undefined;
+  }): Promise<{ raw: string } | null> {
+    const { name, entry, secret, mode, req, res, sourceIp } = a;
+    if (mode === "bearer") {
+      const presented = bearerToken(req, entry.signatureHeader);
+      if (!presented) {
+        recordDelivery({ hook: name, workflow: entry.workflow, result: "unauthorized", httpStatus: 401, sourceIp });
+        sendJson(res, 401, { error: "missing credentials" });
+        return null;
+      }
+      if (!constantTimeEqual(presented, secret)) {
+        recordDelivery({ hook: name, workflow: entry.workflow, result: "forbidden", httpStatus: 403, sourceIp });
+        sendJson(res, 403, { error: "invalid credentials" });
+        return null;
+      }
+      const raw = await readCappedOr413(name, entry, req, res, sourceIp);
+      return raw === null ? null : { raw };
+    }
+
+    const raw = await readCappedOr413(name, entry, req, res, sourceIp);
+    if (raw === null) return null;
+    // Default to GitHub's header name; Grafana operators set
+    // `signatureHeader: X-Grafana-Alerting-Signature` (bare hex, no scheme prefix).
+    const header = entry.signatureHeader ?? "X-Hub-Signature-256";
+    const presented = req.headers[header.toLowerCase()];
+    if (typeof presented !== "string" || presented.length === 0) {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "unauthorized", httpStatus: 401, sourceIp });
+      sendJson(res, 401, { error: "missing signature" });
+      return null;
+    }
+    if (!verifyHmacSha256(secret, raw, presented)) {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "forbidden", httpStatus: 403, sourceIp });
+      sendJson(res, 403, { error: "invalid signature" });
+      return null;
+    }
+    return { raw };
+  }
+
+  /** Read the capped body, or audit `too_large` + send 413 and return null on overflow. */
+  async function readCappedOr413(
+    name: string,
+    entry: WebhookConfig,
+    req: IncomingMessage,
+    res: ServerResponse,
+    sourceIp: string | undefined,
+  ): Promise<string | null> {
+    try {
+      return await readBodyCapped(req, MAX_HOOK_BODY_BYTES);
+    } catch {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "too_large", httpStatus: 413, sourceIp });
+      sendJson(res, 413, { error: "payload too large" });
+      return null;
+    }
+  }
+
+  /** Parse the authenticated raw body to a JSON object, or audit `bad_request` + respond and return null. */
+  function parseEventBody(
+    name: string,
+    entry: WebhookConfig,
+    raw: string,
+    res: ServerResponse,
+    sourceIp: string | undefined,
+  ): Record<string, unknown> | null {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "bad_request", httpStatus: 400, sourceIp });
+      sendJson(res, 400, { error: "webhook body must be valid JSON" });
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      recordDelivery({ hook: name, workflow: entry.workflow, result: "bad_request", httpStatus: 400, sourceIp });
+      sendJson(res, 400, { error: "webhook body must be a JSON object" });
+      return null;
+    }
+    return parsed as Record<string, unknown>;
   }
 
   /**
@@ -669,10 +735,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     const sourceIp = req.socket.remoteAddress ?? undefined;
     const result = runManager.dispatch({
       name: entry.workflow,
-      layout: {
-        ...(layout.workspaceSource !== undefined ? { workspaceSource: layout.workspaceSource } : {}),
-        ...(layout.workflowDir !== undefined ? { workflowDir: layout.workflowDir } : {}),
-      },
+      layout: layoutFields(layout),
       plan,
       trigger: "webhook",
       ...(entry.datasources ? { datasources: entry.datasources } : {}),
