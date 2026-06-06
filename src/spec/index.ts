@@ -6,6 +6,7 @@ export type {
   JobSpec,
   WorkflowSpec,
   StrategySpec,
+  MachineSpec,
   MatrixSpec,
   MatrixValue,
   OnSpec,

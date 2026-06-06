@@ -325,7 +325,7 @@ async function provisionTarget(
     // the model API). The composition root supplies this per job; the core stays
     // agent-agnostic — it just forwards the allowlist/secrets to the target.
     const network = deps.resolveJobNetwork?.(job);
-    const target = deps.makeTarget(job.runsOn, { workdir, ...(network ?? {}) });
+    const target = deps.makeTarget(job.runsOn, { workdir, machine: job.machine, ...(network ?? {}) });
     await target.provision();
     return { target };
   } catch (err) {

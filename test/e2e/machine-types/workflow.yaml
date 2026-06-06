@@ -1,0 +1,36 @@
+# machine types
+# description: per-job machine sizing. one job picks a named type from the
+#              built-in catalog (`machine: small`), another specifies custom
+#              cpu/memory inline. each asserts the sizing it was given actually
+#              took effect inside the gondolin micro-VM (read from /proc), proving
+#              cpus/memory are wired through to QEMU.
+# usage: ./pi-workflows ./test/e2e/machine-types/workflow.yaml
+---
+name: machine-types
+
+jobs:
+  named-small:
+    runs-on: gondolin
+    # `small` = 2 vCPU / 2G RAM (built-in catalog).
+    machine: small
+    steps:
+      - name: assert-machine
+        run: |
+          cpus=$(grep -c ^processor /proc/cpuinfo)
+          mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+          echo "named-small booted with ${cpus} vCPU(s), MemTotal=${mem_kb} kB"
+          test "$cpus" -eq 2 || { echo "expected 2 vCPUs, got ${cpus}" >&2; exit 1; }
+          # 2G RAM, minus kernel/firmware reservation — assert it's well under 3G.
+          test "$mem_kb" -lt 3145728 || { echo "expected ~2G RAM, got ${mem_kb} kB" >&2; exit 1; }
+
+  custom:
+    runs-on: gondolin
+    # Inline custom sizing — the unset dimension (memory) inherits the default type.
+    machine:
+      cpus: 1
+    steps:
+      - name: assert-machine
+        run: |
+          cpus=$(grep -c ^processor /proc/cpuinfo)
+          echo "custom booted with ${cpus} vCPU(s)"
+          test "$cpus" -eq 1 || { echo "expected 1 vCPU, got ${cpus}" >&2; exit 1; }

@@ -6,7 +6,7 @@
  * parser does NOT execute anything — it only produces a validated spec object.
  */
 import { parse as parseYaml } from "yaml";
-import type { EnvMap, InputSpec, JobSpec, MatrixSpec, MatrixValue, OnSpec, StepSpec, StrategySpec, WebhookTrigger, WorkflowSpec } from "./types.ts";
+import type { EnvMap, InputSpec, JobSpec, MachineSpec, MatrixSpec, MatrixValue, OnSpec, StepSpec, StrategySpec, WebhookTrigger, WorkflowSpec } from "./types.ts";
 
 /** Thrown when a workflow file is structurally invalid. */
 export class WorkflowParseError extends Error {
@@ -282,6 +282,29 @@ function parseStep(raw: unknown, path: string): StepSpec {
   return step;
 }
 
+/**
+ * Parse `machine:` — a string (named type) or a mapping of cpus/memory. This
+ * validates only the *shape*; the compiler resolves named types and checks value
+ * ranges/formats against the catalog.
+ */
+function parseMachine(raw: unknown, path: string): MachineSpec | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw === "string") return raw;
+  if (!isPlainObject(raw)) {
+    throw new WorkflowParseError("machine must be a string (named type) or a mapping (cpus/memory)", path);
+  }
+  const spec: { cpus?: number; memory?: string } = {};
+  if (raw.cpus !== undefined) {
+    if (typeof raw.cpus !== "number") throw new WorkflowParseError("machine.cpus must be a number", `${path}.cpus`);
+    spec.cpus = raw.cpus;
+  }
+  if (raw.memory !== undefined) {
+    if (typeof raw.memory !== "string") throw new WorkflowParseError('machine.memory must be a string (e.g. "8G")', `${path}.memory`);
+    spec.memory = raw.memory;
+  }
+  return spec;
+}
+
 function parseJob(raw: unknown, path: string): JobSpec {
   if (!isPlainObject(raw)) throw new WorkflowParseError("job must be a mapping", path);
 
@@ -306,6 +329,9 @@ function parseJob(raw: unknown, path: string): JobSpec {
     }
     job.runsOn = runsOn;
   }
+
+  const machine = parseMachine(raw.machine, `${path}.machine`);
+  if (machine !== undefined) job.machine = machine;
 
   if (raw.needs !== undefined) {
     const needs = Array.isArray(raw.needs) ? raw.needs : [raw.needs];

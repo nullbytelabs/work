@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { ExecutionPlan, PlannedJob } from "../src/compiler/index.ts";
+import { MACHINE_TYPES } from "../src/compiler/index.ts";
 import { levelize } from "../src/tui/levels.ts";
 import { RunStore } from "../src/tui/store.ts";
 import { renderBoard, truncVisible } from "../src/tui/render.ts";
@@ -12,6 +13,7 @@ function job(id: string, needs: string[], steps = 1): PlannedJob {
   return {
     id,
     runsOn: "gondolin",
+    machine: MACHINE_TYPES.medium!,
     needs,
     steps: Array.from({ length: steps }, (_, i) => ({ name: `${id}/${i}`, env: {} })),
   };

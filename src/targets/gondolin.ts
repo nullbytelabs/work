@@ -10,22 +10,22 @@
  * unless a workflow actually declares `runs-on: gondolin`.
  *
  * Mapping to the documented SDK (docs/gondolin-secure-execution.md):
- *   provision -> VM.create({ env, vfs, httpHooks? })
+ *   provision -> VM.create({ memory, cpus, env, vfs, httpHooks? })
  *   run       -> vm.exec(["/bin/sh","-lc",cmd], { cwd, env, signal })
  *   dispose   -> vm.close()   (REQUIRED, or the QEMU process leaks)
  */
 import { mkdir } from "node:fs/promises";
 import { UserFacingError } from "../errors.ts";
+import { MACHINE_TYPES, DEFAULT_MACHINE, type ResolvedMachine } from "../compiler/index.ts";
 import type { ExecutionTarget, RunOptions, RunResult } from "./types.ts";
 
 /** The guest path the per-job working directory is mounted at. */
 const GUEST_WORKSPACE = "/workspace";
 
-// Gondolin's own default is "1G", which is too tight for some toolchains: knip's
-// parser (oxc) eagerly allocates a single ~4 GiB ArrayBuffer, so it OOMs at 1G
-// while lint/typecheck are fine. We boot every job at 6G so the common dev checks
-// run in-VM. (qemu memory syntax.)
-const GUEST_MEMORY = "6G";
+// Applied when a caller provisions a VM without an explicit machine (e.g. a
+// direct makeTarget call). Compiled jobs always carry a resolved machine, so in
+// the normal run path this fallback is never hit.
+const DEFAULT_GONDOLIN_MACHINE: ResolvedMachine = MACHINE_TYPES[DEFAULT_MACHINE]!;
 
 /**
  * Minimal structural shapes for the bits of the Gondolin SDK we use. We model
@@ -48,6 +48,8 @@ interface GVM {
 export interface GondolinTargetConfig {
   /** Host directory mounted read-write at /workspace inside the guest. */
   workdir: string;
+  /** Machine sizing (cpus/memory) for the VM; defaults to the catalog default. */
+  machine?: ResolvedMachine;
   /** Non-secret env applied to the VM (steps also pass their own per-run env). */
   env?: Record<string, string>;
   /** Outbound HTTP allowlist (deny-by-default otherwise). */
@@ -103,8 +105,10 @@ export class GondolinTarget implements ExecutionTarget {
 
     await mkdir(this.cfg.workdir, { recursive: true });
 
+    const machine = this.cfg.machine ?? DEFAULT_GONDOLIN_MACHINE;
     const createOpts: Record<string, unknown> = {
-      memory: GUEST_MEMORY,
+      memory: machine.memory,
+      cpus: machine.cpus,
       vfs: { mounts: { [GUEST_WORKSPACE]: new RealFSProvider(this.cfg.workdir) } },
     };
 

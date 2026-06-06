@@ -23,6 +23,7 @@ export class WorkflowCompileError extends Error {
 import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
 import { interpolate } from "./expr.ts";
 import { expandMatrix, cellId, cellLabel, type MatrixCell } from "./matrix.ts";
+import { resolveMachine } from "./machines.ts";
 
 /** Options for compiling a workflow. */
 export interface CompileOptions {
@@ -127,6 +128,7 @@ function compileLeg(
   const planned: PlannedJob = {
     id: legId,
     runsOn: job.runsOn ?? DEFAULT_RUNS_ON,
+    machine: resolveMachine(job.machine, legId),
     needs,
     steps: job.steps.map((s, i) => compileStep(s, legId, i, jobEnv, inputs, matrix, event)),
   };

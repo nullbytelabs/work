@@ -48,6 +48,21 @@ jobs:
     assert.equal(spec.jobs["a"]!.runsOn, "gondolin");
   });
 
+  it("parses machine as a named string or a custom mapping", () => {
+    const spec = parseWorkflow(`
+name: w
+jobs:
+  named:
+    machine: large
+    steps: [{ run: "true" }]
+  custom:
+    machine: { cpus: 4, memory: 8G }
+    steps: [{ run: "true" }]
+`);
+    assert.equal(spec.jobs["named"]!.machine, "large");
+    assert.deepEqual(spec.jobs["custom"]!.machine, { cpus: 4, memory: "8G" });
+  });
+
   it("parses inputs (shorthand null + full declaration)", () => {
     const spec = parseWorkflow(`
 name: w
@@ -133,6 +148,12 @@ describe("parseWorkflow — validation", () => {
     const e = err(`name: w\njobs:\n  a:\n    needs: ghost\n    steps: [{ run: x }]`);
     assert.equal(e.path, "jobs.a.needs");
     assert.match(e.message, /ghost/);
+  });
+
+  it("rejects machine with non-numeric cpus", () => {
+    const e = err(`name: w\njobs:\n  a:\n    machine: { cpus: "two" }\n    steps: [{ run: x }]`);
+    assert.equal(e.path, "jobs.a.machine.cpus");
+    assert.match(e.message, /must be a number/);
   });
 
   it("rejects a top-level runs-on (it is defined per job)", () => {

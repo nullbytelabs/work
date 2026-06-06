@@ -78,10 +78,28 @@ export interface StrategySpec {
   matrix?: MatrixSpec;
 }
 
+/**
+ * A job's machine sizing (`machine:`) — either a **named type** from the
+ * built-in catalog (`machine: large`) or an **inline custom spec**
+ * (`machine: { cpus: 8, memory: 16G }`). A custom spec may set either dimension;
+ * an unset one inherits from the default type. The compiler resolves either form
+ * against the catalog in `src/compiler/machines.ts`.
+ */
+export type MachineSpec =
+  | string
+  | {
+      /** vCPU count. */
+      cpus?: number;
+      /** RAM in qemu syntax (e.g. "8G"). */
+      memory?: string;
+    };
+
 /** A job: an isolated execution unit containing ordered steps. */
 export interface JobSpec {
   /** Where the job runs. Default applied by the compiler (`DEFAULT_RUNS_ON`, "gondolin"). */
   runsOn?: string;
+  /** Machine sizing (named type or inline cpu/memory). Resolved by the compiler against the built-in catalog. */
+  machine?: MachineSpec;
   /** IDs of jobs that must complete before this one (the `needs` DAG). */
   needs?: string[];
   /** Conditional guard. Evaluated at runtime; a false result skips the job. */

@@ -12,6 +12,8 @@
  * runtime swappable.
  */
 
+import type { ResolvedMachine } from "./machines.ts";
+
 /** A fully-resolved step ready for execution. */
 export interface PlannedStep {
   /** Stable, unique-within-job name: `<jobId>/<stepId-or-index>`. */
@@ -40,6 +42,8 @@ export interface PlannedJob {
   title?: string;
   /** Resolved execution target key (currently always "gondolin"). */
   runsOn: string;
+  /** Resolved machine sizing (cpus/memory) for the job's micro-VM. */
+  machine: ResolvedMachine;
   /** Resolved dependencies (job ids; matrix bases are already expanded to legs). */
   needs: string[];
   /** Raw conditional guard, evaluated at runtime; a false result skips the job. */

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parseWorkflow } from "../src/spec/index.ts";
-import { compile, DEFAULT_RUNS_ON, WorkflowCompileError } from "../src/compiler/index.ts";
+import { compile, DEFAULT_RUNS_ON, MACHINE_TYPES, WorkflowCompileError } from "../src/compiler/index.ts";
 
 function plan(yaml: string) {
   return compile(parseWorkflow(yaml));
@@ -94,6 +94,45 @@ jobs:
     steps: [{ run: "true" }]
 `);
     assert.equal((p.warnings ?? []).length, 1);
+  });
+
+  it("defaults to the medium machine when none is declared", () => {
+    const p = plan(`name: w\njobs:\n  a:\n    steps: [{ run: "true" }]`);
+    assert.deepEqual(p.jobs["a"]!.machine, MACHINE_TYPES.medium);
+  });
+
+  it("resolves a named machine type from the catalog", () => {
+    const p = plan(`name: w\njobs:\n  a:\n    machine: large\n    steps: [{ run: "true" }]`);
+    assert.deepEqual(p.jobs["a"]!.machine, MACHINE_TYPES.large);
+  });
+
+  it("resolves a custom machine, inheriting the unset dimension from the default", () => {
+    const p = plan(`
+name: w
+jobs:
+  a:
+    machine: { cpus: 8 }
+    steps: [{ run: "true" }]
+`);
+    assert.deepEqual(p.jobs["a"]!.machine, { cpus: 8, memory: MACHINE_TYPES.medium!.memory });
+  });
+
+  it("rejects an unknown named machine type", () => {
+    assert.throws(
+      () => plan(`name: w\njobs:\n  a:\n    machine: ludicrous\n    steps: [{ run: "true" }]`),
+      (e) => e instanceof WorkflowCompileError && /unknown machine type "ludicrous"/.test(e.message),
+    );
+  });
+
+  it("rejects a non-positive cpu count and a malformed size", () => {
+    assert.throws(
+      () => plan(`name: w\njobs:\n  a:\n    machine: { cpus: 0 }\n    steps: [{ run: "true" }]`),
+      (e) => e instanceof WorkflowCompileError && /machine\.cpus/.test(e.message),
+    );
+    assert.throws(
+      () => plan(`name: w\njobs:\n  a:\n    machine: { memory: "lots" }\n    steps: [{ run: "true" }]`),
+      (e) => e instanceof WorkflowCompileError && /machine\.memory/.test(e.message),
+    );
   });
 
   it("names steps <job>/<index> by default and <job>/<id> when id is set", () => {

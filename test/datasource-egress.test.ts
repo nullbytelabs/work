@@ -10,10 +10,11 @@ import { makeDatasourceEgressResolver } from "../src/egress/datasource.ts";
 import { composeResolvers, type ComposedJobNetwork } from "../src/egress/compose.ts";
 import { UserFacingError } from "../src/errors.ts";
 import type { PlannedJob } from "../src/compiler/index.ts";
+import { MACHINE_TYPES } from "../src/compiler/index.ts";
 
 /** A minimal PlannedJob — the datasource resolver ignores step content. */
 function job(): PlannedJob {
-  return { id: "j", runsOn: "gondolin", needs: [], steps: [] };
+  return { id: "j", runsOn: "gondolin", machine: MACHINE_TYPES.medium!, needs: [], steps: [] };
 }
 
 const withDs = {

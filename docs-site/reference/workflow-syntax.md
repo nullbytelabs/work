@@ -65,6 +65,7 @@ webhook-triggered run reads the request body via the [`event` context](#expressi
 jobs:
   build:
     runs-on: gondolin
+    machine: large
     needs: []
     if: ${{ inputs.run_build }}
     strategy: { matrix: … }
@@ -76,12 +77,48 @@ jobs:
 | Key | Type | Notes |
 |---|---|---|
 | `runs-on` | string | Where the job runs. Only `gondolin` is supported, and it's the default. Per-job only — not valid at the workflow level. `runsOn` is also accepted. |
+| `machine` | string \| map | Micro-VM sizing. A named type from the catalog, or an inline `{ cpus, memory }`. See [Machine types](#machine-types). Defaults to `medium`. |
 | `needs` | string \| string[] | Job ids that must succeed first. Independent jobs run in parallel. |
 | `if` / `when` | string | Conditional guard; a false result skips the job. Use one, not both. See [Conditionals](#conditionals). |
 | `strategy.matrix` | map | Fan-out into one leg per cell (see [Matrix](#matrix)). |
 | `env` | `map<string,string>` | Job-level env, layered over workflow env. |
 | `outputs` | `map<string,string>` | Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. |
 | `steps` | list | **Required.** The ordered steps (see [Steps](#steps)). |
+
+## Machine types
+
+Each job runs in its own gondolin micro-VM. `machine:` sizes that VM — its vCPU
+count and RAM. Pick a **named type** from the built-in catalog, or specify
+dimensions **inline**. Omitting `machine:` uses `medium`.
+
+```yaml
+jobs:
+  lint:
+    machine: small          # a named type
+    steps: [ … ]
+  build:
+    machine:                # custom — the unset dimension inherits from the default
+      cpus: 8
+      memory: 16G
+    steps: [ … ]
+```
+
+Built-in catalog:
+
+| Name | vCPU | Memory |
+|---|---|---|
+| `small` | 2 | 2G |
+| `medium` *(default)* | 2 | 6G |
+| `large` | 4 | 12G |
+| `xlarge` | 8 | 24G |
+
+`memory` is a size: a positive integer with an optional `K`/`M`/`G`/`T` suffix
+(e.g. `16G`). A custom spec may set either `cpus` or `memory`; whatever you leave
+out is taken from `medium`.
+
+> Disk size is not yet configurable — the gondolin guest image lacks the tooling
+> (`resize2fs`) to grow the root filesystem at boot, so jobs use the image's
+> default disk. It's planned once a custom guest image ships.
 
 ## Steps
 

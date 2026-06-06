@@ -13,12 +13,15 @@
  * Construction is cheap and side-effect-free — GondolinTarget does not import or
  * boot anything until `provision()` is called.
  */
+import type { ResolvedMachine } from "../compiler/index.ts";
 import type { ExecutionTarget } from "./types.ts";
 import { GondolinTarget } from "./gondolin.ts";
 
 export interface TargetContext {
   /** Per-job working directory. */
   workdir: string;
+  /** Resolved machine sizing (cpus/memory). Targets that ignore it fall back to a default. */
+  machine?: ResolvedMachine;
   /** Non-secret env to apply to the target environment. */
   env?: Record<string, string>;
   /** Outbound HTTP allowlist for sandbox targets (deny-by-default otherwise). */
@@ -36,6 +39,7 @@ export const makeTarget: TargetFactory = (runsOn, ctx) => {
     case "gondolin":
       return new GondolinTarget({
         workdir: ctx.workdir,
+        ...(ctx.machine ? { machine: ctx.machine } : {}),
         ...(ctx.env ? { env: ctx.env } : {}),
         ...(ctx.allowedHosts ? { allowedHosts: ctx.allowedHosts } : {}),
         ...(ctx.secrets ? { secrets: ctx.secrets } : {}),

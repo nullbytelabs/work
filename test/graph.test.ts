@@ -1,12 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { ExecutionPlan, PlannedJob } from "../src/compiler/index.ts";
+import { MACHINE_TYPES } from "../src/compiler/index.ts";
 import { emitGraph, isGraphFormat, GRAPH_FORMATS } from "../src/graph/index.ts";
 
 function job(id: string, needs: string[], steps = 1): PlannedJob {
   return {
     id,
     runsOn: "gondolin",
+    machine: MACHINE_TYPES.medium!,
     needs,
     steps: Array.from({ length: steps }, (_, i) => ({ name: `${id}/${i}`, env: {} })),
   };
@@ -82,6 +84,7 @@ function withSteps(): ExecutionPlan {
       verify: {
         id: "verify",
         runsOn: "gondolin",
+        machine: MACHINE_TYPES.medium!,
         needs: [],
         steps: [
           { name: "verify/0", title: "install dependencies", env: {}, run: "npm i" },
@@ -91,6 +94,7 @@ function withSteps(): ExecutionPlan {
       review: {
         id: "review",
         runsOn: "gondolin",
+        machine: MACHINE_TYPES.medium!,
         needs: ["verify"],
         steps: [{ name: "review/summary", id: "summary", title: "review with agent", env: {}, uses: "agent/summarize" }],
       },
