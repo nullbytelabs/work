@@ -43,7 +43,7 @@ export interface Check {
 }
 
 /** Outcome of spawning a binary with `--version`. */
-export interface SpawnResult {
+interface SpawnResult {
   /** Process spawned and exited 0. */
   ok: boolean;
   /** Spawn error code (e.g. "ENOENT" when the binary is missing), else null. */

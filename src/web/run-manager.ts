@@ -52,7 +52,7 @@ export interface RunRecord {
 }
 
 /** The workflow's checkout layout, forwarded into `startRun`. */
-export interface DispatchLayout {
+interface DispatchLayout {
   workspaceSource?: string;
   workflowDir?: string;
 }

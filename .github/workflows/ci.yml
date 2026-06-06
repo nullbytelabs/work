@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   lint-and-typecheck:
-    name: lint + typecheck
+    name: lint + typecheck + knip
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -25,6 +25,7 @@ jobs:
       - run: npm ci --omit=optional
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm run knip
 
   test:
     name: test (full suite, incl. gondolin)

@@ -29,6 +29,8 @@
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "knip": "knip",
+    "check": "npm run lint && npm run typecheck && npm run knip",
     "build": "node scripts/build.mjs",
     "prepack": "npm run build"
   },
@@ -50,6 +52,7 @@
     "esbuild": "^0.25.0",
     "eslint": "^10.4.1",
     "globals": "^16.0.0",
+    "knip": "6.16.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.60.0"
   }
