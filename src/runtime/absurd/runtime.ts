@@ -435,6 +435,25 @@ async function runSteps(
   return { steps, stepOutputs, failed };
 }
 
+/**
+ * Resolve a virtual (reusable-call join) job: it boots no VM and runs no steps,
+ * only aggregating its outputs from its `needs` (the inlined sub-DAG's results),
+ * so `needs.<call>.outputs.*` resolves transparently for downstream jobs.
+ */
+function runVirtualJob(job: PlannedJob, deps: JobDeps, needs: NeedsContext): JobResult {
+  let outputs: Record<string, string> | undefined;
+  if (job.outputs) {
+    outputs = {};
+    for (const [k, expr] of Object.entries(job.outputs)) {
+      outputs[k] = interpolate(expr, { needs, steps: {} });
+    }
+  }
+  const jobResult: JobResult = { id: job.id, status: "success", steps: [] };
+  if (outputs) jobResult.outputs = outputs;
+  deps.ctx.hooks?.onJobEnd?.(job.id, jobResult);
+  return jobResult;
+}
+
 async function runJobInTask(
   job: PlannedJob,
   deps: JobDeps,
@@ -443,6 +462,10 @@ async function runJobInTask(
 ): Promise<JobResult> {
   const { ctx } = deps;
   ctx.hooks?.onJobStart?.(job.id);
+
+  // A virtual job (a reusable-call join node) boots no VM and runs no steps.
+  if (job.virtual) return runVirtualJob(job, deps, needs);
+
   const workdir = join(ctx.workRoot, job.id);
 
   await stageWorkspace(ctx, workdir);

@@ -9,6 +9,8 @@
 ---
 name: ci
 
+on: webhook
+
 jobs:
   lint:
     runs-on: gondolin

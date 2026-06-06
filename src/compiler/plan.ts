@@ -53,6 +53,15 @@ export interface PlannedJob {
   steps: PlannedStep[];
   /** Job outputs: name -> expression (resolved at runtime from step outputs). */
   outputs?: Record<string, string>;
+  /**
+   * A synthesized **virtual** job: it boots no VM and runs no steps (`steps` is
+   * `[]`). The reusable-workflow compiler emits one as the *join node* for a
+   * `uses:` call — it only aggregates the inlined sub-DAG's outputs from its
+   * `needs` so `needs.<callJob>.outputs.*` resolves transparently downstream. The
+   * runtime skips provision/staging for it and computes `outputs` from `needs`.
+   * `runsOn`/`machine` are present to satisfy the type but never used.
+   */
+  virtual?: boolean;
 }
 
 /** The whole compiled workflow. */

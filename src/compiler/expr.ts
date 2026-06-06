@@ -42,6 +42,30 @@ export function interpolate(template: string, ctx: ExprContext): string {
 }
 
 /**
+ * The trimmed bodies of every `${{ … }}` span in a template. Used by the reusable
+ * compiler to inspect `with:` expressions for runtime roots (`needs`/`steps`),
+ * which are illegal in a compile-time-bound `with:`. A fresh regex per call keeps
+ * the shared global `EXPR` free of `lastIndex` state.
+ */
+export function expressionBodies(template: string): string[] {
+  const out: string[] = [];
+  const re = new RegExp(EXPR.source, EXPR.flags);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(template)) !== null) out.push(m[1]!.trim());
+  return out;
+}
+
+/**
+ * Replace each `${{ body }}` span via `fn`, which receives the trimmed body and
+ * returns the **full replacement text** (including a new `${{ }}` if desired).
+ * Used to rewrite a callee's `workflow_call.outputs` (`jobs.<id>.outputs.<k>`)
+ * onto the call's virtual join node (`needs.<ns>::<id>.outputs.<k>`).
+ */
+export function replaceExpressions(template: string, fn: (body: string) => string): string {
+  return template.replace(new RegExp(EXPR.source, EXPR.flags), (_whole, raw: string) => fn(raw.trim()));
+}
+
+/**
  * A single context resolver: returns the resolved string for an expression it
  * recognizes, or `null` if the expression isn't its pattern (so the next
  * resolver gets a turn). A recognized-but-deferred expression returns `whole`

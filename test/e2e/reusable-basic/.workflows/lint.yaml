@@ -1,0 +1,13 @@
+# A reusable callee with no inputs/outputs. `on: workflow_call` makes it callable
+# by `staging`; it also runs fine standalone (the examples harness runs it both
+# ways).
+name: lint
+on: workflow_call
+
+jobs:
+  check:
+    runs-on: gondolin
+    steps:
+      - name: lint
+        run: |
+          echo "lint: 0 problems"

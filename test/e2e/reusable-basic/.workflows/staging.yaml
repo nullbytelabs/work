@@ -1,0 +1,21 @@
+# A reusable-workflow caller: `staging` composes two smaller workflows (lint +
+# build) as units via job-level `uses:`, then a real `report` job consumes the
+# build's output. The compiler inlines each callee's jobs (namespaced) plus a
+# virtual join, so this runs as one flat DAG over one checkout.
+name: staging
+
+jobs:
+  lint:
+    uses: workflow/lint
+
+  build:
+    needs: [lint]
+    uses: workflow/build
+
+  report:
+    needs: [build]
+    runs-on: gondolin
+    steps:
+      - name: report
+        # `build` is the call's virtual join; its declared output threads through.
+        run: echo "shipping version=${{ needs.build.outputs.version }}"

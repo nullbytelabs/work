@@ -11,5 +11,6 @@ export type {
   MatrixValue,
   OnSpec,
   WebhookTrigger,
+  WorkflowCallSpec,
 } from "./types.ts";
 export { parseWorkflow, WorkflowParseError } from "./parse.ts";

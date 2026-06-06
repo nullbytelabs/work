@@ -1,0 +1,18 @@
+# A reusable callee that publishes an output. The mapping form of
+# `on: workflow_call` curates the flat output surface exposed to a caller; the
+# compiler rewrites `jobs.compile.outputs.version` onto the call's virtual join.
+name: build
+on:
+  workflow_call:
+    outputs:
+      version: ${{ jobs.compile.outputs.version }}
+
+jobs:
+  compile:
+    runs-on: gondolin
+    steps:
+      - id: meta
+        name: compute version
+        run: echo "version=1.0.0" >> "$WORK_OUTPUT"
+    outputs:
+      version: ${{ steps.meta.outputs.version }}

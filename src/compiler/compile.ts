@@ -8,7 +8,7 @@
  *  - expand `strategy.matrix` into one independent job per cell
  *  - compute a deterministic topological job order from `needs`, detecting cycles
  */
-import type { JobSpec, StepSpec, WorkflowSpec } from "../spec/index.ts";
+import type { JobSpec, MatrixSpec, StepSpec, WorkflowSpec } from "../spec/index.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "./plan.ts";
 
 export class WorkflowCompileError extends Error {
@@ -24,6 +24,10 @@ import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
 import { interpolate } from "./expr.ts";
 import { expandMatrix, cellId, cellLabel, type MatrixCell } from "./matrix.ts";
 import { resolveMachine } from "./machines.ts";
+import { inlineCall, REUSABLE_DEPTH_CAP, type ResolveWorkflow } from "./reusable.ts";
+
+/** A runaway guard on the total number of jobs an expansion (matrix × reusable) may produce. */
+const MAX_PLAN_JOBS = 1000;
 
 /** Options for compiling a workflow. */
 export interface CompileOptions {
@@ -35,6 +39,18 @@ export interface CompileOptions {
    * `inputs`); when omitted, `${{ event.* }}` is left intact for a later phase.
    */
   event?: Record<string, unknown>;
+  /**
+   * Resolver for reusable-workflow `uses:` references. Injected by the caller (the
+   * CLI) so the compiler stays filesystem-pure. When absent, a `uses:` job is a
+   * compile error (reusable workflows aren't available in that context).
+   */
+  resolveWorkflow?: ResolveWorkflow;
+  /** @internal Recursion state: resolved callee file paths, for cycle detection. */
+  _chain?: string[];
+  /** @internal Recursion state: current nesting depth, for the depth cap. */
+  _depth?: number;
+  /** @internal Recursion state: directory of the workflow being compiled, for relative `./` refs. */
+  _fromDir?: string;
 }
 
 export const DEFAULT_RUNS_ON = "gondolin";
@@ -130,7 +146,7 @@ function compileLeg(
     runsOn: job.runsOn ?? DEFAULT_RUNS_ON,
     machine: resolveMachine(job.machine, legId),
     needs,
-    steps: job.steps.map((s, i) => compileStep(s, legId, i, jobEnv, inputs, matrix, event)),
+    steps: (job.steps ?? []).map((s, i) => compileStep(s, legId, i, jobEnv, inputs, matrix, event)),
   };
   if (title !== undefined) planned.title = title;
   if (job.if !== undefined) planned.if = job.if;
@@ -149,14 +165,12 @@ function compileLeg(
 }
 
 /**
- * Expand a base job into its legs: a list of `{ id, title, cell }`. Non-matrix
- * jobs yield exactly one leg whose id is the job id. Matrix jobs yield one leg
- * per cell with a stable `<base>::<cell>` id; colliding ids are disambiguated.
+ * Expand a matrix into its legs: one `{ id, title, cell }` per cell with a stable
+ * `<base>::<cell>` id; colliding ids are disambiguated. Shared by `expandJob`
+ * (a `steps:` job) and the reusable-workflow path (a `uses:` job that carries a
+ * `strategy.matrix` fans the *call* out per cell).
  */
-function expandJob(baseId: string, job: JobSpec): { id: string; title?: string; cell?: MatrixCell }[] {
-  const matrix = job.strategy?.matrix;
-  if (!matrix) return [{ id: baseId }];
-
+function matrixLegs(baseId: string, matrix: MatrixSpec): { id: string; title: string; cell: MatrixCell }[] {
   const axisOrder = Object.keys(matrix.axes);
   const cells = expandMatrix(matrix);
   if (cells.length === 0) {
@@ -172,6 +186,18 @@ function expandJob(baseId: string, job: JobSpec): { id: string; title?: string; 
     seen.add(id);
     return { id, title: cellLabel(baseId, cell, axisOrder), cell };
   });
+}
+
+/**
+ * Expand a base job into its legs: a list of `{ id, title, cell }`. Non-matrix
+ * jobs yield exactly one leg whose id is the job id. Matrix jobs yield one leg
+ * per cell. For a `uses:` job the leg id is the call's *join* id, so a downstream
+ * `needs: [C]` converges on the join(s) via `legsOf`.
+ */
+function expandJob(baseId: string, job: JobSpec): { id: string; title?: string; cell?: MatrixCell }[] {
+  const matrix = job.strategy?.matrix;
+  if (!matrix) return [{ id: baseId }];
+  return matrixLegs(baseId, matrix);
 }
 
 /**
@@ -219,26 +245,57 @@ export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): Executio
   const workflowEnv = spec.env ?? {};
   const event = opts.event;
 
-  // First pass: expand each base job into its legs and record base -> leg ids,
-  // so a dependency on a matrix base fans out to *all* its legs (converge).
+  if ((opts._depth ?? 0) > REUSABLE_DEPTH_CAP) {
+    throw new WorkflowCompileError(
+      `reusable-workflow nesting too deep (> ${REUSABLE_DEPTH_CAP}): ${(opts._chain ?? []).join(" -> ")}`,
+    );
+  }
+
+  // First pass: expand each base job into its legs and record base -> leg ids, so
+  // a dependency on a matrix base — or a reusable call — fans out / converges on
+  // *all* its legs. For a `uses:` job the leg ids are the call's join ids.
   const expansions = new Map<string, { id: string; title?: string; cell?: MatrixCell }[]>();
   for (const [jobId, job] of Object.entries(spec.jobs)) {
     expansions.set(jobId, expandJob(jobId, job));
   }
   const legsOf = (baseId: string): string[] => (expansions.get(baseId) ?? []).map((l) => l.id);
 
-  // Second pass: compile each leg, rewriting `needs` to concrete leg ids. Warn
-  // once per *base* job (not per matrix leg) about a deprecated/implicit runs-on.
+  // Second pass: compile each leg, rewriting `needs` to concrete leg ids. A
+  // `uses:` job inlines its callee's sub-DAG plus a virtual join; a `steps:` job
+  // compiles its leg directly. Warn once per *base* job (not per matrix leg) about
+  // a deprecated/implicit runs-on (a `uses:` job has no VM, so it never warns).
   const jobs: Record<string, PlannedJob> = {};
   const warnings: string[] = [];
+  const addJob = (job: PlannedJob): void => {
+    if (job.id in jobs) {
+      throw new WorkflowCompileError(`job id collision: "${job.id}" is produced by more than one job — rename one`);
+    }
+    jobs[job.id] = job;
+  };
+
   for (const [jobId, job] of Object.entries(spec.jobs)) {
+    const needs = (job.needs ?? []).flatMap(legsOf);
+    if (job.uses !== undefined) {
+      for (const leg of expansions.get(jobId)!) {
+        const { subJobs, join, warnings: w } = inlineCall({ baseId: jobId, job, leg, callerNeeds: needs, inputs, event, opts });
+        addJob(join);
+        for (const sj of subJobs) addJob(sj);
+        warnings.push(...w);
+      }
+      continue;
+    }
     validateRunsOn(jobId, job.runsOn);
     const w = runsOnWarning(jobId, job.runsOn);
     if (w) warnings.push(w);
-    const needs = (job.needs ?? []).flatMap(legsOf);
     for (const leg of expansions.get(jobId)!) {
-      jobs[leg.id] = compileLeg(leg.id, leg.title, job, needs, workflowEnv, inputs, leg.cell, event);
+      addJob(compileLeg(leg.id, leg.title, job, needs, workflowEnv, inputs, leg.cell, event));
     }
+  }
+
+  if (Object.keys(jobs).length > MAX_PLAN_JOBS) {
+    throw new WorkflowCompileError(
+      `compiled plan has ${Object.keys(jobs).length} jobs, over the limit of ${MAX_PLAN_JOBS} (matrix/reusable expansion too large)`,
+    );
   }
 
   const plan: ExecutionPlan = { name: spec.name, jobs, jobOrder: topoSort(jobs), inputs };

@@ -18,8 +18,8 @@ jobs:
     assert.deepEqual(spec.env, { HELLO_WORLD: "hello world" });
     assert.deepEqual(Object.keys(spec.jobs), ["hello-world"]);
     const job = spec.jobs["hello-world"]!;
-    assert.equal(job.steps.length, 1);
-    assert.equal(job.steps[0]!.run, "echo $HELLO_WORLD");
+    assert.equal(job.steps!.length, 1);
+    assert.equal(job.steps![0]!.run, "echo $HELLO_WORLD");
   });
 
   it("coerces scalar env values to strings", () => {
@@ -170,7 +170,7 @@ describe("parseWorkflow — validation", () => {
 
   it("parses a step-level conditional (if)", () => {
     const spec = parseWorkflow(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        if: \${{ inputs.flag == 'yes' }}`);
-    assert.equal(spec.jobs["a"]!.steps[0]!.if, "${{ inputs.flag == 'yes' }}");
+    assert.equal(spec.jobs["a"]!.steps![0]!.if, "${{ inputs.flag == 'yes' }}");
   });
 
   it("parses a job-level conditional (when, as an if synonym)", () => {

@@ -10,7 +10,10 @@
  */
 import { basename, dirname, join, resolve } from "node:path";
 import { readdir, readFile } from "node:fs/promises";
+import { readdirSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
+import { parseWorkflow } from "./spec/index.ts";
+import type { ResolveWorkflow, ResolvedWorkflow } from "./compiler/reusable.ts";
 import { UserFacingError } from "./errors.ts";
 
 /** The directory name that marks a project's workflow assets (like `.github`). */
@@ -140,4 +143,70 @@ export async function listWorkflows(workspace: string): Promise<{ name: string; 
   return [...names.entries()]
     .map(([name, file]) => ({ name, file }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Resolve a reusable-workflow `uses:` reference to its parsed callee. Injected
+ * into the compiler (`CompileOptions.resolveWorkflow`) so the compiler itself
+ * stays filesystem-pure; the resolution — and all I/O — lives here.
+ *
+ * Two reference forms:
+ *   - `workflow/<name>`        → the `.yaml` in `fromDir` whose `name:` matches
+ *   - `./x.yaml`, `../x/y.yaml` → a path relative to the referencing file's dir
+ *
+ * `fromDir` is the directory of the workflow currently being compiled, so a
+ * nested `./sub/b.yaml` inside a callee resolves relative to that callee. Reads
+ * are synchronous to keep `compile()` synchronous. A `@ref`/remote form is
+ * reserved but not yet implemented.
+ */
+export const resolveWorkflowRef: ResolveWorkflow = (ref, fromDir): ResolvedWorkflow => {
+  const trimmed = ref.trim();
+  if (trimmed.includes("@")) {
+    throw new UserFacingError(`remote/pinned reusable workflows are not yet supported: "${ref}"`);
+  }
+  if (trimmed.startsWith("workflow/")) {
+    return resolveWorkflowByNameInDir(fromDir, trimmed.slice("workflow/".length), ref);
+  }
+  if (trimmed.startsWith("./") || trimmed.startsWith("../")) {
+    return loadWorkflowFile(resolve(fromDir, trimmed));
+  }
+  throw new UserFacingError(`unsupported workflow reference "${ref}" — use "workflow/<name>" or "./path.yaml"`);
+};
+
+/** Read + parse a single workflow file into a `ResolvedWorkflow`. */
+function loadWorkflowFile(file: string): ResolvedWorkflow {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf-8");
+  } catch {
+    throw new UserFacingError(`reusable workflow not found: ${file}`);
+  }
+  return { spec: parseWorkflow(text), dir: dirname(file), file };
+}
+
+/** Find the `.yaml` in `dir` whose `name:` matches, the way `run <name>` resolves. */
+function resolveWorkflowByNameInDir(dir: string, name: string, ref: string): ResolvedWorkflow {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    throw new UserFacingError(`cannot resolve "${ref}": no directory ${dir}`);
+  }
+  const files = entries
+    .filter((e) => e.isFile() && /\.ya?ml$/i.test(e.name))
+    .map((e) => join(dir, e.name))
+    .sort();
+  const matches: string[] = [];
+  for (const file of files) {
+    let wfName: unknown;
+    try {
+      wfName = (parseYaml(readFileSync(file, "utf-8")) as { name?: unknown } | null)?.name;
+    } catch {
+      continue; // a malformed file isn't a candidate
+    }
+    if (wfName === name) matches.push(file);
+  }
+  if (matches.length === 0) throw new UserFacingError(`no workflow named "${name}" in ${dir} (referenced as "${ref}")`);
+  if (matches.length > 1) throw new UserFacingError(`workflow name "${name}" is ambiguous in ${dir} — defined in: ${matches.join(", ")}`);
+  return loadWorkflowFile(matches[0]!);
 }

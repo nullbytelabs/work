@@ -8,6 +8,15 @@
 > design work here. Companion seams: [`phase-1.md`](phase-1.md) (durability
 > caveat), [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (the
 > *step*-level `uses:` surface this deliberately does **not** touch). Date: 2026-06-06.
+>
+> **Status: implemented (v1).** The core vertical shipped — spec (`uses:`/`with:`
+> jobs + `on: workflow_call`), compile-time inlining (`src/compiler/reusable.ts`),
+> the virtual join (`PlannedJob.virtual`), and the CLI resolver
+> (`resolveWorkflowRef` in `src/project.ts`). Two design points were **revised in
+> implementation** and are flagged inline: the compiler takes an *injected*
+> resolver (stays filesystem-pure) rather than reading files itself (§7), and the
+> inlining namespace uses `__` not `::` (§14-Q2). `work --web` returns a clear
+> "not yet" error for `uses:` jobs; remote/cross-repo refs are reserved (§14-Q6).
 
 ## 1. The problem
 
@@ -217,29 +226,46 @@ collecting its outputs.
 
 ## 7. How inlining works (Strategy A in detail)
 
+> **As shipped (v1):** the algorithm below lives in `src/compiler/reusable.ts`
+> (`inlineCall`), invoked from `compile()`. The compiler stays **filesystem-pure**:
+> rather than reading callee files itself, it takes an injected
+> `resolveWorkflow(ref, fromDir) → { spec, dir, file }` (`CompileOptions.resolveWorkflow`),
+> exactly as `makeTarget`/`usesHandlers` are injected. The CLI supplies the real
+> (synchronous) resolver (`resolveWorkflowRef` in `src/project.ts`); compiler tests
+> inject an in-memory one — no temp files. Recursion state (`_chain`/`_depth`/`_fromDir`)
+> rides alongside in `CompileOptions`.
+
 When `compile()` hits a `uses:` job `C` referencing workflow `W`:
 
-1. **Resolve** `W` (`findWorkflowByName` for `workflow/<name>`, or a path resolve
-   relative to the caller's `workflowDir`). Parse it.
+1. **Resolve** `W` via the injected resolver (`workflow/<name>` scans `fromDir`;
+   `./path.yaml` resolves relative to the referencing file's dir). It returns the
+   parsed spec plus the callee's dir and canonical file path (the cycle key).
 2. **Assert opt-in** — `W` declares `on: workflow_call`, else a compile error.
-3. **Bind inputs** — interpolate `C`'s `with:` against the *caller's* compile-time
-   context (`inputs`/`matrix`/`event`), then `resolveInputs(W.inputs, boundWith)`.
-   Unknown/missing-required/option/pattern errors surface here, reusing today's
-   validator unchanged.
+3. **Bind inputs** — first **reject** any `needs.*`/`steps.*` reference in `C`'s
+   `with:` (a runtime value can't bind at compile time — §8), then interpolate
+   against the *caller's* compile-time context (`inputs`/`matrix`/`event`), then
+   `resolveInputs(W.inputs, boundWith)`. Unknown/missing-required/option/pattern
+   errors surface here, reusing today's validator unchanged.
 4. **Recursively compile** `W` with those inputs → a sub-`ExecutionPlan`.
-5. **Namespace** every sub-job id with the caller's id: `C::<subjobId>` (the `::`
-   convention matrix already uses, so ids stay path-safe for workdir naming; a
-   sub-matrix leg becomes `C::<subjobId>::<cell>`). Rewrite all *intra-call*
-   `needs` to the namespaced ids. Prefix titles for display (`deploy / compile`).
+5. **Namespace** every sub-job id off a `\w`-safe prefix: `C__<subjobId>`. (The
+   join keeps the call's id — `C`, or `C::<cell>` for a matrix call — but sub-jobs
+   use `__`, **not** matrix's `::`: a sub-job is referenced at runtime via
+   `${{ needs.<id>… }}`, and `::` isn't valid in that grammar, whereas `__` is.
+   See §14-Q2.) Rewrite all *intra-call* `needs` **and** every deferred
+   `needs.<sibling>` reference inside steps/outputs/`if:` to the namespaced ids.
+   Prefix titles for display (`deploy / compile`).
 6. **Rewire the boundary:**
    - sub-DAG **roots** (no intra-call deps) inherit `C`'s `needs`;
    - downstream jobs that did `needs: [C]` must now depend on the sub-DAG
      **leaves** — handled by the join node below, which keeps id `C`.
 7. **Synthesize a join node** with id `C` (the caller's original id), `needs` =
-   the sub-DAG leaves, and `outputs` = `W`'s declared `workflow_call.outputs`
-   (rewritten to reference the namespaced producing jobs). This single node makes
-   `needs.C.outputs.x` and `needs: [C]` resolve **unchanged** for everything
-   downstream — the call is transparent.
+   the sub-DAG leaves **plus any job referenced by an output** (a curated mid-DAG
+   output's producer may not be a leaf, yet must be in the join's needs context),
+   and `outputs` = `W`'s declared `workflow_call.outputs` **syntactically rewritten**
+   from `${{ jobs.<id>.outputs.<k> }}` (callee vocabulary) to
+   `${{ needs.C__<id>.outputs.<k> }}`. This single node makes `needs.C.outputs.x`
+   and `needs: [C]` resolve **unchanged** for everything downstream — the call is
+   transparent.
 
 The join node does no work (it only aggregates outputs), so it must **not boot a
 VM**. That is the *one* runtime change this design needs:
@@ -342,11 +368,12 @@ narrow" the safe direction. Out of scope for v1.
   error naming the chain. Propose **10**, matching current GHA-cloud; since we
   inline eagerly the cap is a real runaway guard, not just etiquette (§14-Q7).
 - **Fan-out interaction:** a `strategy.matrix` on a `uses:` job multiplies the
-  whole inlined sub-DAG per cell. The id scheme (`C::<cell>::<subjob>`) stays
-  unique. There is **no** expanded-job-count guard anywhere today — matrix itself
-  only checks for *zero* cells (`compile.ts:162`), nothing caps the maximum — so a
-  matrix-of-callees could explode the plan silently. Add one shared plan-size
-  ceiling that covers both matrix and reusable expansion (§14-Q7).
+  whole inlined sub-DAG per cell. The join keeps the cell id `C::<cell>` (so
+  downstream `needs: [C]` converges on every per-cell join); its sub-jobs hang off
+  the `\w`-safe prefix `C__<cell>__<subjob>`. As shipped there **is** now a shared
+  plan-size ceiling (`MAX_PLAN_JOBS` in `compile.ts`) enforced after all expansion,
+  closing the old gap where matrix only checked for *zero* cells and nothing capped
+  the maximum (§14-Q7).
 
 ## 11. Project layout / checkout
 
@@ -368,25 +395,31 @@ WorkflowCallSpec` to `OnSpec` (boolean shorthand + `{ outputs }` mapping),
 validated like `webhook`. **No execution logic here** — syntax only.
 
 **Compiler (`src/compiler/`).** The new work lives almost entirely in a new
-`reusable.ts` invoked from `compile()` during the first/second pass:
-- resolve + parse + opt-in-assert the callee,
+`reusable.ts` (`inlineCall`) invoked from `compile()`'s second pass:
+- resolve + opt-in-assert the callee **via the injected `resolveWorkflow`** (the
+  compiler does no file I/O itself — the CLI's `resolveWorkflowRef` does, keeping
+  `compile()` pure and unit-testable with an in-memory resolver),
 - bind `with:` (reject runtime contexts; §8) and `resolveInputs`,
-- recursively `compile()`, namespace ids, rewrite `needs`, synthesize the virtual
+- recursively `compile()`, namespace ids (`__`), rewrite `needs` **and deferred
+  `needs.<sibling>` references in steps/outputs/`if:`**, synthesize the virtual
   join (§7),
-- splice into the flat `jobs` map *before* `topoSort` (so ordering & cycle
-  detection cover the inlined nodes for free).
-  `expandJob`/matrix and `compileLeg` stay as-is; reusable expansion is a sibling
-  expansion step, not a rewrite of them.
+- splice into the flat `jobs` map (with an id-collision guard) *before* `topoSort`.
+  Pass 1's `expandJob` registers a `uses:` job's join leg ids so a downstream
+  `needs: [C]` converges via `legsOf`. `compileLeg` stays as-is; the matrix leg
+  loop was factored into a shared `matrixLegs` helper both paths call. A
+  `MAX_PLAN_JOBS` ceiling guards runaway expansion.
 
-**Runtime (`src/runtime/absurd/`).** One change: honor `PlannedJob.virtual`
-(skip `makeTarget`/provision; compute outputs from `needs`). The DAG walk, output
-threading, and `if:` gating already handle the resulting nodes.
+**Runtime (`src/runtime/absurd/`).** One change: honor `PlannedJob.virtual` in
+`runJobInTask` (skip stage/provision/steps; compute outputs from `needs`). The DAG
+walk, output threading, and `if:` gating already handle the resulting nodes.
 
 **Graph / TUI.** No changes — they render the flat plan. Inlined jobs and the
-join show up automatically (the join is a natural fan-in node).
+join show up automatically (the join is a natural fan-in node, shown as `0 steps`).
 
-**`src/run.ts` / web.** No changes — `startRun` consumes a compiled plan; the plan
-is just bigger.
+**`src/run.ts` / CLI / web.** `startRun` is unchanged (it consumes a compiled
+plan; the plan is just bigger). The **CLI** passes `resolveWorkflowRef` +
+`_fromDir`/`_chain` into `compile()`; the **web** server passes a resolver that
+errors on any `uses:` job (reusable workflows aren't wired through `--web` yet).
 
 ## 13. Worked example
 
@@ -442,11 +475,18 @@ unless mapped — and a callee owning its public surface mirrors how a job owns
 `outputs:` today. The union form leaks every job output and collides on duplicate
 keys for zero real benefit. (See §4.)
 
-**Q2 — Id separator. DECIDED: reuse `::`.** It's the existing matrix convention
-(`compile.ts:170`, `${baseId}::${suffix}`), already path-safe for workdir naming.
-Nested calls/matrix yield `a::b::c`, which is consistent and readable. Introducing
-a second separator would add a concept for no gain; one expansion vocabulary covers
-matrix legs and inlined sub-jobs alike.
+**Q2 — Id separator. DECIDED (revised in implementation): `__` for the inlining
+namespace; `::` stays matrix-only.** The design first proposed reusing matrix's
+`::`, but implementation surfaced a blocker: an inlined sub-job is *referenced at
+runtime* by its siblings (`${{ needs.<sub>.outputs.* }}`, `if: needs.<sub>.result`),
+and `::` is **not** valid in the `needs.<id>` expression/condition grammar (it
+accepts `[\w-]` only — `expr.ts`, `condition.ts`). Matrix gets away with `::`
+solely because a matrix leg's *outputs* are never referenced in an expression;
+inlined jobs are. Rather than widen the shared expression language in three places
+(risk across every condition/interpolation), sub-jobs use a `\w`-safe `__` prefix
+(`C__<sub>`), which parses unchanged. The join still keeps the call's id (`C`, or
+`C::<cell>` for a matrix call, since that id only appears as a `needs:` *array
+entry*, never inside an expression). A matrix call composes as `C__<cell>__<sub>`.
 
 **Q3 — The `needs`-leak (§8). DECIDED: accept for v1; Strategy B is the documented
 escape hatch.** Config flows through `with:` (compile-time); runtime *data* flows

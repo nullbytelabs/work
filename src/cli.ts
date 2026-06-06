@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError } from "./compiler/index.ts";
 import { resolveConfigLayers, loadMergedConfig, PROJECT_CONFIG_FILENAME, type PiWorkflowsConfig } from "./config/index.ts";
-import { resolveWorkflowLayout, findWorkflowByName, type WorkflowLayout } from "./project.ts";
+import { resolveWorkflowLayout, findWorkflowByName, resolveWorkflowRef, type WorkflowLayout } from "./project.ts";
 import { startRun } from "./run.ts";
 import { startWebServer } from "./web/index.ts";
 import { selectPresenter, detectCI } from "./tui/index.ts";
@@ -317,7 +317,15 @@ async function main(): Promise<void> {
   let plan;
   try {
     const spec = parseWorkflow(yamlText);
-    plan = compile(spec, { inputs: args.inputs });
+    plan = compile(spec, {
+      inputs: args.inputs,
+      // Reusable-workflow resolution: `uses: workflow/<name>` / `./x.yaml` refs
+      // resolve relative to the caller's workflow dir; the resolver owns all I/O.
+      resolveWorkflow: resolveWorkflowRef,
+      _fromDir: layout.workflowDir,
+      _chain: [layout.file],
+      _depth: 0,
+    });
   } catch (err) {
     if (err instanceof WorkflowParseError || err instanceof WorkflowCompileError) {
       fail(err.message);

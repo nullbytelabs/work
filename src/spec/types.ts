@@ -94,11 +94,16 @@ export type MachineSpec =
       memory?: string;
     };
 
-/** A job: an isolated execution unit containing ordered steps. */
+/**
+ * A job: an isolated execution unit. It is **either** a `steps:` job (the usual
+ * case) **or** a `uses:` job that calls a whole reusable workflow as a unit
+ * (`uses: workflow/<name>` + `with:`) — never both. The parser enforces the
+ * exclusivity; the compiler inlines a `uses:` job's callee into the flat plan.
+ */
 export interface JobSpec {
-  /** Where the job runs. Default applied by the compiler (`DEFAULT_RUNS_ON`, "gondolin"). */
+  /** Where the job runs. Default applied by the compiler (`DEFAULT_RUNS_ON`, "gondolin"). Forbidden on a `uses:` job. */
   runsOn?: string;
-  /** Machine sizing (named type or inline cpu/memory). Resolved by the compiler against the built-in catalog. */
+  /** Machine sizing (named type or inline cpu/memory). Resolved by the compiler against the built-in catalog. Forbidden on a `uses:` job. */
   machine?: MachineSpec;
   /** IDs of jobs that must complete before this one (the `needs` DAG). */
   needs?: string[];
@@ -106,12 +111,20 @@ export interface JobSpec {
   if?: string;
   /** Fan-out strategy (matrix). Expanded into independent legs by the compiler. */
   strategy?: StrategySpec;
-  /** Job-level env, layered over workflow env. */
+  /** Job-level env, layered over workflow env. Forbidden on a `uses:` job. */
   env?: EnvMap;
-  /** Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. */
+  /** Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. Forbidden on a `uses:` job (outputs come from the callee). */
   outputs?: Record<string, string>;
-  /** Ordered steps. */
-  steps: StepSpec[];
+  /**
+   * A reusable-workflow reference (`workflow/<name>` or `./path.yaml`). Mutually
+   * exclusive with `steps`. The job delegates to the referenced workflow; the
+   * compiler binds `with:` to its inputs and inlines it.
+   */
+  uses?: string;
+  /** Inputs to a `uses:` callee, validated against its declared `inputs:`. */
+  with?: Record<string, unknown>;
+  /** Ordered steps. Required unless the job is a `uses:` job. */
+  steps?: StepSpec[];
 }
 
 /**
@@ -134,15 +147,32 @@ export interface WebhookTrigger {
 }
 
 /**
- * The typed `on:` trigger block. Currently only `webhook` is modeled. `true` is
- * the opt-in with no options; a mapping carries `WebhookTrigger` details.
+ * A `workflow_call` trigger declaration under `on:` — the opt-in that makes a
+ * workflow callable as a reusable unit by another workflow's `uses:` job (the
+ * GitHub-Actions `on: workflow_call` analog). `on: workflow_call` (string
+ * shorthand) / `true` opts in with no published outputs; the mapping form
+ * declares the flat `outputs:` surface the callee exposes to its caller, each
+ * value an expression in the callee's vocabulary (`${{ jobs.<id>.outputs.<k> }}`).
  *
- * NOTE: this is **not load-bearing for execution** — the compiler/runtime never
- * read it. It is the opt-in gate the (later) webhook receiver consults to decide
- * whether a workflow may be remotely triggered.
+ * Unlike `webhook`, this trigger IS load-bearing: the compiler asserts a callee
+ * has opted in, and reads `outputs` to build the call's virtual join node.
+ */
+export interface WorkflowCallSpec {
+  /** Outputs exposed to the caller as `needs.<callJob>.outputs.<name>`; values are `${{ jobs.<id>.outputs.<key> }}` expressions. */
+  outputs?: Record<string, string>;
+}
+
+/**
+ * The typed `on:` trigger block. `webhook` gates remote triggering; `workflow_call`
+ * gates reusable-workflow callability. `true` is the opt-in with no options; a
+ * mapping carries each trigger's details.
+ *
+ * NOTE: `webhook` is **not load-bearing for execution** (the receiver reads it).
+ * `workflow_call`, by contrast, IS read by the compiler (opt-in assert + outputs).
  */
 export interface OnSpec {
   webhook?: WebhookTrigger | boolean;
+  workflow_call?: WorkflowCallSpec | boolean;
 }
 
 /** A whole workflow file. */

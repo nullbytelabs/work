@@ -19,7 +19,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomBytes, timingSafeEqual, createHmac, createHash } from "node:crypto";
 import { readFile, mkdir } from "node:fs/promises";
 import { parseWorkflow, WorkflowParseError } from "../spec/index.ts";
-import { compile, WorkflowCompileError } from "../compiler/index.ts";
+import { compile, WorkflowCompileError, type ResolveWorkflow } from "../compiler/index.ts";
 import { emitGraph } from "../graph/index.ts";
 import { listWorkflows, findWorkflowByName } from "../project.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "../runtime/index.ts";
@@ -31,6 +31,15 @@ import { RunEventRepository } from "../persistence/run-events.ts";
 import { DeliveryRepository, type DeliveryResult, type DeliveryRow } from "../persistence/deliveries.ts";
 import { RunManager } from "./run-manager.ts";
 import { renderShell } from "./client.ts";
+
+/**
+ * Reusable workflows aren't wired through the web console yet: a `uses:` job
+ * surfaces a clear error rather than silently miscompiling. Compiling a workflow
+ * with no `uses:` jobs never invokes this. (The CLI has full support.)
+ */
+const webResolveWorkflow: ResolveWorkflow = () => {
+  throw new UserFacingError("reusable workflows (uses: <workflow>) are not yet available via --web — run them with the CLI");
+};
 
 /** Default port (§9); on contention we try the next few before erroring. */
 const DEFAULT_PORT = 4280;
@@ -294,7 +303,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     const spec = await loadSpec(name);
     if (!spec) { sendJson(res, 404, { error: `no workflow named "${name}"` }); return; }
     try {
-      const plan = compile(spec, {});
+      const plan = compile(spec, { resolveWorkflow: webResolveWorkflow });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(emitGraph(plan, "json", { steps: true }));
     } catch (err) {
@@ -323,7 +332,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     let plan;
     try {
       const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
-      plan = compile(spec, { inputs });
+      plan = compile(spec, { inputs, resolveWorkflow: webResolveWorkflow });
     } catch (err) {
       sendCompileError(res, err);
       return;
@@ -417,7 +426,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     let plan;
     try {
       const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
-      plan = compile(spec, { inputs: stored.inputs ?? {} });
+      plan = compile(spec, { inputs: stored.inputs ?? {}, resolveWorkflow: webResolveWorkflow });
     } catch (err) {
       sendCompileError(res, err);
       return;
@@ -500,7 +509,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     // Bake the payload into the plan (`${{ event.* }}`) and dispatch async.
     let plan;
     try {
-      plan = compile(spec, { event });
+      plan = compile(spec, { event, resolveWorkflow: webResolveWorkflow });
     } catch (err) {
       recordDelivery({ hook: name, workflow: entry.workflow, result: "bad_request", httpStatus: 400, sourceIp });
       sendCompileError(res, err);
@@ -727,7 +736,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
 
     let plan;
     try {
-      plan = compile(spec, { event: SYNTHETIC });
+      plan = compile(spec, { event: SYNTHETIC, resolveWorkflow: webResolveWorkflow });
     } catch (err) {
       sendCompileError(res, err);
       return;

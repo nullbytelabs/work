@@ -7,7 +7,7 @@ import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
-import { resolveWorkflowLayout } from "../src/project.ts";
+import { resolveWorkflowLayout, resolveWorkflowRef } from "../src/project.ts";
 import { useSharedRuntime } from "./_support.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -61,7 +61,16 @@ const examples: Example[] = readdirSync(EXAMPLES, { withFileTypes: true })
 
 function compilePlan(file: string, name: string) {
   const yaml = readFileSync(file, "utf-8");
-  return compile(parseWorkflow(yaml), { inputs: EXAMPLE_INPUTS[name] ?? {} });
+  const layout = resolveWorkflowLayout(file);
+  // Resolver-aware exactly like the CLI, so reusable-workflow examples (a `uses:`
+  // job referencing a sibling `.workflows/*.yaml`) compile and inline.
+  return compile(parseWorkflow(yaml), {
+    inputs: EXAMPLE_INPUTS[name] ?? {},
+    resolveWorkflow: resolveWorkflowRef,
+    _fromDir: layout.workflowDir,
+    _chain: [layout.file],
+    _depth: 0,
+  });
 }
 
 /** Run a workflow, staging its checkout exactly as the CLI does (via the shared layout resolver). */
