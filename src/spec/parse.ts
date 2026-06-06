@@ -45,72 +45,81 @@ function parseInputs(raw: unknown, path: string): Record<string, InputSpec> | un
 
   const out: Record<string, InputSpec> = {};
   for (const [name, decl] of Object.entries(raw)) {
-    const ip = `${path}.${name}`;
-    if (decl === null || decl === undefined) {
-      out[name] = {}; // shorthand: optional string
-      continue;
-    }
-    // Scalar shorthand: `age: 36` => a number input defaulting to 36; the type
-    // is inferred from the scalar (string | number | boolean).
-    if (typeof decl === "string" || typeof decl === "number" || typeof decl === "boolean") {
-      out[name] = { type: typeof decl as InputSpec["type"], default: decl };
-      continue;
-    }
-    if (!isPlainObject(decl)) {
-      throw new WorkflowParseError(`input "${name}" must be a mapping, a scalar default, or empty`, ip);
-    }
-    const spec: InputSpec = {};
-    if (decl.type !== undefined) {
-      if (typeof decl.type !== "string" || !INPUT_TYPES.has(decl.type)) {
-        throw new WorkflowParseError('type must be one of "string", "boolean", "number"', `${ip}.type`);
-      }
-      spec.type = decl.type as InputSpec["type"];
-    }
-    if (decl.required !== undefined) {
-      if (typeof decl.required !== "boolean") throw new WorkflowParseError("required must be a boolean", `${ip}.required`);
-      spec.required = decl.required;
-    }
-    if (decl.default !== undefined) {
-      const t = typeof decl.default;
-      if (t !== "string" && t !== "number" && t !== "boolean") {
-        throw new WorkflowParseError("default must be a scalar", `${ip}.default`);
-      }
-      spec.default = decl.default as InputSpec["default"];
-    }
-    if (decl.description !== undefined) {
-      if (typeof decl.description !== "string") throw new WorkflowParseError("description must be a string", `${ip}.description`);
-      spec.description = decl.description;
-    }
-
-    const effectiveType = spec.type ?? "string";
-
-    if (decl.options !== undefined) {
-      if (!Array.isArray(decl.options) || decl.options.length === 0) {
-        throw new WorkflowParseError("options must be a non-empty array", `${ip}.options`);
-      }
-      for (const o of decl.options) {
-        if (typeof o !== effectiveType) {
-          throw new WorkflowParseError(`options entries must be of type ${effectiveType}`, `${ip}.options`);
-        }
-      }
-      spec.options = decl.options as InputSpec["options"];
-    }
-    if (decl.pattern !== undefined) {
-      if (typeof decl.pattern !== "string") throw new WorkflowParseError("pattern must be a string", `${ip}.pattern`);
-      try {
-        new RegExp(decl.pattern);
-      } catch {
-        throw new WorkflowParseError("pattern is not a valid regular expression", `${ip}.pattern`);
-      }
-      if (effectiveType !== "string") {
-        throw new WorkflowParseError("pattern only applies to string inputs", ip);
-      }
-      spec.pattern = decl.pattern;
-    }
-
-    out[name] = spec;
+    out[name] = parseInputDecl(decl, name, `${path}.${name}`);
   }
   return out;
+}
+
+/** One input declaration: null (optional string), a scalar default, or a mapping. */
+function parseInputDecl(decl: unknown, name: string, ip: string): InputSpec {
+  if (decl === null || decl === undefined) return {}; // shorthand: optional string
+  // Scalar shorthand: `age: 36` => a number input defaulting to 36; the type
+  // is inferred from the scalar (string | number | boolean).
+  if (typeof decl === "string" || typeof decl === "number" || typeof decl === "boolean") {
+    return { type: typeof decl as InputSpec["type"], default: decl };
+  }
+  if (!isPlainObject(decl)) {
+    throw new WorkflowParseError(`input "${name}" must be a mapping, a scalar default, or empty`, ip);
+  }
+  return parseInputMapping(decl, ip);
+}
+
+/** The full mapping form of an input declaration. */
+function parseInputMapping(decl: Record<string, unknown>, ip: string): InputSpec {
+  const spec: InputSpec = {};
+  if (decl.type !== undefined) {
+    if (typeof decl.type !== "string" || !INPUT_TYPES.has(decl.type)) {
+      throw new WorkflowParseError('type must be one of "string", "boolean", "number"', `${ip}.type`);
+    }
+    spec.type = decl.type as InputSpec["type"];
+  }
+  if (decl.required !== undefined) {
+    if (typeof decl.required !== "boolean") throw new WorkflowParseError("required must be a boolean", `${ip}.required`);
+    spec.required = decl.required;
+  }
+  if (decl.default !== undefined) {
+    const t = typeof decl.default;
+    if (t !== "string" && t !== "number" && t !== "boolean") {
+      throw new WorkflowParseError("default must be a scalar", `${ip}.default`);
+    }
+    spec.default = decl.default as InputSpec["default"];
+  }
+  if (decl.description !== undefined) {
+    if (typeof decl.description !== "string") throw new WorkflowParseError("description must be a string", `${ip}.description`);
+    spec.description = decl.description;
+  }
+
+  const effectiveType = spec.type ?? "string";
+  if (decl.options !== undefined) spec.options = parseInputOptions(decl.options, effectiveType, `${ip}.options`);
+  if (decl.pattern !== undefined) spec.pattern = parseInputPattern(decl.pattern, effectiveType, ip);
+  return spec;
+}
+
+/** Validate `options:` — a non-empty array of scalars matching the input's type. */
+function parseInputOptions(options: unknown, effectiveType: string, path: string): InputSpec["options"] {
+  if (!Array.isArray(options) || options.length === 0) {
+    throw new WorkflowParseError("options must be a non-empty array", path);
+  }
+  for (const o of options) {
+    if (typeof o !== effectiveType) {
+      throw new WorkflowParseError(`options entries must be of type ${effectiveType}`, path);
+    }
+  }
+  return options as InputSpec["options"];
+}
+
+/** Validate `pattern:` — a valid regex, string inputs only. */
+function parseInputPattern(pattern: unknown, effectiveType: string, ip: string): string {
+  if (typeof pattern !== "string") throw new WorkflowParseError("pattern must be a string", `${ip}.pattern`);
+  try {
+    new RegExp(pattern);
+  } catch {
+    throw new WorkflowParseError("pattern is not a valid regular expression", `${ip}.pattern`);
+  }
+  if (effectiveType !== "string") {
+    throw new WorkflowParseError("pattern only applies to string inputs", ip);
+  }
+  return pattern;
 }
 
 /**
