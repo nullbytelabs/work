@@ -15,9 +15,10 @@
  *   task.md          — the task prompt template; `{{ <input> }}` placeholders
  *                      bound from the step's `with`
  * (skills/, extension.ts are reserved for future agent skills/extensions.) This
- * is the currently-shipped `agent/<name>` package shape; the direction for richer
- * agents (a dumb `work/agent` primitive + user-space actions) is in
- * docs/agent-primitive-and-actions.md. Packages are NOT shipped in
+ * is the `agent/<name>` package shape. Alongside it ships the dumb `work/agent`
+ * primitive (`work-agent-handler.ts`) — prompted entirely through `with:`, no
+ * package format — over which user-space actions (`src/actions/`) build richer,
+ * versioned behavior; see docs/agent-primitive-and-actions.md. Packages are NOT shipped in
  * the engine — they live in the project (the agent uses-handler points
  * `loadAgent` at `<projectDir>/agents/`). Remote `@ref` sourcing
  * (github/gitlab/codeberg) and project/user override search paths come later,
@@ -30,8 +31,14 @@ import { UserFacingError } from "../errors.ts";
 import type { ResolvedModel } from "../config/index.ts";
 
 export interface AgentRequest {
-  /** System prompt (the agent's standing persona/policy). */
-  system: string;
+  /**
+   * System prompt (the agent's standing persona/policy). Optional: when omitted
+   * (the `work/agent` primitive with no `instructions`), the runner passes *no*
+   * override, so Pi's own `DefaultResourceLoader` discovery — a checked-in `.pi/`
+   * persona, `AGENTS.md` — stands. The `agent/<name>` package path always sends a
+   * non-empty system prompt, so it's unaffected.
+   */
+  system?: string;
   /** Task prompt for this invocation (built from bound inputs). */
   prompt: string;
   /** Resolved model; optional so a stub runner can ignore it. */
@@ -59,6 +66,8 @@ export interface AgentRunner {
 export { GuestPiRunner, GUEST_MODEL_KEY_ENV, type GuestPiRunnerDeps } from "./guest-pi-runner.ts";
 // The agent uses-handler — register this with the runtime (composition root).
 export { createAgentUsesHandler, type AgentUsesHandlerOptions } from "./uses-handler.ts";
+// The dumb `work/agent` primitive — `with:` is the AgentRequest, no package format.
+export { createWorkAgentHandler, type WorkAgentHandlerOptions } from "./work-agent-handler.ts";
 // Per-job sandbox egress for agent steps (allow-all egress + model-host-scoped key).
 export { makeAgentEgressResolver, type AgentJobNetwork } from "./egress.ts";
 

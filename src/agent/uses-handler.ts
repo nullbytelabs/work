@@ -30,17 +30,17 @@ export interface AgentUsesHandlerOptions {
   agentsDir?: string;
 }
 
-const TRUNCATION_WARNING =
+export const TRUNCATION_WARNING =
   "warning: agent output was truncated (finish_reason=length) — raise the model's maxTokens in config";
 
 /**
  * Pick the runner for a step. An explicitly injected runner always wins (tests).
  * Otherwise the agent runs **inside the job's guest** via `GuestPiRunner` (over
  * `ctx.exec`) — every job is a gondolin sandbox, so the agent loop never touches
- * the host, exactly like a `run:` step.
+ * the host, exactly like a `run:` step. Shared with the `work/agent` handler.
  */
-function selectRunner(opts: AgentUsesHandlerOptions, ctx: UsesContext): AgentRunner {
-  if (opts.runner) return opts.runner;
+export function selectRunner(runner: AgentRunner | undefined, ctx: UsesContext): AgentRunner {
+  if (runner) return runner;
   return new GuestPiRunner({
     exec: ctx.exec,
     hostDir: ctx.workdir,
@@ -55,7 +55,7 @@ export function createAgentUsesHandler(opts: AgentUsesHandlerOptions = {}): Uses
     scheme: "agent",
     async run(ctx: UsesContext): Promise<UsesResult> {
       try {
-        const runner = selectRunner(opts, ctx);
+        const runner = selectRunner(opts.runner, ctx);
         const { name } = parseAgentUses(ctx.uses);
         // Workflow-local resolution: agents live in an `agents/` folder beside
         // the workflow definition (its `workflowDir` — e.g. `.workflows/agents/`,

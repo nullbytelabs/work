@@ -89,7 +89,10 @@ async function main() {
     agentDir: cwd,
     settingsManager,
     extensionFactories: [(api) => api.registerProvider(PROVIDER_NAME, providerConfig)],
-    systemPromptOverride: () => req.system,
+    // Only override the system prompt when one was supplied. Omitted (the
+    // `work/agent` primitive with no `instructions`) → let the loader discover
+    // the persona from the checkout (`.pi/`, `AGENTS.md`).
+    ...(typeof req.system === "string" ? { systemPromptOverride: () => req.system } : {}),
   });
   await resourceLoader.reload();
 

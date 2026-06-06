@@ -85,7 +85,9 @@ export class GuestPiRunner implements AgentRunner {
     // `cwd` is the guest-side workspace mount so the agent's tools operate on the
     // real checkout (the handler passes it; default to the mount root).
     const request = {
-      system: req.system,
+      // Omitted when the caller supplies no system prompt, so the in-guest
+      // wrapper applies no override and Pi's discovered persona/AGENTS.md stands.
+      ...(req.system !== undefined ? { system: req.system } : {}),
       prompt: req.prompt,
       keyEnv: GUEST_MODEL_KEY_ENV,
       cwd: req.cwd ?? guestDir,
