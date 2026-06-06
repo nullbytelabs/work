@@ -55,6 +55,9 @@ jobs:
       - run: npm test        # name defaults to the command
 ```
 
+A job can also skip `steps:` entirely and **call another workflow** with a
+job-level `uses:` — see [Reusable workflows](./reusable-workflows).
+
 ## `runs-on`
 
 `runs-on` selects where a job executes. Today there's exactly one target —

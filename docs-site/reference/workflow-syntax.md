@@ -16,17 +16,18 @@ jobs: …             # required — the named jobs
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** The workflow's name; also how `work run <name>` resolves it. |
-| `on` | string \| map | Trigger declaration (see [Triggers](#triggers)). Currently only `webhook`. |
+| `on` | string \| map | Trigger declaration (see [Triggers](#triggers)): `webhook` (remote POST) and/or `workflow_call` (make this workflow [reusable](#reusable-workflows)). |
 | `inputs` | map | Declared run-time inputs (see [Inputs](#inputs)). |
 | `env` | `map<string,string>` | Workflow-level environment, the base layer for every job and step. |
 | `jobs` | map | **Required.** The named jobs (see [Jobs](#jobs)). |
 
 ## Triggers
 
-`on:` declares how a workflow may be triggered besides a direct `work run`. The
-only supported trigger is `webhook`, which opts the workflow in to remote,
-authenticated `POST` triggering by the [web console's](../guide/web-ui#webhook-triggers)
-receiver.
+`on:` declares how a workflow may be invoked besides a direct `work run`. Two
+triggers are supported: `webhook` (below) opts in to remote, authenticated `POST`
+triggering by the [web console's](../guide/web-ui#webhook-triggers) receiver, and
+`workflow_call` opts in to being called by another workflow (see
+[Reusable workflows](#reusable-workflows)). Both can appear together.
 
 ```yaml
 on: webhook                  # string shorthand — opt in, no options
@@ -59,7 +60,8 @@ webhook-triggered run reads the request body via the [`event` context](#expressi
 
 ## Jobs
 
-`jobs:` is a map of job id → job definition.
+`jobs:` is a map of job id → job definition. A job runs **either** its own
+`steps:` **or** a `uses:` call to a reusable workflow — never both.
 
 ```yaml
 jobs:
@@ -83,7 +85,9 @@ jobs:
 | `strategy.matrix` | map | Fan-out into one leg per cell (see [Matrix](#matrix)). |
 | `env` | `map<string,string>` | Job-level env, layered over workflow env. |
 | `outputs` | `map<string,string>` | Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. |
-| `steps` | list | **Required.** The ordered steps (see [Steps](#steps)). |
+| `steps` | list | The ordered steps (see [Steps](#steps)). Required **unless** the job is a `uses:` call. |
+| `uses` | string | Call a [reusable workflow](#reusable-workflows) (`workflow/<name>` or a `./path.yaml`). Mutually exclusive with `steps`. |
+| `with` | map | Inputs for a `uses:` job, validated against the callee's `inputs:`. Compile-time values only — see [Reusable workflows](#reusable-workflows). |
 
 ## Machine types
 
@@ -159,6 +163,73 @@ A `run` step writes outputs by appending `key=value` lines to the file at the
 Read them inside an expression — `steps.meta.outputs.version` (same job) or, after
 the job re-exposes them via `outputs:`, `needs.<job>.outputs.version` (downstream
 jobs).
+
+## Reusable workflows
+
+A job may call **another whole workflow** instead of defining steps — the
+job-level `uses:` surface. For a guided walkthrough, see
+[Reusable workflows](../guide/reusable-workflows); this is the field reference.
+
+### Caller job (`uses:`)
+
+```yaml
+jobs:
+  build:
+    needs: [lint]
+    uses: workflow/build          # or a relative path: ./build.yaml
+    with:
+      target: staging             # validated against the callee's inputs:
+```
+
+| Reference form | Resolves to |
+|---|---|
+| `workflow/<name>` | the `.workflows/*.yaml` whose `name:` matches (like `work run <name>`). **Recommended.** |
+| `./path.yaml`, `../x/y.yaml` | a file relative to the **calling workflow's** directory. |
+
+Allowed keys on a `uses:` job: `uses` (required), `with`, `needs`, `if`/`when`,
+`strategy.matrix` (fans the whole call out per cell). **Not** allowed: `steps`,
+`runs-on`/`machine`, `env`, `outputs` — sizing belongs to the callee's jobs, env
+is per-workflow, and outputs come from the callee.
+
+::: warning `with:` is compile-time only
+A caller's `with:` may reference only **compile-time** contexts — `inputs`,
+`matrix`, `event`. Referencing `needs.*` or `steps.*` (a runtime value) is a
+compile error. Pass runtime **data** through `needs` instead: a callee's entry
+jobs inherit the caller job's `needs:`, so they read `needs.<job>.outputs.*` at
+run time like any job.
+:::
+
+### Callee opt-in (`on: workflow_call`)
+
+A workflow is callable only if it opts in. Inputs reuse the workflow's existing
+[`inputs:`](#inputs) block; outputs are declared by mapping job outputs.
+
+```yaml
+on: workflow_call               # shorthand — callable, exposes no outputs
+```
+
+```yaml
+on:
+  workflow_call:
+    outputs:
+      version: ${{ jobs.compile.outputs.version }}   # curate the exposed surface
+```
+
+| Form | Meaning |
+|---|---|
+| `on: workflow_call` | Opt in; expose no outputs. |
+| `on: { workflow_call: { outputs } }` | Opt in and map job outputs to workflow outputs. |
+
+The caller reads a callee's outputs through `needs.<callerJob>.outputs.<name>`,
+exactly like a normal job's outputs. Callees are inlined into the caller's flat
+DAG at compile time (one checkout, rendered whole by `work graph`); nesting is
+capped at 10 levels and cycles are a compile error.
+
+::: info CLI only (for now)
+Reusable workflows run via `work run` / `work graph`. The
+[web console](../guide/web-ui) rejects a `uses:` job with a clear error, and
+cross-repo references are reserved but not implemented.
+:::
 
 ## Inputs
 
