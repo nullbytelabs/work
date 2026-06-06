@@ -80,103 +80,122 @@ type Tok =
 const IDENT_START = /[A-Za-z_]/;
 const IDENT_PART = /[A-Za-z0-9_-]/;
 
+/**
+ * A scanner consumes one lexeme of `src` starting at `i`. It returns the token it
+ * produced (omitted for whitespace) plus the new index, or `null` if its lexeme
+ * doesn't start here so the next scanner gets a turn. A malformed-but-recognized
+ * lexeme throws (e.g. a lone `&`). Tried in `SCANNERS` order.
+ */
+type ScanResult = { tok?: Tok; next: number };
+type Scanner = (src: string, i: number) => ScanResult | null;
+
+const scanSpace: Scanner = (src, i) => {
+  const c = src[i]!;
+  return c === " " || c === "\t" || c === "\n" || c === "\r" ? { next: i + 1 } : null;
+};
+
+const scanParen: Scanner = (src, i) => {
+  if (src[i] === "(") return { tok: { t: "lparen" }, next: i + 1 };
+  if (src[i] === ")") return { tok: { t: "rparen" }, next: i + 1 };
+  return null;
+};
+
+const scanLogical: Scanner = (src, i) => {
+  const c = src[i]!;
+  if (c !== "=" && c !== "&" && c !== "|") return null;
+  const pair = src.slice(i, i + 2);
+  if (pair === "==" || pair === "&&" || pair === "||") return { tok: { t: "op", v: pair }, next: i + 2 };
+  throw new ConditionError(`unexpected "${c}" (did you mean "${c}${c}"?)`);
+};
+
+const scanBang: Scanner = (src, i) => {
+  if (src[i] !== "!") return null;
+  if (src[i + 1] === "=") return { tok: { t: "op", v: "!=" }, next: i + 2 };
+  return { tok: { t: "op", v: "!" }, next: i + 1 };
+};
+
+const scanString: Scanner = (src, i) => {
+  const quote = src[i]!;
+  if (quote !== "'" && quote !== '"') return null;
+  const n = src.length;
+  let j = i + 1;
+  let out = "";
+  while (j < n && src[j] !== quote) {
+    // GHA escapes a quote by doubling it inside the same quote style.
+    if (src[j] === quote && src[j + 1] === quote) {
+      out += quote;
+      j += 2;
+      continue;
+    }
+    out += src[j];
+    j++;
+  }
+  if (j >= n) throw new ConditionError("unterminated string literal");
+  return { tok: { t: "str", v: out }, next: j + 1 };
+};
+
+const scanNumber: Scanner = (src, i) => {
+  const c = src[i]!;
+  if (!/[0-9]/.test(c) && !(c === "-" && /[0-9]/.test(src[i + 1] ?? ""))) return null;
+  const n = src.length;
+  let j = i + 1;
+  while (j < n && /[0-9.]/.test(src[j]!)) j++;
+  const text = src.slice(i, j);
+  const num = Number(text);
+  if (Number.isNaN(num)) throw new ConditionError(`invalid number "${text}"`);
+  return { tok: { t: "num", v: num }, next: j };
+};
+
+const scanIdent: Scanner = (src, i) => {
+  if (!IDENT_START.test(src[i]!)) return null;
+  // A context path: dotted keys plus optional `[...]` index/key segments, e.g.
+  // `event.alerts[0].labels.severity`. We consume the whole path as one ident
+  // token; parsePrimary tokenizes its internal structure. Bracket contents are
+  // slurped verbatim (they may hold quotes/spaces) up to `]`.
+  const n = src.length;
+  let j = i + 1;
+  while (j < n) {
+    const d = src[j]!;
+    if (IDENT_PART.test(d) || d === ".") {
+      j++;
+    } else if (d === "[") {
+      const close = src.indexOf("]", j);
+      if (close === -1) throw new ConditionError("unbalanced '[' in context path");
+      j = close + 1;
+    } else {
+      break;
+    }
+  }
+  const word = src.slice(i, j);
+  if (word === "true" || word === "false") return { tok: { t: "bool", v: word === "true" }, next: j };
+  if (word === "null") return { tok: { t: "null" }, next: j };
+  return { tok: { t: "ident", v: word }, next: j };
+};
+
+/** Ordered so the first applicable scanner wins (matches the original dispatch). */
+const SCANNERS: readonly Scanner[] = [scanSpace, scanParen, scanLogical, scanBang, scanString, scanNumber, scanIdent];
+
 function tokenize(src: string): Tok[] {
   const toks: Tok[] = [];
   let i = 0;
   const n = src.length;
   while (i < n) {
-    const c = src[i]!;
-    if (c === " " || c === "\t" || c === "\n" || c === "\r") {
-      i++;
-      continue;
-    }
-    if (c === "(") {
-      toks.push({ t: "lparen" });
-      i++;
-      continue;
-    }
-    if (c === ")") {
-      toks.push({ t: "rparen" });
-      i++;
-      continue;
-    }
-    if (c === "=" || c === "&" || c === "|") {
-      const pair = src.slice(i, i + 2);
-      if (pair === "==" || pair === "&&" || pair === "||") {
-        toks.push({ t: "op", v: pair });
-        i += 2;
-        continue;
-      }
-      throw new ConditionError(`unexpected "${c}" (did you mean "${c}${c}"?)`);
-    }
-    if (c === "!") {
-      if (src[i + 1] === "=") {
-        toks.push({ t: "op", v: "!=" });
-        i += 2;
-      } else {
-        toks.push({ t: "op", v: "!" });
-        i++;
-      }
-      continue;
-    }
-    if (c === "'" || c === '"') {
-      const quote = c;
-      let j = i + 1;
-      let out = "";
-      while (j < n && src[j] !== quote) {
-        // GHA escapes a quote by doubling it inside the same quote style.
-        if (src[j] === quote && src[j + 1] === quote) {
-          out += quote;
-          j += 2;
-          continue;
-        }
-        out += src[j];
-        j++;
-      }
-      if (j >= n) throw new ConditionError("unterminated string literal");
-      toks.push({ t: "str", v: out });
-      i = j + 1;
-      continue;
-    }
-    if (/[0-9]/.test(c) || (c === "-" && /[0-9]/.test(src[i + 1] ?? ""))) {
-      let j = i + 1;
-      while (j < n && /[0-9.]/.test(src[j]!)) j++;
-      const text = src.slice(i, j);
-      const num = Number(text);
-      if (Number.isNaN(num)) throw new ConditionError(`invalid number "${text}"`);
-      toks.push({ t: "num", v: num });
-      i = j;
-      continue;
-    }
-    if (IDENT_START.test(c)) {
-      // A context path: dotted keys plus optional `[...]` index/key segments,
-      // e.g. `event.alerts[0].labels.severity`. We consume the whole path as one
-      // ident token; parsePrimary tokenizes its internal structure. Bracket
-      // contents are slurped verbatim (they may hold quotes/spaces) up to `]`.
-      let j = i + 1;
-      while (j < n) {
-        const d = src[j]!;
-        if (IDENT_PART.test(d) || d === ".") {
-          j++;
-        } else if (d === "[") {
-          const close = src.indexOf("]", j);
-          if (close === -1) throw new ConditionError("unbalanced '[' in context path");
-          j = close + 1;
-        } else {
-          break;
-        }
-      }
-      const word = src.slice(i, j);
-      if (word === "true" || word === "false") toks.push({ t: "bool", v: word === "true" });
-      else if (word === "null") toks.push({ t: "null" });
-      else toks.push({ t: "ident", v: word });
-      i = j;
-      continue;
-    }
-    throw new ConditionError(`unexpected character "${c}" in condition`);
+    const result = scanOne(src, i);
+    if (!result) throw new ConditionError(`unexpected character "${src[i]!}" in condition`);
+    if (result.tok) toks.push(result.tok);
+    i = result.next;
   }
   toks.push({ t: "eof" });
   return toks;
+}
+
+/** Try each scanner at `i`; return the first match (or null if none applies). */
+function scanOne(src: string, i: number): ScanResult | null {
+  for (const scan of SCANNERS) {
+    const r = scan(src, i);
+    if (r) return r;
+  }
+  return null;
 }
 
 // --- AST ---------------------------------------------------------------------
