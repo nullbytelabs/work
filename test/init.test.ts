@@ -90,12 +90,12 @@ describe("runInit --global (writes the XDG global config)", () => {
     await rm(xdg, { recursive: true, force: true });
   });
 
-  it("writes config.json under $XDG_CONFIG_HOME/work and does NOT touch the project", async () => {
+  it("writes work.json under $XDG_CONFIG_HOME/work and does NOT touch the project", async () => {
     const proj = await mkdtemp(join(tmpdir(), "pi-wf-gproj-"));
     try {
       const code = await runInit(["--global"], proj);
       assert.equal(code, 0);
-      assert.ok(existsSync(join(xdg, "work", "config.json")));
+      assert.ok(existsSync(join(xdg, "work", "work.json")));
       assert.equal(existsSync(join(proj, ".workflows")), false);
       assert.equal(existsSync(join(proj, CONFIG_FILENAME)), false);
     } finally {
@@ -107,14 +107,14 @@ describe("runInit --global (writes the XDG global config)", () => {
     const { writeFile, mkdir } = await import("node:fs/promises");
     await mkdir(join(xdg, "work"), { recursive: true });
     const mine = '{"providers":{},"models":{},"_mine":true}';
-    await writeFile(join(xdg, "work", "config.json"), mine);
+    await writeFile(join(xdg, "work", "work.json"), mine);
     const code = await runInit(["--global"], "/tmp");
     assert.equal(code, 0);
-    assert.equal(await (await import("node:fs/promises")).readFile(join(xdg, "work", "config.json"), "utf-8"), mine);
+    assert.equal(await (await import("node:fs/promises")).readFile(join(xdg, "work", "work.json"), "utf-8"), mine);
   });
 
   it("--dry-run writes nothing", async () => {
     await runInit(["--global", "--dry-run"], "/tmp");
-    assert.equal(existsSync(join(xdg, "work", "config.json")), false);
+    assert.equal(existsSync(join(xdg, "work", "work.json")), false);
   });
 });

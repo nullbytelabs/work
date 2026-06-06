@@ -142,14 +142,14 @@ describe("runChecks — config", () => {
   });
   it("passes when a present config loads cleanly", async () => {
     const checks = await runChecks(
-      baseProbes({ exists: (p) => p.endsWith("pi-workflows.config.json"), loadConfig: async () => ({ providers: {}, models: {} }) }),
+      baseProbes({ exists: (p) => p.endsWith("work.json"), loadConfig: async () => ({ providers: {}, models: {} }) }),
     );
     assert.equal(byId(checks, "config").status, "pass");
   });
   it("fails and echoes the message when a present config is broken", async () => {
     const checks = await runChecks(
       baseProbes({
-        exists: (p) => p.endsWith("pi-workflows.config.json"),
+        exists: (p) => p.endsWith("work.json"),
         loadConfig: async () => {
           throw new UserFacingError("config.models.x references unknown provider \"y\"");
         },
@@ -159,7 +159,7 @@ describe("runChecks — config", () => {
     assert.equal(c.status, "fail");
     assert.match(c.detail ?? "", /unknown provider/);
   });
-  it("honours $PI_WORKFLOWS_CONFIG over the default path", async () => {
+  it("honours $WORK_CONFIG over the default path", async () => {
     const seen: string[] = [];
     await runChecks(
       baseProbes({
@@ -214,7 +214,7 @@ describe("overallStatus", () => {
       baseProbes({
         platform: "linux",
         pathAccess: () => true,
-        exists: (p) => p.endsWith(".workflows") || p.endsWith("pi-workflows.config.json"),
+        exists: (p) => p.endsWith(".workflows") || p.endsWith("work.json"),
         loadConfig: async () => ({ providers: {}, models: {} }),
       }),
     );

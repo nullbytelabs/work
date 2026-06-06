@@ -7,7 +7,7 @@
 #
 # Agent packages live in `.workflows/agents/` (`uses: agent/<name>`). Tests inject
 # a mock runner (no inference). For a real review against a model:
-#   ./pi-workflows ./test/e2e/agent-project/.workflows/review.yaml --config pi-workflows.config.json
+#   ./pi-workflows ./test/e2e/agent-project/.workflows/review.yaml --config work.json
 ---
 name: review
 

@@ -114,13 +114,13 @@ gondolin.ts") — so the two code paths can't drift in their messaging.
 ## 2. `work init` & the config hierarchy / merge model
 
 ### Where the global config lives (PROPOSED)
-The user's sketch is `~/.work/config.json`. Recommend **XDG-first**, resolved:
-1. `$XDG_CONFIG_HOME/work/config.json`
-2. `~/.config/work/config.json` (XDG default)
-3. `~/.work/config.json` — **read-only fallback** if it already exists (don't strand early
+The user's sketch is `~/.work/work.json`. Recommend **XDG-first**, resolved:
+1. `$XDG_CONFIG_HOME/work/work.json`
+2. `~/.config/work/work.json` (XDG default)
+3. `~/.work/work.json` — **read-only fallback** if it already exists (don't strand early
    adopters who followed the sketch)
 
-`work init --global` *writes* to `~/.config/work/config.json`. Rationale: `~/.config` is the
+`work init --global` *writes* to `~/.config/work/work.json`. Rationale: `~/.config` is the
 de-facto CLI convention on **both** macOS and Linux (git, gh, ripgrep, starship…), one code
 path, relocatable via `$XDG_CONFIG_HOME`; `~/.work/` pollutes `$HOME` and isn't redirectable.
 Keep a clean split: **config under `~/.config/work/`, mutable state/db under `~/.work/`** (the
@@ -137,9 +137,9 @@ model whose `provider` isn't in *that same file's* `providers` throws
 provider lives in global) would be rejected. **Validation must move to post-merge.**
 
 Precedence (lowest → highest, later wins):
-1. **Global** `~/.config/work/config.json` — base catalog
-2. **Project** `<cwd>/pi-workflows.config.json` (`DEFAULT_CONFIG_PATH`) — overrides global
-3. **`$PI_WORKFLOWS_CONFIG`** — names the project layer's file (still merges over global)
+1. **Global** `~/.config/work/work.json` — base catalog
+2. **Project** `<cwd>/work.json` (`DEFAULT_CONFIG_PATH`) — overrides global
+3. **`$WORK_CONFIG`** — names the project layer's file (still merges over global)
 4. **`--config <file>`** — highest config-*file* tier (`--config > env > default`)
 5. **Process env `$VAR`** — *not a layer*; only fills `apiKey` values at resolve time via
    `expandEnv` (`src/config/index.ts:119`). Orthogonal to structural merge.
@@ -181,13 +181,13 @@ agent egress/key-injection activates from global — *intended*, since global is
 ### Files `--project` writes (PROPOSED)
 ```
 .workflows/hello-world.yaml             # always (mirrors test/e2e/hello-world-gondolin)
-pi-workflows.config.json                # always — the project layer (NO real secrets, $ENV refs only)
+work.json                # always — the project layer (NO real secrets, $ENV refs only)
 .claude/skills/work-workflows/SKILL.md  # only with --include-skill — a skill for the user's OWN
 .agents/skills/work-workflows/SKILL.md  #   Claude Code / Amp (NOT a workflow agent). See §3.
 ```
-Config filename is `pi-workflows.config.json` **at the project root** (= `DEFAULT_CONFIG_PATH`,
+Config filename is `work.json` **at the project root** (= `DEFAULT_CONFIG_PATH`,
 found with zero flags) — *not* inside `.workflows/`. Minimal valid starter uses
-`"apiKey": "$FIREWORKS_API_KEY"` (matches `pi-workflows.config.example.json`).
+`"apiKey": "$FIREWORKS_API_KEY"` (matches `work.example.json`).
 
 ### Idempotency & safety (PROPOSED)
 - **Never clobber by default** — skip-and-report existing files (`writeFile {flag:"wx"}`,
@@ -218,7 +218,7 @@ bug class (which has bitten this repo before).
 |---|---|---|
 | `*.yaml` (workflows, agent.yaml) | **Templates** (embedded TS strings, `{{placeholder}}`) | the teaching **header comments** *are* the value; `yaml.stringify` drops them |
 | `instructions.md` / `task.md` / `SKILL.md` | **Templates** | pure prose |
-| `pi-workflows.config.json` | **Codegen** (`JSON.stringify(obj, null, 2)`) | JSON is comment-free and strictly parsed (`parseConfig`); codegen is exact-by-construction |
+| `work.json` | **Codegen** (`JSON.stringify(obj, null, 2)`) | JSON is comment-free and strictly parsed (`parseConfig`); codegen is exact-by-construction |
 
 The seed corpus proves the point: every `test/e2e/*/workflow.yaml` leads with a `# description:`
 / `# usage:` header and inline annotations (`if: always() # runs even if…`) — that's the

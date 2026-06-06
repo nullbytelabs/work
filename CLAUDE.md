@@ -115,7 +115,7 @@ checks out the **project root** (parent) into each job; a standalone file checks
 
 ### Other subsystems
 
-- **`src/config/`** — provider/model config for agent steps (`pi-workflows.config.json`, gitignored
+- **`src/config/`** — provider/model config for agent steps (`work.json`, gitignored
   because it holds keys; commit `*.example.json`). Layered: global creds home + project override;
   `apiKey` supports `$VAR` expansion. `--no-global` for a hermetic run.
 - **`src/tui/`** — presenters. A live DAG-aware board on an interactive TTY; buffered per-job

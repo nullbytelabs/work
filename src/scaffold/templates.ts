@@ -9,7 +9,7 @@
  * Split by file type (see docs/init-doctor-scaffolding-research.md §3):
  *   - YAML / markdown → TEMPLATES — the teaching header comments *are* the value,
  *     and `yaml.stringify` would drop them.
- *   - config.json     → CODEGEN — JSON is comment-free and strictly parsed, so
+ *   - work.json       → CODEGEN — JSON is comment-free and strictly parsed, so
  *     `JSON.stringify` is exact-by-construction.
  *
  * `scaffoldFiles()` is pure: it returns the intended file map and touches no FS,
@@ -25,7 +25,7 @@ export function isTemplateName(s: string): s is TemplateName {
 }
 
 /** Project config filename — the project layer, found with zero flags. */
-export const CONFIG_FILENAME = "pi-workflows.config.json";
+export const CONFIG_FILENAME = "work.json";
 
 /**
  * Substitute `{{name}}` (exact token, no surrounding spaces) for the slug. The
@@ -103,7 +103,7 @@ const AGENT_TASK_MD = `Describe the task for the {{name}} agent here. The agent 
 workspace (the checkout) and can read the files directly.
 `;
 
-/** The starter project config (codegen). Mirrors pi-workflows.config.example.json. */
+/** The starter project config (codegen). Mirrors work.example.json. */
 const STARTER_CONFIG = {
   providers: {
     fireworks: {
@@ -162,7 +162,7 @@ export function scaffoldFiles(opts: ScaffoldOptions): Map<string, string> {
 /**
  * The starter project config (codegen). `init` always writes this; the writer
  * preserves an existing one (it may hold real creds). Mirrors the
- * `pi-workflows.config.example.json` shape — `apiKey` is an `$ENV` ref, never a
+ * `work.example.json` shape — `apiKey` is an `$ENV` ref, never a
  * literal secret.
  */
 export function starterConfigFile(): { path: string; contents: string } {

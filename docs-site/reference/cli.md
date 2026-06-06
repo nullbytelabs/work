@@ -38,10 +38,10 @@ work init [--project | --global] [--include-skill] [--from-template <name>] [--f
 
 Scaffolds a project so it's ready to run. With no flags (or `--project`, the
 default) it writes a starter workflow into `.workflows/` plus a project
-`pi-workflows.config.json`:
+`work.json`:
 
 ```bash
-work init                      # .workflows/hello-world.yaml + pi-workflows.config.json
+work init                      # .workflows/hello-world.yaml + work.json
 work init --include-skill      # also a Claude Code / Amp skill (see below)
 work init --from-template agent-action   # start from the agent template instead
 ```
@@ -50,14 +50,14 @@ work init --from-template agent-action   # start from the agent template instead
 overwritten), the config is never clobbered, and a re-run that changes nothing is a
 clean "already initialized" exit `0`.
 
-`--global` instead writes a **machine-wide** config to `~/.config/work/config.json`
+`--global` instead writes a **machine-wide** config to `~/.config/work/work.json`
 (XDG) — the home for your providers/models, merged underneath every project's config
 at run time. See [Configuration discovery](#configuration-discovery).
 
 | Option | Effect |
 |---|---|
 | `--project` | Scaffold the current project (the default). |
-| `--global` | Write the machine-wide `~/.config/work/config.json` instead. |
+| `--global` | Write the machine-wide `~/.config/work/work.json` instead. |
 | `--include-skill` | Also write a developer skill (`SKILL.md`) teaching your **own** coding agent (Claude Code / Amp) to drive the `work` CLI. This is unrelated to in-workflow agent steps. |
 | `--from-template <name>` | Starter template: `hello-world` (default) or `agent-action`. |
 | `--force` | Overwrite the scaffold's own files (never the config). |
@@ -182,7 +182,7 @@ It runs these checks:
 | **QEMU installed** | QEMU is on `PATH`. |
 | **Hardware acceleration** | HVF (macOS) or KVM (Linux) is available. |
 | **Guest image cached** | Whether the ~200 MB guest image is already downloaded. |
-| **Config valid** | `pi-workflows.config.json` (if present) parses and is well-formed. |
+| **Config valid** | `work.json` (if present) parses and is well-formed. |
 | **`.workflows/` present** | Whether a project `.workflows/` directory exists. |
 
 Pass `--json` for machine-readable output.
@@ -198,7 +198,7 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 | `--web` | (standalone) | Open the local web console over the workspace's `.workflows/` instead of running a workflow. |
 | `--port <n>` | `--web` | Port the web console binds (default `4280`; `1`–`65535`). |
 | `--inputs '<json>'` | run | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. |
-| `--config <file>` | run | Project-layer model/provider config file. Default: `./pi-workflows.config.json`, or `$PI_WORKFLOWS_CONFIG`. |
+| `--config <file>` | run | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
 | `--no-global` | run | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
 | `--workdir <dir>` | run | Where job workspaces are staged (default: a temp dir). |
 | `--quiet` | run | Suppress the live board / per-job output. |
@@ -223,11 +223,11 @@ a script or scheduler cleanly.
 For commands that may need a model (agent steps), config is loaded in **two
 layers** — a machine-wide global file, then one project layer that overrides it:
 
-1. **Global** (lowest precedence): `~/.config/work/config.json` (XDG —
-   `$XDG_CONFIG_HOME/work/config.json` if set; `~/.work/config.json` is read as a
+1. **Global** (lowest precedence): `~/.config/work/work.json` (XDG —
+   `$XDG_CONFIG_HOME/work/work.json` if set; `~/.work/work.json` is read as a
    fallback). Skipped entirely with `--no-global`. Created by `work init --global`.
 2. **Project** (overrides global), chosen by: `--config <file>` >
-   `$PI_WORKFLOWS_CONFIG` > `./pi-workflows.config.json` if it exists.
+   `$WORK_CONFIG` > `./work.json` if it exists.
 
 The layers are deep-merged (`providers`/`models` union, the project layer winning
 on a key collision; `defaultModel` last-writer-wins), and validated **after**

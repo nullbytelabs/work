@@ -83,7 +83,7 @@ on:
 
 ### 2. Wire up the hook in config
 
-The operator declares the matching receiver in `pi-workflows.config.json`. This is
+The operator declares the matching receiver in `work.json`. This is
 where the secret and auth scheme live — referenced by name, never committed
 literally. See the [Configuration reference](../reference/configuration#webhooks):
 

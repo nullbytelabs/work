@@ -865,7 +865,7 @@ async function viewWebhooks() {
   if (!hooks.length) {
     list.outerHTML = emptyState(
       'No webhooks configured',
-      'Add a <code>webhooks:</code> block to <code>pi-workflows.config.json</code> mapping a hook ' +
+      'Add a <code>webhooks:</code> block to <code>work.json</code> mapping a hook ' +
       'name to a workflow, then reload to see it here.');
     return;
   }

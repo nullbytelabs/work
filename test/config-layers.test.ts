@@ -120,23 +120,23 @@ describe("loadMergedConfig", () => {
 describe("global config path resolution", () => {
   it("prefers XDG, then ~/.config/work, then the ~/.work fallback", () => {
     const cands = globalConfigCandidates({ XDG_CONFIG_HOME: "/xdg" }, "/home/u");
-    assert.deepEqual(cands, ["/xdg/work/config.json", "/home/u/.config/work/config.json", "/home/u/.work/config.json"]);
+    assert.deepEqual(cands, ["/xdg/work/work.json", "/home/u/.config/work/work.json", "/home/u/.work/work.json"]);
   });
   it("omits the XDG candidate when XDG_CONFIG_HOME is unset", () => {
     const cands = globalConfigCandidates({}, "/home/u");
-    assert.deepEqual(cands, ["/home/u/.config/work/config.json", "/home/u/.work/config.json"]);
+    assert.deepEqual(cands, ["/home/u/.config/work/work.json", "/home/u/.work/work.json"]);
   });
   it("write path is XDG-first and never the ~/.work fallback", () => {
-    assert.equal(globalConfigWritePath({ XDG_CONFIG_HOME: "/xdg" }, "/home/u"), "/xdg/work/config.json");
-    assert.equal(globalConfigWritePath({}, "/home/u"), "/home/u/.config/work/config.json");
+    assert.equal(globalConfigWritePath({ XDG_CONFIG_HOME: "/xdg" }, "/home/u"), "/xdg/work/work.json");
+    assert.equal(globalConfigWritePath({}, "/home/u"), "/home/u/.config/work/work.json");
   });
   it("resolveGlobalConfigPath returns the first existing candidate", async () => {
     const home = await mkdtemp(join(tmpdir(), "pi-wf-home-"));
     try {
       assert.equal(resolveGlobalConfigPath({}, home), undefined); // none yet
       await mkdir(join(home, ".config", "work"), { recursive: true });
-      await writeFile(join(home, ".config", "work", "config.json"), "{}");
-      assert.equal(resolveGlobalConfigPath({}, home), join(home, ".config", "work", "config.json"));
+      await writeFile(join(home, ".config", "work", "work.json"), "{}");
+      assert.equal(resolveGlobalConfigPath({}, home), join(home, ".config", "work", "work.json"));
     } finally {
       await rm(home, { recursive: true, force: true });
     }

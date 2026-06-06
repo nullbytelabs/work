@@ -1,8 +1,8 @@
 /**
  * pi-workflows config — provider/model setup for agentic (`uses: agent/…`) steps.
  *
- * A JSON file (default `./pi-workflows.config.json`, or `--config`, or
- * `PI_WORKFLOWS_CONFIG`) declares OpenAI-compatible providers and named models.
+ * A JSON file (default `./work.json`, or `--config`, or `WORK_CONFIG`) declares
+ * OpenAI-compatible providers and named models.
  * Each deployment points this at its own endpoint/key. Secrets in `apiKey`
  * support `$VAR` / `${VAR}` env expansion so the file itself need not hold them.
  */
@@ -299,9 +299,9 @@ export function parseConfig(raw: unknown): PiWorkflowsConfig {
   return validateConfig(parsePartialConfig(raw));
 }
 
-/** Project config filename — found with zero flags at the project root. */
-export const PROJECT_CONFIG_FILENAME = "pi-workflows.config.json";
-const GLOBAL_CONFIG_BASENAME = "config.json";
+/** Config filename — the same `work.json` everywhere (project root or XDG dir). */
+export const PROJECT_CONFIG_FILENAME = "work.json";
+const GLOBAL_CONFIG_BASENAME = "work.json";
 
 /**
  * Candidate global-config paths in read precedence (first existing wins):
@@ -336,7 +336,7 @@ export interface ConfigLayer {
 
 /**
  * The ordered config layers to load (lowest precedence first): the global file
- * (optional), then exactly one project layer — `--config` > `$PI_WORKFLOWS_CONFIG`
+ * (optional), then exactly one project layer — `--config` > `$WORK_CONFIG`
  * (both required-to-exist) > the default project file (optional). `--no-global`
  * drops the global layer for a hermetic run.
  */
@@ -348,8 +348,8 @@ export function resolveConfigLayers(cliPath: string | undefined, opts: { noGloba
   }
   if (cliPath) {
     layers.push({ path: resolve(cliPath), required: true });
-  } else if (process.env["PI_WORKFLOWS_CONFIG"]) {
-    layers.push({ path: resolve(process.env["PI_WORKFLOWS_CONFIG"]), required: true });
+  } else if (process.env["WORK_CONFIG"]) {
+    layers.push({ path: resolve(process.env["WORK_CONFIG"]), required: true });
   } else {
     layers.push({ path: resolve(PROJECT_CONFIG_FILENAME), required: false });
   }

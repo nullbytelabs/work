@@ -12,8 +12,8 @@ your own project and drop into any workflow.
 ## 1. Configure a model
 
 Agent steps need a model. Declare providers and named models in
-`pi-workflows.config.json` (loaded automatically from the working directory; or
-pass `--config`, or set `$PI_WORKFLOWS_CONFIG`):
+`work.json` (loaded automatically from the working directory; or
+pass `--config`, or set `$WORK_CONFIG`):
 
 ```json
 {
@@ -44,8 +44,8 @@ is a leaked key.
 :::
 
 ::: tip Scaffold the config
-`work init` writes a starter `pi-workflows.config.json` like this, and
-`work init --global` puts one at `~/.config/work/config.json` to share across
+`work init` writes a starter `work.json` like this, and
+`work init --global` puts one at `~/.config/work/work.json` to share across
 projects. Fill in a real `$FIREWORKS_API_KEY` (or your provider's key).
 :::
 

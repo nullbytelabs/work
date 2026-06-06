@@ -19,8 +19,8 @@ import { WORKFLOWS_DIR } from "../project.ts";
 import { loadConfig } from "../config/index.ts";
 import { UserFacingError } from "../errors.ts";
 
-/** Default project config filename — mirrors DEFAULT_CONFIG_PATH in cli.ts. */
-const DEFAULT_CONFIG_PATH = "pi-workflows.config.json";
+/** Default project config filename — mirrors PROJECT_CONFIG_FILENAME in config/. */
+const DEFAULT_CONFIG_PATH = "work.json";
 
 /** The gondolin SDK specifier — single source so doctor and the target agree. */
 const GONDOLIN_SPECIFIER = "@earendil-works/gondolin";
@@ -74,7 +74,7 @@ export interface DoctorProbes {
   exists(path: string): boolean;
   /** Load + validate a config file; throws (UserFacingError) on bad config. */
   loadConfig(path: string): Promise<unknown>;
-  /** $PI_WORKFLOWS_CONFIG, if set. */
+  /** $WORK_CONFIG, if set. */
   configEnv?: string;
 }
 
@@ -281,6 +281,6 @@ export function defaultProbes(): DoctorProbes {
     },
     exists: (path) => existsSync(path),
     loadConfig: (path) => loadConfig(path),
-    ...(process.env["PI_WORKFLOWS_CONFIG"] ? { configEnv: process.env["PI_WORKFLOWS_CONFIG"] } : {}),
+    ...(process.env["WORK_CONFIG"] ? { configEnv: process.env["WORK_CONFIG"] } : {}),
   };
 }

@@ -249,7 +249,7 @@ runner is injectable, so tests use a mock and never call inference. (Tool-using
 agents, `runs-on` tool∩target enforcement, and `@ref`/override paths are next —
 see `docs/agent-uses-interface.md`.)
 
-**Config** (`--config <file>`, `$PI_WORKFLOWS_CONFIG`, or `./pi-workflows.config.json`):
+**Config** (`--config <file>`, `$WORK_CONFIG`, or `./work.json`):
 
 ```json
 {

@@ -32,10 +32,10 @@ Run them by name (the run resolves `.workflows/*.yaml` by the `name:` inside):
 ./pi-workflows --workspace ./test/e2e/agent-project run ci
 
 # the agent review (needs a model config)
-./pi-workflows --workspace ./test/e2e/agent-project run review --config pi-workflows.config.json
+./pi-workflows --workspace ./test/e2e/agent-project run review --config work.json
 
 # or ad-hoc by path
-./pi-workflows ./test/e2e/agent-project/.workflows/review.yaml --config pi-workflows.config.json
+./pi-workflows ./test/e2e/agent-project/.workflows/review.yaml --config work.json
 ```
 
 `node_modules/` is intentionally not part of the checkout — each job installs

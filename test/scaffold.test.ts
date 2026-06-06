@@ -58,7 +58,7 @@ describe("scaffoldFiles — agent-action", () => {
     assert.match(files.get(".workflows/review.yaml")!, /uses: agent\/review/);
     // instructions.md must be non-empty or loadAgent throws.
     assert.ok(files.get(".workflows/agents/review/instructions.md")!.trim().length > 0);
-    // config.json is valid JSON and parses as a config object.
+    // work.json is valid JSON and parses as a config object.
     const cfg = JSON.parse(files.get(CONFIG_FILENAME)!);
     assert.equal(cfg.defaultModel, "kimi");
     assert.equal(cfg.providers.fireworks.apiKey, "$FIREWORKS_API_KEY"); // $ENV ref, never a literal secret
@@ -120,7 +120,7 @@ describe("runCreate (integration, real temp dir)", () => {
     assert.equal(existsSync(join(proj, ".workflows", "deploy.yaml")), false);
   });
 
-  it("never overwrites an existing config.json, even with --force", async () => {
+  it("never overwrites an existing work.json, even with --force", async () => {
     const cfgPath = join(proj, CONFIG_FILENAME);
     const original = '{"providers":{},"models":{},"defaultModel":null,"_mine":true}';
     await writeFile(cfgPath, original);

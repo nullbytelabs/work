@@ -1,6 +1,6 @@
 # Configuration
 
-`pi-workflows.config.json` declares the **providers** and **models** that
+`work.json` declares the **providers** and **models** that
 [agent steps](../guide/agent-steps) use, and — optionally — the **datasources** a
 `run:` step may reach and the **webhooks** that can trigger a workflow. You only
 need it if your workflows run `uses: agent/<name>` steps, call out to a declared
@@ -12,20 +12,20 @@ all.
 Config is loaded in **two layers** — a machine-wide global file, then one project
 layer that overrides it:
 
-1. **Global** (lowest precedence) — `~/.config/work/config.json`
-   (`$XDG_CONFIG_HOME/work/config.json` when set; `~/.work/config.json` is read as a
+1. **Global** (lowest precedence) — `~/.config/work/work.json`
+   (`$XDG_CONFIG_HOME/work/work.json` when set; `~/.work/work.json` is read as a
    legacy fallback). This is the natural home for your providers and models, shared
    across every project. Create it with `work init --global`. Skip it for a single
    run with `--no-global`.
 2. **Project** (overrides global) — chosen by, in order:
    1. the path passed to `--config <file>`,
-   2. the path in `$PI_WORKFLOWS_CONFIG`,
-   3. `./pi-workflows.config.json` in the working directory, if it exists.
+   2. the path in `$WORK_CONFIG`,
+   3. `./work.json` in the working directory, if it exists.
 
 An absent config is fine until an agent step actually needs a model.
 
 ::: tip Scaffold it
-`work init` writes a starter project `pi-workflows.config.json`, and
+`work init` writes a starter project `work.json`, and
 `work init --global` writes the machine-wide one. Neither ever overwrites an
 existing config.
 :::
@@ -185,6 +185,6 @@ written into the guest, so it isn't visible to anything running inside the micro
 ## Example
 
 A complete example ships in the repo as
-[`pi-workflows.config.example.json`](https://github.com/nullbytelabs/pi-workflows/blob/main/pi-workflows.config.example.json).
+[`work.example.json`](https://github.com/nullbytelabs/pi-workflows/blob/main/work.example.json).
 Any OpenAI-compatible provider works — point `baseUrl` at your endpoint and set the
 matching key.

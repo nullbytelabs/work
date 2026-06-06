@@ -167,7 +167,7 @@ When a workflow lives in `.workflows/`, the **project root** (the parent) is wha
 
 An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) coding agent **inside the job's micro-VM**, with its full toolset rooted at the checkout — so it can read and edit the project's files directly. The model is reached only through the sandbox's mediated egress, and your API key is injected host-side and never enters the guest.
 
-**1. Configure a model** in `pi-workflows.config.json` (loaded automatically from the working directory; or pass `--config`, or set `$PI_WORKFLOWS_CONFIG`):
+**1. Configure a model** in `work.json` (loaded automatically from the working directory; or pass `--config`, or set `$WORK_CONFIG`):
 
 ```json
 {
@@ -188,7 +188,7 @@ An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-
 }
 ```
 
-`apiKey` supports `$VAR` / `${VAR}` expansion, so secrets stay in your environment. See [`pi-workflows.config.example.json`](pi-workflows.config.example.json).
+`apiKey` supports `$VAR` / `${VAR}` expansion, so secrets stay in your environment. See [`work.example.json`](work.example.json).
 
 **2. Define an agent** as a package under `.workflows/agents/<name>/`:
 
@@ -229,7 +229,7 @@ work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
 |---|---|
 | `--workspace <dir>` | project root for `run <name>` / `graph <name>` (default: current dir) |
 | `--inputs '<json>'` | values for the workflow's declared `inputs:` |
-| `--config <file>` | model/provider config (default: `./pi-workflows.config.json`, or `$PI_WORKFLOWS_CONFIG`) |
+| `--config <file>` | model/provider config (default: `./work.json`, or `$WORK_CONFIG`) |
 | `--workdir <dir>` | where job workspaces are staged (default: a temp dir) |
 | `--quiet` | suppress the live board / per-job output |
 | `--steps` | (graph) expand each job into its ordered steps |

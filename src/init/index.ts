@@ -1,7 +1,7 @@
 /**
  * `work init` — initialize a project for the `work` CLI.
  *
- * Writes a starter workflow into `.workflows/` plus a project `pi-workflows.config.json`,
+ * Writes a starter workflow into `.workflows/` plus a project `work.json`,
  * and (with `--include-skill`) a developer Claude Code / Amp skill that teaches
  * the user's *own* coding agent to drive the CLI — unrelated to the engine's
  * in-gondolin agent steps (docs/init-doctor-scaffolding-research.md §2–§3).
@@ -11,7 +11,7 @@
  *
  *   work init [--project | --global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]
  *
- * `--global` writes a machine-wide config (XDG: ~/.config/work/config.json) — the
+ * `--global` writes a machine-wide config (XDG: ~/.config/work/work.json) — the
  * home for providers/models, merged under every project config at run time.
  */
 import { writeFile, mkdir } from "node:fs/promises";

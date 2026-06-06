@@ -411,7 +411,7 @@ restart.
 | Re-run failed jobs (resume) | Cross-job orchestration is plain JS, not durable | **Out of scope** |
 | Cancel | `cancel_task` exists in schema but not plumbed runtime→target | **Out of scope (nice-to-have)** |
 | Branch/ref dropdown | No branch concept (checkout = project root) | **N/A by design** |
-| Secrets/variables manager | Config is file-based (`pi-workflows.config.json`, `$VAR`) | **Out of scope** |
+| Secrets/variables manager | Config is file-based (`work.json`, `$VAR`) | **Out of scope** |
 
 ---
 

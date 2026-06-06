@@ -9,7 +9,7 @@
  *   - Two independent collision guards: the workflow *filename* and the
  *     declared `name:` (a duplicate name makes `run <name>` ambiguous).
  *   - Never clobber by default: existing files are skipped-and-reported; the
- *     workflow file needs `--force` to overwrite, and `pi-workflows.config.json`
+ *     workflow file needs `--force` to overwrite, and `work.json`
  *     is never overwritten (it may hold real creds).
  */
 import { existsSync } from "node:fs";
