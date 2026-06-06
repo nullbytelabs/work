@@ -75,5 +75,9 @@ describe("RunManager concurrency bound", () => {
 
     // Both accepted runs are in history; the shed one never got a record.
     assert.equal((await rm.list()).length, 2);
+
+    // Drain before the shared engine closes (in after()) so no run's worker is
+    // left polling an ended pool.
+    await rm.whenIdle();
   });
 });

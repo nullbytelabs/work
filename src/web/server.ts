@@ -703,6 +703,11 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
+      // Drain in-flight background runs before touching the engine: each run's
+      // worker is closed inside its run, so once they settle no worker is left
+      // polling. Closing the engine under a live worker orphans it against an
+      // ended pool ("Cannot use a pool after calling end on the pool").
+      await runManager.whenIdle();
       if (ownsEngine) await engine.close();
     },
   };

@@ -122,6 +122,16 @@ export class RunManager {
   private active = 0;
   /** FIFO of queued launch thunks, run as slots free up. */
   private readonly queue: Array<() => void> = [];
+  /**
+   * The settle-promise of every in-flight `launch()` (the full
+   * `.then().catch().finally()` chain). `whenIdle()` awaits these so a caller can
+   * drain background runs before tearing the engine down — each run's worker is
+   * closed inside `startRun` *before* its chain settles, so once these resolve no
+   * worker is left polling a pool that's about to end. Without this drain, closing
+   * the engine mid-run orphans a worker that spins forever on `claimTasks`
+   * ("Cannot use a pool after calling end on the pool") and hangs the process.
+   */
+  private readonly inFlight = new Set<Promise<void>>();
 
   constructor(opts: RunManagerOptions) {
     this.engine = opts.engine;
@@ -188,7 +198,7 @@ export class RunManager {
   /** Actually run a dispatched workflow in the background; release its slot on settle. */
   private launch(record: RunRecord, opts: DispatchOptions, presenter: WebPresenter, inserted: Promise<void>): void {
     record.status = "running";
-    void startRun({
+    const chain = startRun({
       plan: opts.plan,
       ...(opts.layout.workspaceSource !== undefined ? { workspaceSource: opts.layout.workspaceSource } : {}),
       ...(opts.layout.workflowDir !== undefined ? { workflowDir: opts.layout.workflowDir } : {}),
@@ -218,6 +228,22 @@ export class RunManager {
         this.active--;
         this.drain();
       });
+    this.inFlight.add(chain);
+    void chain.finally(() => this.inFlight.delete(chain));
+  }
+
+  /**
+   * Resolve once no run is executing or queued. Drains in waves: queued runs
+   * launch as active ones settle (via `drain()` in each run's `finally`), so we
+   * re-check after each batch until both the in-flight set and the queue are
+   * empty. Teardown (`server.close()`, tests) awaits this before closing the
+   * engine so no worker is orphaned against an ended pool.
+   */
+  async whenIdle(): Promise<void> {
+    while (this.inFlight.size > 0 || this.queue.length > 0) {
+      if (this.inFlight.size === 0) this.drain(); // flush queue if nothing is settling to trigger it
+      await Promise.allSettled([...this.inFlight]);
+    }
   }
 
   /** Best-effort durable write of a run's terminal status (after its insert landed). */
