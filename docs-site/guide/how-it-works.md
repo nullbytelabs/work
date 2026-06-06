@@ -52,12 +52,15 @@ are hermetic and install their own dependencies.
 
 ## Agent steps
 
-When a step is `uses: agent/<name>`, the engine invokes a
+When a step is `uses: agent/<name>` — or the built-in
+[`work/agent`](./actions) primitive — the engine invokes a
 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) coding agent
 **inside that same micro-VM**, with its toolset rooted at the checkout. The host
 allowlists the model endpoint through the sandbox's egress and injects the API key,
-so the agent can reach the model while the key never enters the guest. See
-[Agent steps](./agent-steps) for the authoring side.
+so the agent can reach the model while the key never enters the guest. A
+`uses: action/<name>` step runs your own [JavaScript action](./actions) the same
+way — staged into the guest and run there, never on the host. See
+[Agent steps](./agent-steps) and [Actions](./actions) for the authoring side.
 
 ## The pieces
 

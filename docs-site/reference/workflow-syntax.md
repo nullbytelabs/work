@@ -126,7 +126,9 @@ out is taken from `medium`.
 
 ## Steps
 
-A step is either a `run` command or a `uses` agent — never both.
+A step is either a `run` command or a `uses:` reference — never both. A step
+`uses:` resolves to an agent, the built-in `work/agent` primitive, or a
+user-space action (see [Step `uses:` forms](#step-uses-forms)).
 
 ```yaml
 steps:
@@ -145,8 +147,8 @@ steps:
 | `name` | string | Human-readable label. Defaults to the `run` command if omitted. |
 | `id` | string | Stable id. Required to read this step's outputs via `steps.<id>.outputs.*`. |
 | `run` | string | Shell command or multi-line script. Mutually exclusive with `uses`. |
-| `uses` | string | Agent reference, `agent/<name>`. Mutually exclusive with `run`. See [Agent steps](../guide/agent-steps). |
-| `with` | map | Inputs for a `uses` step; bound to <code v-pre>{{ placeholder }}</code> markers in the agent's `task.md`. |
+| `uses` | string | A step reference: `agent/<name>`, `work/agent`, or `action/<name>`. Mutually exclusive with `run`. See [Step `uses:` forms](#step-uses-forms). |
+| `with` | map | Inputs for a `uses` step. Meaning depends on the form — see [Step `uses:` forms](#step-uses-forms). |
 | `if` / `when` | string | Conditional guard; a false result skips the step. Use one, not both. |
 | `env` | `map<string,string>` | Step-level env, layered over job and workflow env. |
 
@@ -163,6 +165,40 @@ A `run` step writes outputs by appending `key=value` lines to the file at the
 Read them inside an expression — `steps.meta.outputs.version` (same job) or, after
 the job re-exposes them via `outputs:`, `needs.<job>.outputs.version` (downstream
 jobs).
+
+A `uses:` step also produces outputs (an agent's final message, an action's
+declared outputs); read them the same way. See below.
+
+### Step `uses:` forms
+
+A step `uses:` takes one of three forms. All run **in-guest** and feed `with:` /
+produce `steps.<id>.outputs.*`; the guide is [Actions & `work/agent`](../guide/actions)
+and [Agent steps](../guide/agent-steps).
+
+| `uses:` | What it is | `with:` | Outputs |
+|---|---|---|---|
+| `work/agent` | Built-in agent primitive (no package). | `instructions`/`instructionsFile`, `prompt`/`promptFile` (one required), `model`. | single `output` (final message) |
+| `action/<name>` | A user-space JavaScript action at `.workflows/actions/<name>/`. | inputs validated against the action's `action.yaml` `inputs:`. | the action's declared `outputs:` |
+| `agent/<name>` | An agent **package** (manifest + `instructions.md` + `task.md`). | bound to <code v-pre>{{ placeholder }}</code> markers in `task.md`. | the agent's declared `outputs:` |
+
+#### Action manifest (`action.yaml`)
+
+A JavaScript action declares typed inputs/outputs and its entry script:
+
+```yaml
+name: greet
+inputs:                       # the workflow inputs: grammar (type/default/required/options/pattern)
+  name: { type: string, default: world }
+outputs:
+  greeting: { description: the greeting line }
+runs:
+  using: node                 # JavaScript action (composite is not yet supported)
+  main: index.mjs             # entry script (default: index.mjs)
+```
+
+The script reads inputs from `INPUT_<NAME>` env vars and writes outputs to
+`$WORK_OUTPUT` (the same ABI as a `run:` step). If the action dir has a
+`package.json`, its deps are `npm install`ed in-guest first.
 
 ## Reusable workflows
 

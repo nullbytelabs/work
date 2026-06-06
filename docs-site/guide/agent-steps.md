@@ -6,9 +6,17 @@ checkout — so it can read and edit the project's files directly. The model is
 reached only through the sandbox's mediated egress, and your API key is injected
 host-side and **never enters the guest**.
 
-An agent is the **step-level** `uses:` unit of pi-workflows — a reusable AI step
+An agent is a **step-level** `uses:` unit of pi-workflows — a reusable AI step
 you define in your own project and drop into any workflow. (The **job-level**
 `uses:`, which calls a whole workflow, is [Reusable workflows](./reusable-workflows).)
+
+::: tip Just need a prompt, not a package?
+This page covers the `agent/<name>` **package** format (a manifest + prompt files).
+For a one-step agent prompted inline, reach for the built-in
+[`work/agent`](./actions) primitive — and for bespoke logic in your own
+JavaScript, a [user-space action](./actions). Both are lighter-weight siblings of
+the package format.
+:::
 
 ## 1. Configure a model
 

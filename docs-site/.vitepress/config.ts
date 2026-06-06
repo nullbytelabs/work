@@ -68,6 +68,7 @@ export default defineConfig({
             { text: "Reusable workflows", link: "/guide/reusable-workflows" },
             { text: "Project layout", link: "/guide/project-layout" },
             { text: "Agent steps (AI)", link: "/guide/agent-steps" },
+            { text: "Actions & work/agent", link: "/guide/actions" },
             { text: "Web console", link: "/guide/web-ui" },
           ],
         },
