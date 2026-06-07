@@ -6,11 +6,11 @@ instead of copy-pasting. It's the same idea as `needs:` wiring jobs together, on
 level up: now you wire *workflows* together.
 
 This is the **job-level `uses:`** surface. Don't confuse it with the
-[step-level `uses:`](./agent-steps) that runs an AI agent:
+[step-level `uses:`](./agent-steps) that runs an AI agent or an action:
 
 | `uses:` on a… | pulls in… | for |
 |---|---|---|
-| **step** | an AI agent | [Agent steps](./agent-steps) (`uses: agent/<name>`) |
+| **step** | an AI agent or action | [Agent steps](./agent-steps) (`uses: work/agent`) / [Actions](./actions) (`uses: action/<name>`) |
 | **job** | an entire workflow | **this page** (`uses: workflow/<name>`) |
 
 The level tells you which kind you're looking at.

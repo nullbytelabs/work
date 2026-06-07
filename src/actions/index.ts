@@ -10,6 +10,7 @@
  * Like agents, actions compose in at the CLI: the durable core dispatches a
  * `uses: action/<name>` step to this handler by scheme and imports none of it.
  */
-export { createActionUsesHandler, type ActionUsesHandlerOptions } from "./uses-handler.ts";
-export { loadAction, parseActionUses, type LoadedAction, type ActionOutput } from "./load.ts";
+export { createActionUsesHandler, runAction, type ActionUsesHandlerOptions } from "./uses-handler.ts";
+export { loadAction, loadBuiltinAction, parseActionUses, BUILTIN_ACTIONS, type LoadedAction, type ActionOutput, type CompositeStep } from "./load.ts";
 export { runGuestNode, type GuestNodeDeps, type GuestNodeRequest, type GuestNodeResult } from "./guest-node.ts";
+export { runComposite, type SubUsesDispatch } from "./composite.ts";

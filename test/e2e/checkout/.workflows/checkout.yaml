@@ -1,0 +1,17 @@
+# The built-in work/checkout action: clone a public git repo into the workspace.
+# It installs git in the Alpine guest (apk) and clones over the sandbox's mediated
+# egress. Reaches github.com, so it's gated behind WORK_TEST_NETWORK=1 in the suite.
+name: checkout
+jobs:
+  fetch:
+    runs-on: gondolin
+    steps:
+      - name: clone a small public repo
+        uses: work/checkout
+        with:
+          repo: octocat/Hello-World
+          path: hello
+      - name: assert the checkout landed
+        run: |
+          ls -a hello
+          test -f hello/README

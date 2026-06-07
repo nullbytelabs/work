@@ -20,7 +20,9 @@ jobs:
     needs: [collect]
     runs-on: gondolin
     steps:
-      - uses: agent/summarize  # an AI agent reads data.json and writes the summary
+      - uses: work/agent       # an AI agent reads data.json and writes the summary
+        with:
+          prompt: Read data.json and write a short summary.
 ```
 
 ```bash
@@ -190,13 +192,7 @@ An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-
 
 `apiKey` supports `$VAR` / `${VAR}` expansion, so secrets stay in your environment. See [`work.example.json`](work.example.json).
 
-**2. Define an agent** as a package under `.workflows/agents/<name>/`:
-
-- `agent.yaml` — manifest: `name`, `description`, declared `inputs`/`outputs`.
-- `instructions.md` — the system prompt (the agent's standing role).
-- `task.md` — the task prompt, with optional `{{ input }}` placeholders bound from the step's `with:`.
-
-**3. Use it** in a workflow:
+**2. Use the `work/agent` primitive** — prompt it entirely through `with:`. Its final message becomes the step output `output`:
 
 ```yaml
 jobs:
@@ -204,11 +200,14 @@ jobs:
     runs-on: gondolin
     steps:
       - id: summary
-        uses: agent/review
-      - run: echo "review -> ${{ steps.summary.outputs.summary }}"
+        uses: work/agent
+        with:
+          instructions: You are a code reviewer.
+          prompt: Review main.ts and summarize it in one sentence.
+      - run: echo "review -> ${{ steps.summary.outputs.output }}"
 ```
 
-The agent's final message becomes the step's declared output (e.g. `steps.summary.outputs.summary`). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a verification workflow (install deps → typecheck → smoke test) and a separate `review.yaml` where an agent reviews the source.
+Prompts can also be file-backed (`instructionsFile:`/`promptFile:`). **To package a named, reusable agent**, wrap `work/agent` in a composite action under `.workflows/actions/<name>/` (`uses: action/<name>`) — see the [actions guide](https://nullbytelabs.github.io/pi-workflows/guide/actions). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a verification workflow and a `review.yaml` where a composite action reviews the source.
 
 ---
 

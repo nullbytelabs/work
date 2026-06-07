@@ -1,8 +1,8 @@
 /**
  * One shared slug function for scaffolding. A generated workflow's filename, its
- * `name:`, and any `uses: agent/<name>` ref must all agree and all be valid — and
- * the strictest consumer is the agent parser, whose charset is `^[a-z0-9][a-z0-9-]*$`
- * (`parseAgentUses`, src/agent/index.ts). Slugging through here once guarantees a
+ * `name:`, and any `uses: action/<name>` ref must all agree and all be valid — and
+ * the strictest consumer is the action parser, whose charset is `^[a-z0-9][a-z0-9-]*$`
+ * (`parseActionUses`, src/actions/load.ts). Slugging through here once guarantees a
  * generated `uses:` ref is always resolvable.
  */
 import { UserFacingError } from "../errors.ts";

@@ -14,9 +14,9 @@ work run hello-world      # run the scaffolded workflow by its name
 ```
 
 `work create <name>` scaffolds an additional workflow any time, and
-`work create <name> --template agent-action` scaffolds a full [agent
-step](./agent-steps). Both validate the generated YAML before writing and never
-clobber existing files.
+`work create <name> --template agent-action` scaffolds a workflow plus a composite
+[action](./actions) that wraps the built-in [`work/agent`](./agent-steps) step.
+Both validate the generated YAML before writing and never clobber existing files.
 
 The rest of this page hand-writes the YAML so you can see the moving parts.
 

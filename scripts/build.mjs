@@ -4,7 +4,7 @@
 // `npm publish` (via the `prepack` hook) bundle the CLI to plain JS here. Dev is
 // unaffected — `./pi-workflows` and the npm scripts still run `src/` build-free.
 import { build } from "esbuild";
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -34,4 +34,9 @@ await build({
 await copyFile(resolve(root, "src/runtime/absurd/schema.sql"), resolve(dist, "schema.sql"));
 await copyFile(resolve(root, "src/agent/guest-runner-script.mjs"), resolve(dist, "guest-runner-script.mjs"));
 
-console.log("built dist/cli.js (+ schema.sql, guest-runner-script.mjs)");
+// Built-in actions (work/checkout, work/install-node) are bundled action packages
+// loaded via `new URL("./builtin", import.meta.url)`, which resolves to `dist/`
+// after bundling — so copy the whole tree flat next to cli.js.
+await cp(resolve(root, "src/actions/builtin"), resolve(dist, "builtin"), { recursive: true });
+
+console.log("built dist/cli.js (+ schema.sql, guest-runner-script.mjs, builtin/)");

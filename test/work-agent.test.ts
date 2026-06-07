@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createWorkAgentHandler, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
+import { createWorkHandler, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
 import type { UsesContext } from "../src/runtime/index.ts";
 
 // The dumb `work/agent` primitive: `with:` is the AgentRequest. These tests drive
@@ -50,7 +50,7 @@ describe("work/agent primitive", () => {
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
     try {
       const { ctx } = makeCtx({ with: { instructions: "Be terse.", prompt: "Summarize." }, workdir: dir });
-      const res = await createWorkAgentHandler({ runner }).run(ctx);
+      const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "success");
       assert.equal(res.stdout, "AGENT REPLY");
       assert.deepEqual(res.outputs, { output: "AGENT REPLY" });
@@ -70,7 +70,7 @@ describe("work/agent primitive", () => {
       await writeFile(join(dir, "sys.md"), "  You are a reviewer.\n");
       await writeFile(join(dir, "task.md"), "Review the diff.\n");
       const { ctx } = makeCtx({ with: { instructionsFile: "sys.md", promptFile: "task.md" }, workdir: dir });
-      const res = await createWorkAgentHandler({ runner }).run(ctx);
+      const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "success");
       assert.equal(calls[0]!.system, "You are a reviewer."); // trimmed
       assert.equal(calls[0]!.prompt, "Review the diff.");
@@ -84,7 +84,7 @@ describe("work/agent primitive", () => {
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
     try {
       const { ctx } = makeCtx({ with: { prompt: "Triage." }, workdir: dir });
-      const res = await createWorkAgentHandler({ runner }).run(ctx);
+      const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "success");
       assert.equal(calls[0]!.system, undefined);
     } finally {
@@ -97,7 +97,7 @@ describe("work/agent primitive", () => {
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
     try {
       const { ctx, emitted } = makeCtx({ with: { instructions: "Hi." }, workdir: dir });
-      const res = await createWorkAgentHandler({ runner }).run(ctx);
+      const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "failure");
       assert.match(res.stderr ?? "", /needs a prompt/);
       assert.ok(emitted.some((e) => /needs a prompt/.test(e.text)));
@@ -111,7 +111,7 @@ describe("work/agent primitive", () => {
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
     try {
       const { ctx } = makeCtx({ uses: "work/summarize", with: { prompt: "x" }, workdir: dir });
-      const res = await createWorkAgentHandler({ runner }).run(ctx);
+      const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "failure");
       assert.match(res.stderr ?? "", /unsupported work built-in/);
     } finally {
@@ -124,7 +124,7 @@ describe("work/agent primitive", () => {
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
     try {
       const { ctx } = makeCtx({ with: { promptFile: "../escape.md" }, workdir: dir });
-      const res = await createWorkAgentHandler({ runner }).run(ctx);
+      const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "failure");
       assert.match(res.stderr ?? "", /escapes the workspace/);
     } finally {

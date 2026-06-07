@@ -41,7 +41,8 @@ jobs:
 `jobs:` is a map of named jobs. Each job has ordered `steps:`. A step is either:
 
 - a **`run:`** command — a shell command or multi-line script, or
-- a **`uses:`** step — an [AI agent](./agent-steps).
+- a **`uses:`** step — the built-in [`work/agent`](./agent-steps) AI agent or an
+  [action](./actions) (`action/<name>`).
 
 A step takes a `run` **or** a `uses`, never both.
 

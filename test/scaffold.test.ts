@@ -43,31 +43,28 @@ describe("scaffoldFiles — hello-world", () => {
 });
 
 describe("scaffoldFiles — agent-action", () => {
-  it("emits the workflow, agent package, and a starter config", () => {
+  it("emits the workflow, composite action (wrapping work/agent), and a starter config", () => {
     const files = scaffoldFiles({ name: "review", template: "agent-action" });
     assert.deepEqual(
       [...files.keys()].sort(),
       [
-        ".workflows/agents/review/agent.yaml",
-        ".workflows/agents/review/instructions.md",
-        ".workflows/agents/review/task.md",
+        ".workflows/actions/review/action.yaml",
+        ".workflows/actions/review/instructions.md",
+        ".workflows/actions/review/task.md",
         ".workflows/review.yaml",
         CONFIG_FILENAME,
       ].sort(),
     );
-    assert.match(files.get(".workflows/review.yaml")!, /uses: agent\/review/);
-    // instructions.md must be non-empty or loadAgent throws.
-    assert.ok(files.get(".workflows/agents/review/instructions.md")!.trim().length > 0);
+    assert.match(files.get(".workflows/review.yaml")!, /uses: action\/review/);
+    // The action is a composite that wraps the work/agent primitive.
+    const action = files.get(".workflows/actions/review/action.yaml")!;
+    assert.match(action, /using: composite/);
+    assert.match(action, /uses: work\/agent/);
+    assert.ok(files.get(".workflows/actions/review/instructions.md")!.trim().length > 0);
     // work.json is valid JSON and parses as a config object.
     const cfg = JSON.parse(files.get(CONFIG_FILENAME)!);
     assert.equal(cfg.defaultModel, "kimi");
     assert.equal(cfg.providers.fireworks.apiKey, "$FIREWORKS_API_KEY"); // $ENV ref, never a literal secret
-  });
-
-  it("leaves the agent runner's {{ input }} placeholders untouched", () => {
-    const files = scaffoldFiles({ name: "review", template: "agent-action" });
-    // The manifest documents `{{ input_name }}` — our renderer must not eat it.
-    assert.match(files.get(".workflows/agents/review/agent.yaml")!, /\{\{ input_name \}\}/);
   });
 });
 

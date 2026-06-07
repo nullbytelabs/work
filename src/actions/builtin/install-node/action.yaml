@@ -1,0 +1,56 @@
+name: install-node
+description: >
+  Install a specific Node.js version into the guest, shadowing the version the
+  Alpine image ships. Downloads the musl build, so `node`/`npm` in later steps of
+  the same job resolve to the requested version. Note: arm64 musl builds exist only
+  for recent Node versions (v24+); x64 supports all versions.
+inputs:
+  version:
+    type: string
+    required: true
+    description: Node version to install, without the leading v (e.g. 24.9.0).
+outputs:
+  version:
+    description: The installed Node version (node --version).
+    value: ${{ steps.install.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: install
+      name: install node
+      run: |
+        set -eu
+        # Trust gondolin's MITM CA so curl works over the mediated TLS egress.
+        if [ -f /etc/gondolin/mitm/ca.crt ]; then
+          cat /etc/gondolin/mitm/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+        fi
+
+        case "$(uname -m)" in
+          x86_64) arch=x64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
+        esac
+
+        ver="$INPUT_VERSION"
+        pkg="node-v${ver}-linux-${arch}-musl"
+        url="https://unofficial-builds.nodejs.org/download/release/v${ver}/${pkg}.tar.gz"
+        echo "downloading $url"
+        if ! curl -fsSL "$url" -o /tmp/node.tar.gz; then
+          echo "no musl build for node v${ver} on ${arch} (arm64 musl exists only for v24+)" >&2
+          exit 1
+        fi
+
+        # The guest rootfs (/usr/local) is tiny; extract into the large /tmp tmpfs
+        # and symlink the binaries into /usr/local/bin (ahead of /usr/bin on PATH),
+        # so later steps in this job resolve the new node. The tree persists for the
+        # VM's lifetime.
+        mkdir -p /tmp/.work-node
+        tar -xz -C /tmp/.work-node --strip-components=1 -f /tmp/node.tar.gz
+        rm -f /tmp/node.tar.gz
+        for b in node npm npx; do
+          [ -e "/tmp/.work-node/bin/$b" ] && ln -sf "/tmp/.work-node/bin/$b" "/usr/local/bin/$b"
+        done
+        hash -r 2>/dev/null || true
+
+        echo "version=$(/usr/local/bin/node --version)" >> "$WORK_OUTPUT"
+        echo "installed $(/usr/local/bin/node --version) at /usr/local/bin/node"

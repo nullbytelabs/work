@@ -1,7 +1,7 @@
 # Project layout
 
 For a one-off, a standalone `workflow.yaml` is fine. For a real project, keep your
-workflows and agents together in a `.workflows/` directory at the project root.
+workflows and actions together in a `.workflows/` directory at the project root.
 
 ```
 my-project/
@@ -9,18 +9,16 @@ my-project/
 ├── src/…
 └── .workflows/
     ├── verify.yaml             # a workflow (name: verify)
-    └── agents/
-        └── review/             # a local agent package
-            ├── agent.yaml
-            ├── instructions.md
-            └── task.md
+    └── actions/
+        └── review/             # a local action package
+            └── action.yaml     # JavaScript or composite (may wrap work/agent)
 ```
 
 ::: tip Scaffold it
 `work init` creates this layout (a starter workflow + config), and
 `work create <name>` adds another workflow — `--template agent-action` also writes
-an `agents/<name>/` package like the one above. See the
-[CLI reference](../reference/cli#work-init).
+an `actions/<name>/` composite action (wrapping [`work/agent`](./agent-steps)) like
+the one above. See the [CLI reference](../reference/cli#work-init).
 :::
 
 ## Running a workflow by name

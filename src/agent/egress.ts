@@ -1,20 +1,24 @@
 /**
- * Per-job sandbox egress for agent steps.
+ * Per-job sandbox egress for `uses:` steps.
  *
- * When a `runs-on: gondolin` job contains agent steps (`uses: agent/*` or the
- * `work/agent` primitive), the in-guest Pi process must reach the model API —
- * but Gondolin is deny-by-default. This
- * builds the job's network policy from config: allowlist the model host(s) and
- * inject the API key as a header-only secret under `GUEST_MODEL_KEY_ENV`, so the
+ * Gondolin is deny-by-default, but a non-`run` `uses:` step almost always needs
+ * the network: the `work/agent` primitive (and any composite action wrapping it)
+ * reaches the model; a JS action `npm install`s; `work/checkout`/`work/install-node`
+ * fetch from a git/download host. So a job containing **any** `work/*` or
+ * `action/*` step is granted mediated allow-all egress.
+ *
+ * When a model is configured, the API key is also injected as a header-only secret
+ * under `GUEST_MODEL_KEY_ENV`, scoped to the configured model host(s) — so the
  * **real key never enters the guest** (Gondolin swaps the placeholder into the
- * Authorization header for the model host only).
+ * Authorization header for the model host only) and is harmless for a job that
+ * never calls the model. A composite `action/<name>` may wrap `work/agent` without
+ * the resolver being able to see inside it, so action steps get the key too.
  *
- * It is wired into the runtime via `AbsurdRuntimeOptions.resolveJobNetwork`, so
- * the durable core stays agent-agnostic — it only forwards the result to the
- * target. The shape returned is structurally a `JobNetwork`.
+ * Wired via `AbsurdRuntimeOptions.resolveJobNetwork`, so the durable core stays
+ * agnostic — it only forwards the result to the target.
  */
 import type { PlannedJob } from "../compiler/index.ts";
-import { resolveModel, type PiWorkflowsConfig, type ResolvedModel } from "../config/index.ts";
+import { resolveModel, type PiWorkflowsConfig } from "../config/index.ts";
 import { GUEST_MODEL_KEY_ENV } from "./guest-pi-runner.ts";
 
 /** Structural `JobNetwork` (kept local to avoid an agent→runtime import cycle). */
@@ -31,52 +35,53 @@ function hostOf(baseUrl: string): string | undefined {
   }
 }
 
-/** The model alias an agent step targets (its `with.model`), if any. */
+/** A non-`run` step that needs the sandbox's mediated egress. */
+function isUsesStep(uses: string | undefined): boolean {
+  return uses !== undefined && (uses.startsWith("work/") || uses.startsWith("action/"));
+}
+
+/** Could this step run a model? `work/agent`, or an `action/<name>` that might wrap it. */
+function mightRunModel(uses: string | undefined): boolean {
+  return uses === "work/agent" || (uses?.startsWith("action/") ?? false);
+}
+
+/** The model alias a `work/agent` step targets (its `with.model`), if any. */
 function stepModelAlias(job: PlannedJob, i: number): string | undefined {
-  const w = job.steps[i]?.with;
-  const m = w?.["model"];
+  const m = job.steps[i]?.with?.["model"];
   return typeof m === "string" ? m : undefined;
 }
 
 /**
- * Whether a step reaches the model and so needs the egress allowlist + injected
- * key: either an `agent/<name>` package step or the `work/agent` primitive. Both
- * run a real Pi loop in-guest and reach the model the same way.
- */
-function isModelStep(uses: string | undefined): boolean {
-  return uses === "work/agent" || (uses?.startsWith("agent/") ?? false);
-}
-
-/**
- * Build the `resolveJobNetwork` callback. Returns `undefined` for jobs that
- * need no mediated egress (no config, or no agent steps).
+ * Build the `resolveJobNetwork` callback. Returns `undefined` for jobs with no
+ * `uses:` step (they stay deny-by-default).
  */
 export function makeAgentEgressResolver(
   config?: PiWorkflowsConfig,
 ): (job: PlannedJob) => AgentJobNetwork | undefined {
   return (job) => {
-    if (!config) return undefined;
+    if (!job.steps.some((s) => isUsesStep(s.uses))) return undefined;
 
-    // Resolve every model an agent step in this job will call (agent/<name> or
-    // the work/agent primitive).
-    const models: ResolvedModel[] = [];
-    job.steps.forEach((step, i) => {
-      if (isModelStep(step.uses)) {
-        models.push(resolveModel(config, stepModelAlias(job, i)));
+    const net: AgentJobNetwork = { allowedHosts: ["*"] };
+
+    // Inject the model key (host-scoped) when a model is configured and the job
+    // has a step that might call the model. `work/agent` carries its own alias;
+    // an action that may wrap it can't be introspected, so use the default model.
+    if (config) {
+      const hosts = new Set<string>();
+      let value: string | undefined;
+      job.steps.forEach((step, i) => {
+        if (!mightRunModel(step.uses)) return;
+        const alias = step.uses === "work/agent" ? stepModelAlias(job, i) : undefined;
+        const model = resolveModel(config, alias);
+        const h = hostOf(model.baseUrl);
+        if (h) hosts.add(h);
+        value ??= model.apiKey; // one key per job (first wins) — documented limitation
+      });
+      if (hosts.size > 0 && value !== undefined) {
+        net.secrets = { [GUEST_MODEL_KEY_ENV]: { hosts: [...hosts], value } };
       }
-    });
-    if (models.length === 0) return undefined;
+    }
 
-    const hosts = [...new Set(models.map((m) => hostOf(m.baseUrl)).filter((h): h is string => !!h))];
-    if (hosts.length === 0) return undefined;
-
-    // One model key per job in this first cut: the guest reads a single
-    // GUEST_MODEL_KEY_ENV. If a job mixes models with distinct keys, the first
-    // key is injected for all model hosts (documented limitation).
-    const value = models[0]!.apiKey;
-    return {
-      allowedHosts: ["*"],
-      secrets: { [GUEST_MODEL_KEY_ENV]: { hosts, value } },
-    };
+    return net;
   };
 }

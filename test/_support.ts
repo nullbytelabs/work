@@ -7,8 +7,9 @@ import { mkdir } from "node:fs/promises";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunContext, type WorkflowResult } from "../src/runtime/index.ts";
 import type { ExecutionPlan } from "../src/compiler/index.ts";
 import type { ExecutionTarget, RunOptions, RunResult, TargetFactory } from "../src/targets/index.ts";
-import { createAgentUsesHandler, createWorkAgentHandler, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
-import { createActionUsesHandler } from "../src/actions/index.ts";
+import { createWorkHandler, makeAgentEgressResolver, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
+import { createActionUsesHandler, type SubUsesDispatch } from "../src/actions/index.ts";
+import type { UsesHandler } from "../src/runtime/index.ts";
 
 /** Deterministic agent runner for tests — no network. Echoes a canned summary. */
 export const mockAgentRunner: AgentRunner = {
@@ -105,20 +106,27 @@ export function useSharedRuntime(opts: { realTargets?: boolean } = {}): SharedRu
     if (engine) await engine.close();
   });
   return {
-    // Register the agent uses-handlers with the mock runner (no inference) unless
-    // a test passes its own runner — both `agent/<name>` and the `work/agent`
-    // primitive — plus the JS-action handler (which runs `node` in-target, not the
-    // runner), so e2e examples using any of them dispatch.
+    // Register the `work` handler (work/agent primitive + built-in actions) with
+    // the mock runner (no inference) unless a test passes its own runner, plus the
+    // action handler. A late-bound dispatcher routes a composite action's inner
+    // `uses:` sub-steps by scheme — so e2e composite examples (and the migrated
+    // agent review) dispatch work/agent / nested actions.
     run(plan, ctx, agentRunner = mockAgentRunner) {
       if (!engine) throw new Error("engine not started");
-      const usesHandlers = [
-        createAgentUsesHandler({ runner: agentRunner }),
-        createWorkAgentHandler({ runner: agentRunner }),
-        createActionUsesHandler(),
-      ];
+      const usesHandlers: UsesHandler[] = [];
+      const dispatch: SubUsesDispatch = (subCtx) => {
+        const h = usesHandlers.find((x) => x.scheme === subCtx.uses.split("/", 1)[0]);
+        return h ? h.run(subCtx) : Promise.resolve({ status: "failure", stderr: `no handler for ${subCtx.uses}` });
+      };
+      usesHandlers.push(createWorkHandler({ runner: agentRunner, dispatch }), createActionUsesHandler({ dispatch }));
       return new AbsurdRuntime({
         engine,
         usesHandlers,
+        // Mirror production egress: a job with a `uses:` step gets mediated egress
+        // (allow-all). No config here (the agent runner is mocked), so no model key
+        // is injected — but built-in network actions (work/checkout, work/install-node)
+        // get the network they need.
+        resolveJobNetwork: makeAgentEgressResolver(),
         ...(opts.realTargets ? {} : { makeTarget: hostTargetFactory }),
       }).run(plan, ctx);
     },

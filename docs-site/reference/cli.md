@@ -70,12 +70,13 @@ work create <name> [--template hello-world|agent-action] [--force] [--dry-run]
 ```
 
 Scaffolds a **single new workflow** named `<name>` into `.workflows/<name>.yaml`.
-The `agent-action` template additionally writes a full agent package under
-`.workflows/agents/<name>/` and a starter config.
+The `agent-action` template additionally writes a composite action under
+`.workflows/actions/<name>/` (wrapping the built-in `work/agent`) and a starter
+config.
 
 ```bash
 work create deploy                         # .workflows/deploy.yaml
-work create review --template agent-action # workflow + agent package + config
+work create review --template agent-action # workflow + composite action + config
 ```
 
 The generated YAML is validated through the real compiler **before** it's written,

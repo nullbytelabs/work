@@ -1,0 +1,20 @@
+# A composite action (the action.yml analog), supplied by THIS project — not the
+# engine. It wraps the built-in `work/agent` primitive with file-backed prompts and
+# maps the agent's final message to a declared output. This is the project-owned
+# "agent package" shape: a composite action over work/agent.
+name: summarize
+description: Read the project's source from the workspace and summarize it in one sentence.
+
+outputs:
+  summary:
+    description: The one-sentence summary (the agent's final message).
+    value: ${{ steps.run.outputs.output }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      uses: work/agent
+      with:
+        instructionsFile: .workflows/actions/summarize/instructions.md
+        promptFile: .workflows/actions/summarize/task.md

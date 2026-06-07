@@ -42,7 +42,7 @@ export interface StepSpec {
   id?: string;
   /** Shell command / script to execute. Mutually exclusive with `uses`. */
   run?: string;
-  /** Action/agent reference (`uses: agent/<name>`). Mutually exclusive with `run`. */
+  /** A `uses:` reference (`work/agent`, `action/<name>`, `work/checkout`, …). Mutually exclusive with `run`. */
   uses?: string;
   /** Inputs for a `uses` step. */
   with?: Record<string, unknown>;

@@ -138,8 +138,8 @@ steps:
     env: { KEY: value }   # step-level env
     if: ${{ success() }}  # optional guard
   - id: review
-    uses: agent/summarize # …or an agent
-    with: { topic: parsing }
+    uses: work/agent      # …or an agent / action
+    with: { prompt: "Summarize the diff." }
 ```
 
 | Key | Type | Notes |
@@ -171,19 +171,20 @@ declared outputs); read them the same way. See below.
 
 ### Step `uses:` forms
 
-A step `uses:` takes one of three forms. All run **in-guest** and feed `with:` /
+A step `uses:` is one of the forms below. All run **in-guest** and feed `with:` /
 produce `steps.<id>.outputs.*`; the guide is [Actions & `work/agent`](../guide/actions)
 and [Agent steps](../guide/agent-steps).
 
 | `uses:` | What it is | `with:` | Outputs |
 |---|---|---|---|
 | `work/agent` | Built-in agent primitive (no package). | `instructions`/`instructionsFile`, `prompt`/`promptFile` (one required), `model`. | single `output` (final message) |
-| `action/<name>` | A user-space JavaScript action at `.workflows/actions/<name>/`. | inputs validated against the action's `action.yaml` `inputs:`. | the action's declared `outputs:` |
-| `agent/<name>` | An agent **package** (manifest + `instructions.md` + `task.md`). | bound to <code v-pre>{{ placeholder }}</code> markers in `task.md`. | the agent's declared `outputs:` |
+| `action/<name>` | A user-space action at `.workflows/actions/<name>/` — JavaScript or composite. | inputs validated against the action's `action.yaml` `inputs:`. | the action's declared `outputs:` |
+| `work/checkout`, `work/install-node` | Built-in actions shipped with the engine. | per action (e.g. `repo`, `version`). | per action |
 
 #### Action manifest (`action.yaml`)
 
-A JavaScript action declares typed inputs/outputs and its entry script:
+An action declares typed inputs/outputs and how it runs. **`node`** runs an entry
+script; **`composite`** runs a step bundle (each step a `run:` or a `uses:`):
 
 ```yaml
 name: greet
@@ -192,13 +193,15 @@ inputs:                       # the workflow inputs: grammar (type/default/requi
 outputs:
   greeting: { description: the greeting line }
 runs:
-  using: node                 # JavaScript action (composite is not yet supported)
-  main: index.mjs             # entry script (default: index.mjs)
+  using: node                 # node | composite
+  main: index.mjs             # node: entry script (default: index.mjs)
 ```
 
-The script reads inputs from `INPUT_<NAME>` env vars and writes outputs to
-`$WORK_OUTPUT` (the same ABI as a `run:` step). If the action dir has a
-`package.json`, its deps are `npm install`ed in-guest first.
+A `node` action reads inputs from `INPUT_<NAME>` env vars and writes outputs to
+`$WORK_OUTPUT` (the same ABI as a `run:` step); if the action dir has a
+`package.json`, its deps are `npm install`ed in-guest first. A `composite` action
+lists `runs.steps:` and maps each declared output to a `value:` expression
+(e.g. <code v-pre>value: ${{ steps.run.outputs.output }}</code>).
 
 ## Reusable workflows
 

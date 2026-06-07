@@ -9,8 +9,8 @@
  * `${{ needs.* }}` expressions are resolved here at runtime (inputs were already
  * bound at compile time).
  *
- * Step kinds: `run` (shell on the ExecutionTarget) and `uses: agent/<name>`
- * (an LLM call via the injected AgentRunner). Both are memoized checkpoints.
+ * Step kinds: `run` (shell on the ExecutionTarget) and `uses:` (dispatched to a
+ * registered handler — work/agent, an action, …). Both are memoized checkpoints.
  *
  * Failure/skip: a job runs only if every `needs` dependency succeeded; otherwise
  * it's skipped. The workflow fails if any job failed.

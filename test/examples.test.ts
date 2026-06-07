@@ -21,6 +21,12 @@ const EXAMPLE_INPUTS: Record<string, Record<string, unknown>> = {
   "input-validation": { release: "staging", id: "3cd7a864-f023-5a35-9db1-39a1be5bdcca" },
 };
 
+// Examples that reach the *external* network (clone a repo, download Node). They
+// boot a real VM AND hit github.com / nodejs.org, so they're skipped by default to
+// keep the suite hermetic; run them with WORK_TEST_NETWORK=1.
+const NETWORK_EXAMPLES = new Set(["checkout", "install-node"]);
+const RUN_NETWORK = process.env["WORK_TEST_NETWORK"] === "1";
+
 /** Every workflow file an example folder contributes: a root `workflow.yaml`, or
  *  every `.workflows/*.yaml` (a project may ship several pipelines, e.g. ci + review). */
 function workflowFiles(name: string): string[] {
@@ -94,7 +100,7 @@ async function runExample(file: string, name: string) {
 // CI provisions Node >= 23.6 + QEMU; some pipelines also install real npm deps.
 describe("examples — every workflow runs to success", () => {
   for (const ex of examples) {
-    it(`runs ${ex.label}`, async () => {
+    it(`runs ${ex.label}`, { skip: NETWORK_EXAMPLES.has(ex.name) && !RUN_NETWORK ? "external network (set WORK_TEST_NETWORK=1)" : false }, async () => {
       const result = await runExample(ex.file, ex.name);
       assert.equal(result.status, "success", `${ex.label} should succeed`);
     });

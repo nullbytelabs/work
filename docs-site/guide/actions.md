@@ -1,22 +1,24 @@
 # Actions & the `work/agent` primitive
 
-Two step-level building blocks let you reach for an AI agent with **no package
-ceremony**, and bundle your own **bespoke logic** as a reusable step:
+Step-level building blocks let you reach for an AI agent with **no package
+ceremony**, bundle your own **bespoke logic** as a reusable step, and pull in
+shipped helpers:
 
 - **`work/agent`** — a built-in agent primitive. Prompt it entirely through
   `with:`; no manifest, no special files, no templating.
-- **`action/<name>`** — a user-space **JavaScript action**: a small project-owned
-  package whose `index.mjs` runs in the sandbox with a GitHub-Actions-style ABI.
-  It's the **step-level sibling** of [reusable workflows](./reusable-workflows).
+- **`action/<name>`** — a user-space action you own: **JavaScript** (an `index.mjs`
+  run in the sandbox) or **composite** (a step bundle that can itself
+  `uses: work/agent`). It's the **step-level sibling** of
+  [reusable workflows](./reusable-workflows).
+- **`work/checkout`, `work/install-node`** — built-in actions shipped with the engine.
 
-Both are `uses:` **steps**, alongside the [`agent/<name>`](./agent-steps) package
-format. The four `uses:` forms across the project:
+The `uses:` forms across the project:
 
 | `uses:` on a… | resolves to | docs |
 |---|---|---|
 | **step** | `work/agent` — the built-in agent primitive | **this page** |
-| **step** | `action/<name>` — your JavaScript action | **this page** |
-| **step** | `agent/<name>` — an agent **package** (manifest + prompt files) | [Agent steps](./agent-steps) |
+| **step** | `action/<name>` — your JavaScript or composite action | **this page** |
+| **step** | `work/checkout`, `work/install-node` — built-in actions | **this page** |
 | **job** | `workflow/<name>` — an entire workflow | [Reusable workflows](./reusable-workflows) |
 
 ## `work/agent` — the dumb primitive
@@ -164,25 +166,79 @@ action can pull in libraries:
 └── package.json     # → npm install in the sandbox
 ```
 
+## Composite actions — step bundles
+
+A **composite** action is a list of `steps:` — each a `run:` command or a `uses:`
+(of `work/agent` or another action). It's the step-level sibling of a reusable
+workflow: a named, reusable bundle, and the canonical way to package a real agent.
+Inputs are referenced as <code v-pre>${{ inputs.x }}</code> and one step's outputs
+flow to the next as <code v-pre>${{ steps.id.outputs.y }}</code>; declared outputs
+take a `value:` expression:
+
+```yaml
+# .workflows/actions/review/action.yaml
+name: review
+inputs:
+  target: { type: string, default: /workspace }
+outputs:
+  summary:
+    value: ${{ steps.run.outputs.output }}     # map a step output to an action output
+runs:
+  using: composite
+  steps:
+    - id: prep
+      run: git diff > /tmp/diff.txt
+    - id: run
+      uses: work/agent                          # the primitive, wrapped
+      with:
+        instructionsFile: .workflows/actions/review/system.md
+        prompt: Review /tmp/diff.txt for regressions affecting ${{ inputs.target }}.
+```
+
+The whole action runs as the caller's **single** step, in the job's micro-VM. A
+composite step's `with:` is resolved at run time, so it can take a previous step's
+output as an input — the same data flow GitHub composite actions support.
+
+## Built-in actions
+
+The engine ships a couple of actions under the reserved `work/` scheme:
+
+| `uses:` | What it does | Key `with:` |
+|---|---|---|
+| `work/checkout` | `git clone` a public repo into the workspace (installs git in-guest). | `repo` (required; `owner/name` or a URL), `ref`, `path`, `depth` |
+| `work/install-node` | Install a specific Node version, shadowing the guest's for later steps. | `version` (required, e.g. `24.9.0`) |
+
+```yaml
+steps:
+  - uses: work/checkout
+    with: { repo: octocat/Hello-World, path: src }
+  - uses: work/install-node
+    with: { version: 24.9.0 }
+  - run: node --version          # the installed version
+```
+
+A job containing one of these is granted mediated egress automatically (most jobs
+are deny-by-default). `work/install-node` uses musl Node builds; **arm64 guests
+need a version that publishes an arm64-musl build (v24+)** — x64 supports all.
+
 ## How it runs
 
-Both forms run **in the job's micro-VM** — never on your host. For a JS action,
-the engine stages the action directory into the sandbox, installs its deps if any,
-runs `node <main>` with the `INPUT_*` env set and `$WORK_OUTPUT` pointed at a
-capture file, then reads the declared outputs back. It's the same
-stage → install → exec → read path that runs an in-guest agent — so an action gets
-the same deny-by-default mediated egress as every other step.
+Everything runs **in the job's micro-VM** — never on your host. A JS action is
+staged into the sandbox, its deps installed if any, then `node <main>` runs with
+`INPUT_*` set and `$WORK_OUTPUT` captured. A composite action runs its steps
+in-guest as one checkpoint. Both get the same deny-by-default mediated egress as
+every other step.
 
 ::: info Not yet
-This iteration ships **JavaScript** actions (`runs.using: node`). **Composite**
-actions (a `runs.using: composite` step bundle that can itself `uses: work/agent`)
-and **remote** sourcing (`owner/repo@ref`) are planned next. Actions resolve by the
-`action/<name>` scheme today; a `./path` form is reserved.
+**Remote** sourcing (`owner/repo@ref`) and a `./path` reference form are planned;
+today actions resolve by the `action/<name>` scheme from `.workflows/actions/`.
 :::
 
 ::: tip Runnable examples
 [`test/e2e/work-agent`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/work-agent)
-uses the `work/agent` primitive;
+(the `work/agent` primitive),
 [`test/e2e/js-action`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/js-action)
-is the full `greet` action above.
+(the `greet` JS action), and
+[`test/e2e/composite-action`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/composite-action)
+(a composite action wrapping `work/agent`).
 :::

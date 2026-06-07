@@ -52,8 +52,8 @@ are hermetic and install their own dependencies.
 
 ## Agent steps
 
-When a step is `uses: agent/<name>` — or the built-in
-[`work/agent`](./actions) primitive — the engine invokes a
+When a step is the built-in [`work/agent`](./agent-steps) primitive — or a
+composite [`action/<name>`](./actions) that wraps it — the engine invokes a
 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) coding agent
 **inside that same micro-VM**, with its toolset rooted at the checkout. The host
 allowlists the model endpoint through the sandbox's egress and injects the API key,
@@ -69,7 +69,7 @@ way — staged into the guest and run there, never on the host. See
 | [Absurd](https://www.npmjs.com/package/absurd-sdk) | Durable task execution — jobs are tasks, steps are checkpoints. |
 | [PGLite](https://www.npmjs.com/package/@electric-sql/pglite) | In-process Postgres the journal is written to. No external DB. |
 | [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin) | The micro-VM every job runs in, with mediated egress. |
-| [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | The coding agent behind `uses: agent/<name>` steps. |
+| [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | The coding agent behind `uses: work/agent` steps. |
 
 ::: tip Deeper dives
 The repository's [`docs/`](https://github.com/nullbytelabs/pi-workflows/tree/main/docs)

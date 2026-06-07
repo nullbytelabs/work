@@ -3,7 +3,7 @@
 `work.json` declares the **providers** and **models** that
 [agent steps](../guide/agent-steps) use, and — optionally — the **datasources** a
 `run:` step may reach and the **webhooks** that can trigger a workflow. You only
-need it if your workflows run `uses: agent/<name>` steps, call out to a declared
+need it if your workflows run `uses: work/agent` steps, call out to a declared
 datasource, or accept webhook triggers — plain `run:` workflows need no config at
 all.
 

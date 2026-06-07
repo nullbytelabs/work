@@ -96,7 +96,7 @@ function withSteps(): ExecutionPlan {
         runsOn: "gondolin",
         machine: MACHINE_TYPES.medium!,
         needs: ["verify"],
-        steps: [{ name: "review/summary", id: "summary", title: "review with agent", env: {}, uses: "agent/summarize" }],
+        steps: [{ name: "review/summary", id: "summary", title: "review with agent", env: {}, uses: "action/summarize" }],
       },
     },
     jobOrder: ["verify", "review"],
@@ -108,7 +108,7 @@ describe("emitGraph: steps option", () => {
     const out = emitGraph(withSteps(), "ascii", { steps: true });
     assert.match(out, /1\. install dependencies/);
     assert.match(out, /2\. capture source {2}\[read\]/);
-    assert.match(out, /1\. review with agent {2}→ uses agent\/summarize {2}\[summary\]/);
+    assert.match(out, /1\. review with agent {2}→ uses action\/summarize {2}\[summary\]/);
   });
 
   it("json adds a stepList with kind/uses/id", () => {
@@ -118,7 +118,7 @@ describe("emitGraph: steps option", () => {
     assert.deepEqual(parsed.jobs.review.stepList[0], {
       name: "review with agent",
       kind: "uses",
-      uses: "agent/summarize",
+      uses: "action/summarize",
       id: "summary",
     });
   });
@@ -129,7 +129,7 @@ describe("emitGraph: steps option", () => {
     assert.match(out, /n0_s1\["1\. install dependencies"\]/);
     assert.match(out, /n0_s1 --> n0_s2/); // ordered chain
     // uses step gets the stadium shape and uses ref
-    assert.match(out, /n1_s1\(\["1\. review with agent.*uses agent\/summarize.*"\]\)/);
+    assert.match(out, /n1_s1\(\["1\. review with agent.*uses action\/summarize.*"\]\)/);
     assert.match(out, /n0 --> n1/); // job dependency between subgraphs
   });
 

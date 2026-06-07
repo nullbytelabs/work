@@ -12,9 +12,9 @@ import { useSharedRuntime } from "./_support.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const runtime = useSharedRuntime();
 
-// Agent packages are workflow-local; point inline agent-step tests at the
-// agent-project's `.workflows/` so `uses: agent/summarize` resolves to its
-// package (`.workflows/agents/summarize`). AGENT_PROJECT is the project root.
+// Actions are workflow-local; point inline action tests at the agent-project's
+// `.workflows/` so `uses: action/summarize` resolves to its composite action
+// (`.workflows/actions/summarize`). AGENT_PROJECT is the project root.
 const AGENT_PROJECT = resolve(HERE, "e2e", "agent-project");
 const AGENT_WORKFLOWS = join(AGENT_PROJECT, ".workflows");
 
@@ -177,8 +177,8 @@ jobs:
     runs-on: gondolin
     steps:
       - id: sum
-        uses: agent/summarize
-        with: { input: "x" }
+        uses: work/agent
+        with: { prompt: "x" }
 `));
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-trunc-"));
     let result: WorkflowResult;
@@ -201,8 +201,8 @@ jobs:
     runs-on: gondolin
     steps:
       - id: s
-        uses: agent/summarize
-        with: { input: "x" }
+        uses: work/agent
+        with: { prompt: "x" }
 `));
     const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-aerr-"));
     let result: WorkflowResult;
@@ -227,11 +227,11 @@ jobs:
     runs-on: gondolin
     steps:
       - id: sum
-        uses: agent/summarize
+        uses: work/agent
         with:
-          input: "the text to summarize"
+          prompt: "the text to summarize"
       - env:
-          S: \${{ steps.sum.outputs.summary }}
+          S: \${{ steps.sum.outputs.output }}
         run: echo "out=$S"
 `, AGENT_WORKFLOWS);
     assert.equal(result.status, "success");
@@ -255,10 +255,10 @@ jobs:
   });
 });
 
-// The real-world shape: a project keeps its pipeline + agents in `.workflows/`
+// The real-world shape: a project keeps its pipeline + actions in `.workflows/`
 // and the workflow operates on the PROJECT ROOT checkout. This proves the wiring
 // offline (mock agent, no npm): checkout == project root, multiline `$WORK_OUTPUT`,
-// and agent resolution from `.workflows/agents/`.
+// and action resolution from `.workflows/actions/`.
 describe("project layout (.workflows/): checkout is the project root", () => {
   it("stages the project root, captures multiline source, and resolves a .workflows agent", async () => {
     const plan = compile(parseWorkflow(`
@@ -279,10 +279,8 @@ jobs:
             echo "__EOF__"
           } >> "$WORK_OUTPUT"
       - id: rev
-        name: review with the project's own agent
-        uses: agent/summarize
-        with:
-          input: \${{ steps.read.outputs.source }}
+        name: review with the project's own composite action
+        uses: action/summarize
       - name: show
         env:
           R: \${{ steps.rev.outputs.summary }}
@@ -299,7 +297,7 @@ jobs:
       });
       assert.equal(result.status, "success");
       assert.match(output, /CHECKOUT_OK/); // run steps see the project root checkout
-      assert.match(output, /review=MOCK SUMMARY/); // agent resolved from .workflows/agents/
+      assert.match(output, /review=MOCK SUMMARY/); // composite action resolved from .workflows/actions/
 
       // The multiline source survived $WORK_OUTPUT heredoc capture intact.
       const src = result.jobs[0]!.steps.find((s) => s.outputs?.["source"])?.outputs?.["source"] ?? "";

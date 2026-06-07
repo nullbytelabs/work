@@ -59,7 +59,8 @@ const AGENT_WORKFLOW_YAML = `# {{name}}
 # description: run an AI agent step inside the sandbox, then use its output
 # usage: work run {{name}} --config ${CONFIG_FILENAME}
 #
-# The agent package lives in ${WORKFLOWS_DIR}/agents/{{name}}/ (uses: agent/{{name}}).
+# The agent lives in a composite action at ${WORKFLOWS_DIR}/actions/{{name}}/
+# (uses: action/{{name}}) that wraps the built-in work/agent primitive.
 # An agent step needs a model — see ${CONFIG_FILENAME} (fill in a real $API_KEY).
 ---
 name: {{name}}
@@ -71,8 +72,8 @@ jobs:
       result: \${{ steps.agent.outputs.summary }}
     steps:
       - id: agent
-        name: run the {{name}} agent
-        uses: agent/{{name}}
+        name: run the {{name}} action
+        uses: action/{{name}}
 
       - name: show result
         env:
@@ -81,19 +82,28 @@ jobs:
           echo "result -> $RESULT"
 `;
 
-const AGENT_MANIFEST_YAML = `# Agent package manifest for \`uses: agent/{{name}}\` — supplied by THIS project,
-# not the engine (the action.yml analog).
-# Today's runner uses instructions + task + inputs/outputs; skills/extensions are future.
+const ACTION_MANIFEST_YAML = `# Composite action for \`uses: action/{{name}}\` — supplied by THIS project, not the
+# engine (the action.yml analog). It wraps the built-in \`work/agent\` primitive with
+# file-backed prompts, and maps the agent's final message to a declared output.
 name: {{name}}
 description: <one line describing what this agent does>
 
-# Declare inputs here to thread step outputs in via the step's \`with:\`; bind them
-# into task.md with {{ input_name }} placeholders. Omit when the agent just reads
-# the workspace.
+# Declare inputs here to accept values from the step's \`with:\` and reference them
+# in the steps below as \${{ inputs.<name> }}.
 
 outputs:
   summary:
     description: The agent's final message.
+    value: \${{ steps.run.outputs.output }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      uses: work/agent
+      with:
+        instructionsFile: ${WORKFLOWS_DIR}/actions/{{name}}/instructions.md
+        promptFile: ${WORKFLOWS_DIR}/actions/{{name}}/task.md
 `;
 
 const AGENT_INSTRUCTIONS_MD = `You are a helpful agent operating inside a sandboxed workspace. Read the project files in your working directory and complete the task. Output only the result — no preamble, labels, or quotes.
@@ -148,12 +158,12 @@ export function scaffoldFiles(opts: ScaffoldOptions): Map<string, string> {
     return files;
   }
 
-  // agent-action: workflow + agent package + starter config.
+  // agent-action: workflow + composite action (wrapping work/agent) + starter config.
   files.set(workflowPath(name), render(AGENT_WORKFLOW_YAML, name));
-  const agentDir = `${WORKFLOWS_DIR}/agents/${name}`;
-  files.set(`${agentDir}/agent.yaml`, render(AGENT_MANIFEST_YAML, name));
-  files.set(`${agentDir}/instructions.md`, render(AGENT_INSTRUCTIONS_MD, name));
-  files.set(`${agentDir}/task.md`, render(AGENT_TASK_MD, name));
+  const actionDir = `${WORKFLOWS_DIR}/actions/${name}`;
+  files.set(`${actionDir}/action.yaml`, render(ACTION_MANIFEST_YAML, name));
+  files.set(`${actionDir}/instructions.md`, render(AGENT_INSTRUCTIONS_MD, name));
+  files.set(`${actionDir}/task.md`, render(AGENT_TASK_MD, name));
   const cfg = starterConfigFile();
   files.set(cfg.path, cfg.contents);
   return files;
@@ -175,7 +185,7 @@ export function starterConfigFile(): { path: string; contents: string } {
 // A single SKILL.md works in both editors; the `description` drives auto-discovery.
 const SKILL_MD = `---
 name: work-workflows
-description: Author and run GitHub-Actions-style workflows with the \`work\` CLI in this repo. Use when asked to write, run, inspect, or debug a workflow, a .workflows/*.yaml file, or an \`agent/\` step.
+description: Author and run GitHub-Actions-style workflows with the \`work\` CLI in this repo. Use when asked to write, run, inspect, or debug a workflow, a .workflows/*.yaml file, an agent step, or an action.
 ---
 
 # Authoring \`work\` workflows
@@ -186,8 +196,10 @@ each job isolated in a gondolin micro-VM, with optional AI agent steps.
 ## Layout
 - Workflows live in \`${WORKFLOWS_DIR}/<file>.yaml\`; you run one by its declared
   \`name:\` (not its filename).
-- Agent packages live in \`${WORKFLOWS_DIR}/agents/<name>/\` and are referenced as
-  \`uses: agent/<name>\`.
+- A step \`uses:\` is one of: \`work/agent\` (the built-in agent primitive, prompted
+  via \`with:\`), \`action/<name>\` (a project action under
+  \`${WORKFLOWS_DIR}/actions/<name>/\` — JavaScript or composite), or a built-in
+  \`work/checkout\` / \`work/install-node\`.
 - Provider/model config for agent steps is \`${CONFIG_FILENAME}\` (\`$ENV\` refs for keys).
 
 ## Spec shape
@@ -204,7 +216,8 @@ jobs:
       - name: <label>
         run: echo hi         # a shell step (run XOR uses)
       - id: review
-        uses: agent/<name>   # an agent step
+        uses: work/agent     # an agent step (prompt via with:)
+        with: { prompt: "Review the checkout and summarize risks." }
 \`\`\`
 A step has \`run\` **or** \`uses\`, never both. Typed \`inputs\` are validated at compile time.
 

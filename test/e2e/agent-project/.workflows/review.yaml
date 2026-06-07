@@ -5,9 +5,10 @@
 # workspace-aware — it reads `main.ts` straight from the checkout — so this
 # pipeline needs nothing from CI (no `needs`, no threaded output).
 #
-# Agent packages live in `.workflows/agents/` (`uses: agent/<name>`). Tests inject
-# a mock runner (no inference). For a real review against a model:
-#   ./pi-workflows ./test/e2e/agent-project/.workflows/review.yaml --config work.json
+# The "agent" is a composite action in `.workflows/actions/summarize/` that wraps
+# the built-in `work/agent` primitive (`uses: action/summarize`). Tests inject a
+# mock runner (no inference). For a real review against a model:
+#   work --workspace test/e2e/agent-project run review --config work.json
 ---
 name: review
 
@@ -19,7 +20,7 @@ jobs:
     steps:
       - id: summary
         name: review the source with an agent
-        uses: agent/summarize
+        uses: action/summarize
 
       - name: show review
         env:

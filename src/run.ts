@@ -15,8 +15,9 @@ import { join, resolve } from "node:path";
 import { AbsurdRuntime, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
 import type { ExecutionPlan } from "./compiler/index.ts";
 import type { TargetFactory } from "./targets/index.ts";
-import { createAgentUsesHandler, createWorkAgentHandler, makeAgentEgressResolver } from "./agent/index.ts";
-import { createActionUsesHandler } from "./actions/index.ts";
+import { createWorkHandler, makeAgentEgressResolver } from "./agent/index.ts";
+import { createActionUsesHandler, type SubUsesDispatch } from "./actions/index.ts";
+import type { UsesHandler } from "./runtime/index.ts";
 import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.ts";
 import type { PiWorkflowsConfig } from "./config/index.ts";
 
@@ -67,19 +68,32 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
     ? resolve(opts.workdir)
     : await mkdtemp(join(tmpdir(), "pi-workflows-"));
 
-  // Compose the agent uses-handler into the (agent-agnostic) runtime. Per-job
-  // egress is the union of two resolvers: the agent resolver (allowlists the
-  // model host + injects the API key so an in-guest agent reaches the model
-  // without the key entering the guest) and the datasource resolver (allowlists
-  // a scoped datasource's host + injects its token for a plain `run:` step). Both
-  // inject secrets host-side only — the real values never enter the guest. An
+  // Compose the `uses:` handlers into the (agent-agnostic) runtime. A composite
+  // action's inner `uses:` sub-steps route through a late-bound dispatcher that
+  // resolves by scheme over this same handler set — so `work/agent` and nested
+  // `action/<name>` work inside a composite, and built-in `work/*` actions run via
+  // the action path. Per-job egress is the union of the agent/action resolver
+  // (allow-all for jobs with a uses-step + a host-scoped model key) and the
+  // datasource resolver (a scoped datasource host + injected token for a `run:`
+  // step). Secrets are injected host-side only — never entering the guest. An
   // injected engine is shared (not closed per run).
+  const handlers: UsesHandler[] = [];
+  const dispatch: SubUsesDispatch = (subCtx) => {
+    const scheme = subCtx.uses.split("/", 1)[0]!;
+    const h = handlers.find((x) => x.scheme === scheme);
+    if (!h) {
+      subCtx.emit({ stream: "stderr", text: `no handler for uses: "${subCtx.uses}"` });
+      return Promise.resolve({ status: "failure", stderr: `no handler for uses: "${subCtx.uses}"` });
+    }
+    return h.run(subCtx);
+  };
+  handlers.push(
+    createWorkHandler({ config: opts.config, dispatch }),
+    createActionUsesHandler({ dispatch }),
+  );
+
   const runtime = new AbsurdRuntime({
-    usesHandlers: [
-      createAgentUsesHandler({ config: opts.config }),
-      createWorkAgentHandler({ config: opts.config }),
-      createActionUsesHandler(),
-    ],
+    usesHandlers: handlers,
     resolveJobNetwork: composeResolvers(
       makeAgentEgressResolver(opts.config),
       makeDatasourceEgressResolver(opts.config, opts.datasources ? { datasources: opts.datasources } : {}),

@@ -197,7 +197,7 @@ jobs:
         env:
           SVC: "\${{ event.commonLabels.service }}"
         run: 'echo sev=\${{ event.alerts[0].labels.severity }}'
-      - uses: agent/triage
+      - uses: action/triage
         with:
           alert: "\${{ event }}"
 `);

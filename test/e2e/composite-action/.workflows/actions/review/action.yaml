@@ -1,0 +1,20 @@
+name: review
+description: Shape an input, then run the work/agent primitive and surface its output.
+inputs:
+  target:
+    type: string
+    default: .
+outputs:
+  summary:
+    description: The agent's final message.
+    value: ${{ steps.agent.outputs.output }}
+runs:
+  using: composite
+  steps:
+    - id: prep
+      run: echo "reviewing ${{ inputs.target }}"
+    - id: agent
+      uses: work/agent
+      with:
+        instructions: You are terse.
+        prompt: Summarize the target ${{ inputs.target }} in one line.

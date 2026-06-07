@@ -91,20 +91,29 @@ work-root / runtime-construction / close sequence. It deliberately owns **no pre
 callers pass `hooks` (the TUI presenter, or the web SSE sink). When given a shared `engine` it does
 not own it (the web server boots one engine for all runs); otherwise it constructs and closes its own.
 
-### Agent steps and egress
+### Agent steps, actions, and egress
 
-A `uses: agent/<name>` step runs a real Pi agent **inside the job's micro-VM**, rooted at the
-checkout with its full toolset (`src/agent/`). Key security property: the model is reached only
-through gondolin's **mediated egress** — the agent egress resolver allowlists the model host and
-**injects the API key host-side**, so the key never enters the guest (`makeAgentEgressResolver`).
-`startRun` composes that with a **datasource** egress resolver (`src/egress/`) so an allowlisted
-`run:` step can reach a scoped datasource host with a header-injected token. Both are deny-by-default.
-Per project memory: agents get the full toolset over their workspace — core does **not** govern
-agent permissions, and you must never mock the agent runner.
+The agent surface is the dumb **`work/agent`** primitive (`src/agent/work-handler.ts`):
+`uses: work/agent` runs a real Pi agent **inside the job's micro-VM**, rooted at the checkout
+with its full toolset (`src/agent/`), prompted entirely through `with:` (`instructions`/
+`instructionsFile`, `prompt`/`promptFile`, `model`) — no package format. Its final message
+becomes the step's `output`. (The old engine-owned `agent/<name>` package format was removed —
+see docs/agent-primitive-and-actions.md; don't reintroduce it.)
 
-Agents are defined as packages under `.workflows/agents/<name>/`: `agent.yaml` (manifest),
-`instructions.md` (system prompt), `task.md` (task prompt with `{{ input }}` placeholders bound
-from the step's `with:`). The agent's final message becomes the step's declared output.
+Richer, reusable behavior lives in **user-space actions** (`src/actions/`): `uses: action/<name>`
+resolves a package under `.workflows/actions/<name>/` — either a **JavaScript** action
+(`runs.using: node`, `INPUT_*`/`$WORK_OUTPUT` ABI) or a **composite** action (`runs.using: composite`,
+a step bundle that can itself `uses: work/agent`). The engine also ships built-in `work/checkout`
+and `work/install-node` actions (bundled under `src/actions/builtin/`, run through the same path).
+A composite action's inner `uses:` sub-steps route through a late-bound dispatcher wired in `run.ts`.
+
+Key security property: the model is reached only through gondolin's **mediated egress** — the
+egress resolver (`makeAgentEgressResolver`) grants allow-all egress to any job with a `uses:` step
+(work/action) and **injects the API key host-side**, scoped to the model host, so the key never
+enters the guest. `startRun` composes that with a **datasource** egress resolver (`src/egress/`) so
+an allowlisted `run:` step can reach a scoped datasource host with a header-injected token. Both are
+deny-by-default. Per project memory: agents get the full toolset over their workspace — core does
+**not** govern agent permissions, and you must never mock the agent runner.
 
 ### Project layout resolution (`src/project.ts`)
 

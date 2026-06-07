@@ -3,7 +3,7 @@
  * gondolin guest). It is the only agent runner: every job is a sandbox, so the
  * agent loop never runs on the host.
  *
- * This is what makes `uses: agent/*` steps honor `runs-on: gondolin`: the whole
+ * This is what makes `uses: work/agent` steps honor `runs-on: gondolin`: the whole
  * model loop executes in the VM, reaching the model API only through Gondolin's
  * mediated egress, with the API key injected host-side (it never enters the
  * guest). The host side here only *stages* a request and *reads back* a result

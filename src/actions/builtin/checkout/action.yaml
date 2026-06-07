@@ -1,0 +1,63 @@
+name: checkout
+description: >
+  Clone a git repository into the job's workspace. Installs git in the Alpine
+  guest (apk) on demand and clones over the sandbox's mediated egress. v1 targets
+  public repositories.
+inputs:
+  repo:
+    type: string
+    required: true
+    description: Clone URL or owner/name (owner/name resolves to https://github.com/owner/name).
+  ref:
+    type: string
+    default: ""
+    description: Branch or tag to check out. Empty clones the default branch.
+  path:
+    type: string
+    default: .
+    description: Destination directory under the workspace (default the workspace root).
+  depth:
+    type: number
+    default: 1
+    description: Shallow-clone depth. 0 clones full history.
+outputs:
+  ref:
+    description: The ref that was checked out.
+    value: ${{ steps.clone.outputs.ref }}
+  sha:
+    description: The commit SHA HEAD points at after cloning.
+    value: ${{ steps.clone.outputs.sha }}
+runs:
+  using: composite
+  steps:
+    - id: clone
+      name: git clone
+      run: |
+        set -eu
+        # Trust gondolin's MITM CA so apk/git work over the mediated TLS egress.
+        if [ -f /etc/gondolin/mitm/ca.crt ]; then
+          cat /etc/gondolin/mitm/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+        fi
+        command -v git >/dev/null 2>&1 || apk add --no-cache git >/dev/null
+
+        # The workspace mount is host-owned but steps run as root; tell git the
+        # checkout is trusted so rev-parse works.
+        git config --global --add safe.directory '*'
+
+        # owner/name shorthand -> GitHub https URL.
+        repo="$INPUT_REPO"
+        case "$repo" in
+          *://*|*@*) : ;;
+          */*) repo="https://github.com/$repo" ;;
+        esac
+
+        args=""
+        [ "$INPUT_DEPTH" != "0" ] && args="--depth $INPUT_DEPTH"
+        [ -n "$INPUT_REF" ] && args="$args --branch $INPUT_REF"
+
+        # shellcheck disable=SC2086
+        git clone $args "$repo" "$INPUT_PATH"
+
+        cd "$INPUT_PATH"
+        echo "ref=$(git rev-parse --abbrev-ref HEAD)" >> "$WORK_OUTPUT"
+        echo "sha=$(git rev-parse HEAD)" >> "$WORK_OUTPUT"

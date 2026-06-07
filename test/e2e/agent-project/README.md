@@ -1,7 +1,7 @@
 # Sample project (with a pi-workflows pipeline)
 
 A tiny TypeScript project that demonstrates the **real-world shape** for
-pi-workflows: a project keeps its pipeline and agents in a `.workflows/` folder
+pi-workflows: a project keeps its pipeline and actions in a `.workflows/` folder
 (the analog of `.github/workflows/`), and the workflow runs against the project
 root checkout.
 
@@ -13,8 +13,8 @@ root checkout.
 └── .workflows/
     ├── ci.yaml          # fast verification pipeline      (name: ci)
     ├── review.yaml      # standalone agent review         (name: review)
-    └── agents/
-        └── summarize/   # a project-local agent package (uses: agent/summarize)
+    └── actions/
+        └── summarize/   # a composite action wrapping work/agent (uses: action/summarize)
 ```
 
 Two independent pipelines, so verification and review run on their own schedules:

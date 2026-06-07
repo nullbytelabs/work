@@ -1,0 +1,19 @@
+# A composite action: a step bundle that runs a shell step AND the built-in
+# work/agent primitive, mapping the agent's output to a declared action output.
+# It's the step-level sibling of a reusable workflow. (Under test the agent runner
+# is mocked, so this verifies the wiring without inference.)
+name: composite-action
+jobs:
+  go:
+    runs-on: gondolin
+    steps:
+      - id: r
+        uses: action/review
+        with:
+          target: src
+      - name: assert the composite action output flowed through
+        env:
+          OUT: ${{ steps.r.outputs.summary }}
+        run: |
+          echo "summary: $OUT"
+          test -n "$OUT"

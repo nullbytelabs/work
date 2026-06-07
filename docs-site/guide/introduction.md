@@ -22,7 +22,9 @@ jobs:
     needs: [collect]
     runs-on: gondolin
     steps:
-      - uses: agent/summarize  # an AI agent reads data.json and writes the summary
+      - uses: work/agent       # an AI agent reads data.json and writes the summary
+        with:
+          prompt: Read data.json and write a short summary.
 ```
 
 ```bash
@@ -55,7 +57,7 @@ A workflow is a single YAML file. The pieces:
 |---|---|
 | **Workflow** | the file itself — a `name:` and a set of named jobs. |
 | **Job** | an isolated unit of work, run in its own micro-VM (`runs-on: gondolin`), sized with `machine:`. |
-| **Step** | a shell command (`run:`) or a `uses:` reference — an AI agent (`agent/<name>` or the built-in [`work/agent`](./actions)) or your own [JavaScript action](./actions). |
+| **Step** | a shell command (`run:`) or a `uses:` reference — the built-in [`work/agent`](./agent-steps) AI agent or your own [action](./actions) (`action/<name>`). |
 | **`needs`** | dependencies between jobs; independent jobs run in parallel. |
 | **Inputs / outputs / matrix / conditionals** | typed parameters, data passing between jobs, fan-out, and guards. |
 

@@ -1,0 +1,17 @@
+# The built-in work/install-node action: install a specific Node version over the
+# one the Alpine guest ships, so later steps in the job resolve to it. Downloads
+# from nodejs.org, so it's gated behind WORK_TEST_NETWORK=1 in the suite.
+name: install-node
+jobs:
+  setup:
+    runs-on: gondolin
+    steps:
+      # v24+ has musl builds for both x64 and arm64 (older versions are x64-only).
+      - name: install Node 24.9.0
+        uses: work/install-node
+        with:
+          version: 24.9.0
+      - name: assert the new node shadows the guest's
+        run: |
+          echo "node is now $(node --version)"
+          node --version | grep -q "v24.9.0"

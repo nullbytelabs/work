@@ -54,10 +54,10 @@ export interface RunContext {
    */
   workspaceSource?: string;
   /**
-   * Directory holding the workflow definition and its local assets (agent
-   * packages under `<workflowDir>/agents/`). Distinct from `workspaceSource`
+   * Directory holding the workflow definition and its local assets (action
+   * packages under `<workflowDir>/actions/`). Distinct from `workspaceSource`
    * when the workflow lives in a `.workflows/` folder: the checkout staged into
-   * jobs is the project root, while agents resolve from `.workflows/agents/`.
+   * jobs is the project root, while actions resolve from `.workflows/actions/`.
    * Defaults to `workspaceSource` when omitted.
    */
   workflowDir?: string;
@@ -78,12 +78,12 @@ export interface Runtime {
 /**
  * The contract for `uses:` steps. The durable core stays agent-agnostic: it
  * dispatches a step whose `uses:` is `<scheme>/<…>` to the registered handler
- * for that scheme and maps the result into a step result. Agents are just one
- * handler (`scheme: "agent"`), composed in at the CLI/test layer — the runtime
- * imports none of the agent/Pi/config code.
+ * for that scheme and maps the result into a step result. The `work` handler
+ * (work/agent + built-ins) and the `action` handler are composed in at the
+ * CLI/test layer — the runtime imports none of the agent/Pi/config code.
  */
 export interface UsesContext {
-  /** The raw `uses:` value, e.g. "agent/summarize@v2". */
+  /** The raw `uses:` value, e.g. "work/agent" or "action/review". */
   uses: string;
   /** The step's `with:` — string values are already interpolated by the core. */
   with: Record<string, unknown>;

@@ -166,7 +166,8 @@ jobs:
   review:
     runs-on: gondolin
     steps:
-      - uses: agent/summarize
+      - uses: work/agent
+        with: { prompt: "summarize" }
 `),
     );
   }
@@ -184,17 +185,20 @@ jobs:
     });
   });
 
-  it("returns undefined for agent-free jobs and when there is no config", () => {
+  it("grants no egress to a job with no uses: step; grants network (but no key) without config", () => {
     const resolveWith = makeAgentEgressResolver(config);
     const resolveNoCfg = makeAgentEgressResolver(undefined);
 
-    const noAgentPlan = compile(
+    const noUsesPlan = compile(
       parseWorkflow(`name: w\njobs:\n  go:\n    runs-on: gondolin\n    steps: [{ run: "true" }]`),
     );
 
-    // No agent steps in the job → no mediated egress needed.
-    assert.equal(resolveWith(noAgentPlan.jobs["go"]!), undefined);
-    // No config at all → nothing to allowlist or inject.
-    assert.equal(resolveNoCfg(gondolinAgentPlan().jobs["review"]!), undefined);
+    // No uses: step (only run:) → deny-by-default, no mediated egress.
+    assert.equal(resolveWith(noUsesPlan.jobs["go"]!), undefined);
+    // A work/agent job without config still needs network (to npm-install Pi), but
+    // there is no model key to inject.
+    const net = resolveNoCfg(gondolinAgentPlan().jobs["review"]!);
+    assert.deepEqual(net?.allowedHosts, ["*"]);
+    assert.equal(net?.secrets, undefined);
   });
 });

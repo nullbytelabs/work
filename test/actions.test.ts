@@ -43,11 +43,11 @@ describe("loadAction (manifest)", () => {
     }
   });
 
-  it("rejects composite actions (not yet supported)", async () => {
+  it("rejects an unknown runs.using kind", async () => {
     const base = await mkdtemp(join(tmpdir(), "act-"));
     try {
-      const actionsDir = await writeAction(base, "c", `name: c\nruns:\n  using: composite\n  steps: []\n`, "");
-      await assert.rejects(() => loadAction("c", actionsDir), /composite actions are not yet supported/);
+      const actionsDir = await writeAction(base, "c", `name: c\nruns:\n  using: docker\n`, "");
+      await assert.rejects(() => loadAction("c", actionsDir), /must declare runs.using: node \| composite/);
     } finally {
       await rm(base, { recursive: true, force: true });
     }
