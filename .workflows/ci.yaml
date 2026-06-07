@@ -1,11 +1,12 @@
 # ci
-# description: dogfoods the engine on itself — composes two reusable workflows via
+# description: dogfoods the engine on itself — composes three reusable workflows via
 #              job-level `uses:`. `checks` runs lint/typecheck/knip/fan-in in one VM;
-#              `unit-tests` then runs the non-QEMU test tier. Sequential (unit-tests
-#              needs checks) for fail-fast and one 8G VM at a time. The e2e/VM-smoke
+#              `test` then runs the non-QEMU test tier (needs checks → fail-fast).
+#              `review` runs a real work/agent code review last (needs test), so it
+#              only spends a model call once the code verifies. The e2e/VM-smoke
 #              tiers live in GitHub Actions (.github/workflows/ci.yml), where QEMU is
 #              available and nested virtualization isn't needed.
-# usage: work run ci
+# usage: work run ci   (review needs a model in work.json)
 ---
 name: ci
 
@@ -18,3 +19,7 @@ jobs:
   test:
     needs: [checks]
     uses: workflow/test
+
+  review:
+    needs: [test]
+    uses: workflow/review

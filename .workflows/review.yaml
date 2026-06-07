@@ -1,0 +1,35 @@
+# review
+# description: reusable agent review — one gondolin VM runs a real Pi agent
+#              (uses: work/agent) over the checked-out source and prints its findings.
+#              Workspace-aware: the agent reads src/ straight from the checkout (the
+#              same checkout `checks`/`test` lint and build), so there's no `npm ci`,
+#              no git, and no diff to compute. Needs a model in work.json — the agent
+#              egress allowlists the model host and injects the key host-side, so the
+#              key never enters the guest. Called by `ci` via `uses: workflow/review`;
+#              also runnable directly: `work run review`.
+---
+name: review
+
+on: workflow_call
+
+jobs:
+  review:
+    runs-on: gondolin
+    steps:
+      - id: review
+        name: agent code review
+        uses: work/agent
+        with:
+          prompt: |
+            You are a senior engineer reviewing the pi-workflows codebase — a local
+            workflow engine whose source lives under `src/`. Read the source and
+            report the most important correctness, security, or quality issues you
+            find (aim for 3–5). Format each as: `path/to/file` — the issue — a
+            one-line fix. Prioritise real bugs over style. If the code looks solid,
+            say so briefly. Be concise.
+      - name: show review
+        env:
+          REVIEW: ${{ steps.review.outputs.output }}
+        run: |
+          printf '%s\n' "----- agent review -----"
+          printf '%s\n' "$REVIEW"
