@@ -75,33 +75,15 @@ jobs:
 The prompt can be inline (`prompt:`) or read from a file in the checkout
 (`promptFile:`). There's no separate system-prompt input — a standing persona can
 come from the prompt, or from Pi's own discovery of a committed `.pi/` persona /
-`AGENTS.md`. The full `work/agent` surface is on the
-[Actions](./actions#work-agent-the-dumb-primitive) page.
+`AGENTS.md`.
 
 ## 3. Package an agent as an action
 
 When you want a named, reusable agent with a typed interface — the equivalent of a
-GitHub Action — wrap `work/agent` in a **composite action**. The action owns its
-prompts (as files), declares inputs/outputs, and lives at
-`.workflows/actions/<name>/`; the workflow just calls `uses: action/<name>`:
-
-```yaml
-# .workflows/actions/review/action.yaml
-name: review
-outputs:
-  summary:
-    value: ${{ steps.run.outputs.output }}
-runs:
-  using: composite
-  steps:
-    - id: run
-      uses: work/agent
-      with:
-        promptFile: .workflows/actions/review/prompt.md
-```
-
-`work create <name> --template agent-action` scaffolds exactly this. See
-[Actions](./actions) for JavaScript and composite actions in full.
+GitHub Action — wrap `work/agent` in a **[composite action](./composite-actions)**:
+a file-backed prompt and a declared output, called as `uses: action/<name>`.
+`work create <name> --template agent-action` scaffolds exactly that. See
+[Composite actions](./composite-actions#packaging-an-agent) for the full shape.
 
 ## How it runs
 
