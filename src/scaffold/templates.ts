@@ -84,7 +84,7 @@ jobs:
 
 const ACTION_MANIFEST_YAML = `# Composite action for \`uses: action/{{name}}\` — supplied by THIS project, not the
 # engine (the action.yml analog). It wraps the built-in \`work/agent\` primitive with
-# file-backed prompts, and maps the agent's final message to a declared output.
+# a file-backed prompt, and maps the agent's final message to a declared output.
 name: {{name}}
 description: <one line describing what this agent does>
 
@@ -102,14 +102,16 @@ runs:
     - id: run
       uses: work/agent
       with:
-        instructionsFile: ${WORKFLOWS_DIR}/actions/{{name}}/instructions.md
-        promptFile: ${WORKFLOWS_DIR}/actions/{{name}}/task.md
+        promptFile: ${WORKFLOWS_DIR}/actions/{{name}}/prompt.md
 `;
 
-const AGENT_INSTRUCTIONS_MD = `You are a helpful agent operating inside a sandboxed workspace. Read the project files in your working directory and complete the task. Output only the result — no preamble, labels, or quotes.
-`;
+// The single prompt the action feeds to work/agent. The role lives in the prompt
+// itself — there is no separate system-prompt input.
+const AGENT_PROMPT_MD = `You are a helpful agent operating inside a sandboxed workspace. Read the project
+files in your working directory and complete the task below. Output only the
+result — no preamble, labels, or quotes.
 
-const AGENT_TASK_MD = `Describe the task for the {{name}} agent here. The agent runs in the job's
+Task: describe the task for the {{name}} agent here. The agent runs in the job's
 workspace (the checkout) and can read the files directly.
 `;
 
@@ -162,8 +164,7 @@ export function scaffoldFiles(opts: ScaffoldOptions): Map<string, string> {
   files.set(workflowPath(name), render(AGENT_WORKFLOW_YAML, name));
   const actionDir = `${WORKFLOWS_DIR}/actions/${name}`;
   files.set(`${actionDir}/action.yaml`, render(ACTION_MANIFEST_YAML, name));
-  files.set(`${actionDir}/instructions.md`, render(AGENT_INSTRUCTIONS_MD, name));
-  files.set(`${actionDir}/task.md`, render(AGENT_TASK_MD, name));
+  files.set(`${actionDir}/prompt.md`, render(AGENT_PROMPT_MD, name));
   const cfg = starterConfigFile();
   files.set(cfg.path, cfg.contents);
   return files;

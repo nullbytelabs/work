@@ -54,9 +54,8 @@ projects. Fill in a real `$FIREWORKS_API_KEY` (or your provider's key).
 
 ## 2. Run an agent with `work/agent`
 
-`work/agent` is the dumb primitive: the `with:` map *is* the request. Give it a
-`prompt` (and optionally `instructions`); its **final message** becomes the step
-output `output`:
+`work/agent` is the dumb primitive: give it a single `prompt` (the role lives in
+the prompt itself), and its **final message** becomes the step output `output`:
 
 ```yaml
 jobs:
@@ -68,16 +67,16 @@ jobs:
       - id: a
         uses: work/agent
         with:
-          instructions: You are a code reviewer. Flag regressions; never edit files.
-          prompt: Review the diff under /workspace and summarize the risks.
+          prompt: You are a code reviewer. Review the diff under /workspace and summarize the risks.
           model: kimi               # a model alias from work.json (optional)
       - run: echo "review -> ${{ steps.a.outputs.output }}"
 ```
 
-Prompts can be inline (`instructions:`/`prompt:`) or read from files in the
-checkout (`instructionsFile:`/`promptFile:`). Omitting `instructions` lets Pi's own
-discovery (a committed `.pi/` persona, `AGENTS.md`) supply the role. The full
-`work/agent` surface is on the [Actions](./actions#work-agent-the-dumb-primitive) page.
+The prompt can be inline (`prompt:`) or read from a file in the checkout
+(`promptFile:`). There's no separate system-prompt input — a standing persona can
+come from the prompt, or from Pi's own discovery of a committed `.pi/` persona /
+`AGENTS.md`. The full `work/agent` surface is on the
+[Actions](./actions#work-agent-the-dumb-primitive) page.
 
 ## 3. Package an agent as an action
 
@@ -98,8 +97,7 @@ runs:
     - id: run
       uses: work/agent
       with:
-        instructionsFile: .workflows/actions/review/instructions.md
-        promptFile: .workflows/actions/review/task.md
+        promptFile: .workflows/actions/review/prompt.md
 ```
 
 `work create <name> --template agent-action` scaffolds exactly this. See

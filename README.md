@@ -148,11 +148,10 @@ my-project/
 ├── src/…
 └── .workflows/
     ├── verify.yaml             # a workflow (name: verify)
-    └── agents/
-        └── review/             # a local agent package
-            ├── agent.yaml
-            ├── instructions.md
-            └── task.md
+    └── actions/
+        └── review/             # a local action (composite or JS)
+            ├── action.yaml
+            └── prompt.md       # e.g. a composite action wrapping work/agent
 ```
 
 Run a workflow **by its `name:`**:
@@ -202,12 +201,11 @@ jobs:
       - id: summary
         uses: work/agent
         with:
-          instructions: You are a code reviewer.
-          prompt: Review main.ts and summarize it in one sentence.
+          prompt: You are a code reviewer. Review main.ts and summarize it in one sentence.
       - run: echo "review -> ${{ steps.summary.outputs.output }}"
 ```
 
-Prompts can also be file-backed (`instructionsFile:`/`promptFile:`). **To package a named, reusable agent**, wrap `work/agent` in a composite action under `.workflows/actions/<name>/` (`uses: action/<name>`) — see the [actions guide](https://nullbytelabs.github.io/pi-workflows/guide/actions). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a verification workflow and a `review.yaml` where a composite action reviews the source.
+The prompt can also be file-backed (`promptFile:`); there's no separate system-prompt input. **To package a named, reusable agent**, wrap `work/agent` in a composite action under `.workflows/actions/<name>/` (`uses: action/<name>`) — see the [actions guide](https://nullbytelabs.github.io/pi-workflows/guide/actions). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a verification workflow and a `review.yaml` where a composite action reviews the source.
 
 ---
 

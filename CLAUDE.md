@@ -95,8 +95,9 @@ not own it (the web server boots one engine for all runs); otherwise it construc
 
 The agent surface is the dumb **`work/agent`** primitive (`src/agent/work-handler.ts`):
 `uses: work/agent` runs a real Pi agent **inside the job's micro-VM**, rooted at the checkout
-with its full toolset (`src/agent/`), prompted entirely through `with:` (`instructions`/
-`instructionsFile`, `prompt`/`promptFile`, `model`) — no package format. Its final message
+with its full toolset (`src/agent/`), prompted entirely through `with:` (a single
+`prompt` or `promptFile`, plus `model`) — no package format, no separate system prompt.
+Its final message
 becomes the step's `output`. (The old engine-owned `agent/<name>` package format was removed —
 see docs/agent-primitive-and-actions.md; don't reintroduce it.)
 

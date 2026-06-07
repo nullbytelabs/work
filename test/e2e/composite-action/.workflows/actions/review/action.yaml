@@ -16,5 +16,4 @@ runs:
     - id: agent
       uses: work/agent
       with:
-        instructions: You are terse.
-        prompt: Summarize the target ${{ inputs.target }} in one line.
+        prompt: You are terse. Summarize the target ${{ inputs.target }} in one line.

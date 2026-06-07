@@ -178,7 +178,7 @@ and [Agent steps](../guide/agent-steps).
 
 | `uses:` | What it is | `with:` | Outputs |
 |---|---|---|---|
-| `work/agent` | Built-in agent primitive (no package). | `instructions`/`instructionsFile`, `prompt`/`promptFile` (one required), `model`. | single `output` (final message) |
+| `work/agent` | Built-in agent primitive (no package). | `prompt` or `promptFile` (one required), `model`. | single `output` (final message) |
 | `action/<name>` | A user-space action at `.workflows/actions/<name>/` — JavaScript or composite. | inputs validated against the action's `action.yaml` `inputs:`. | the action's declared `outputs:` |
 | `work/checkout`, `work/install-node` | Built-in actions shipped with the engine. | per action (e.g. `repo`, `version`). | per action |
 

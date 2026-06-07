@@ -49,18 +49,19 @@ describe("scaffoldFiles — agent-action", () => {
       [...files.keys()].sort(),
       [
         ".workflows/actions/review/action.yaml",
-        ".workflows/actions/review/instructions.md",
-        ".workflows/actions/review/task.md",
+        ".workflows/actions/review/prompt.md",
         ".workflows/review.yaml",
         CONFIG_FILENAME,
       ].sort(),
     );
     assert.match(files.get(".workflows/review.yaml")!, /uses: action\/review/);
-    // The action is a composite that wraps the work/agent primitive.
+    // The action is a composite that wraps the work/agent primitive with a prompt.
     const action = files.get(".workflows/actions/review/action.yaml")!;
     assert.match(action, /using: composite/);
     assert.match(action, /uses: work\/agent/);
-    assert.ok(files.get(".workflows/actions/review/instructions.md")!.trim().length > 0);
+    assert.match(action, /promptFile:/);
+    assert.doesNotMatch(action, /instructions/);
+    assert.ok(files.get(".workflows/actions/review/prompt.md")!.trim().length > 0);
     // work.json is valid JSON and parses as a config object.
     const cfg = JSON.parse(files.get(CONFIG_FILENAME)!);
     assert.equal(cfg.defaultModel, "kimi");

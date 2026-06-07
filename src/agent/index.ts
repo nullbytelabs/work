@@ -18,10 +18,10 @@ import type { ResolvedModel } from "../config/index.ts";
 
 export interface AgentRequest {
   /**
-   * System prompt (the agent's standing persona/policy). Optional: when omitted
-   * (the `work/agent` primitive with no `instructions`), the runner passes *no*
-   * override, so Pi's own `DefaultResourceLoader` discovery — a checked-in `.pi/`
-   * persona, `AGENTS.md` — stands.
+   * System prompt (the agent's standing persona/policy). Optional, and the
+   * `work/agent` primitive never sets it — when omitted, the runner passes *no*
+   * override, so Pi's own `DefaultResourceLoader` discovery (a checked-in `.pi/`
+   * persona, `AGENTS.md`) stands. Kept on the runner as a general capability.
    */
   system?: string;
   /** Task prompt for this invocation. */

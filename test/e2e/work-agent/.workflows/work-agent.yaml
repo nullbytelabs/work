@@ -1,5 +1,5 @@
-# The dumb `work/agent` primitive: a Pi agent prompted entirely through `with:` —
-# no agent package, no instructions.md/task.md, no templating. Its final message
+# The dumb `work/agent` primitive: a Pi agent prompted entirely through a single
+# `prompt` (or `promptFile`) — no agent package, no templating. Its final message
 # is the step's single `output`. (Under test the agent runner is mocked, so this
 # verifies the wiring without inference; a real model resolves from config.)
 name: work-agent
@@ -10,8 +10,7 @@ jobs:
       - id: a
         uses: work/agent
         with:
-          instructions: You are terse.
-          prompt: Summarize what this project does in one line.
+          prompt: You are terse. Summarize what this project does in one line.
       - name: assert the agent produced an output
         env:
           OUT: ${{ steps.a.outputs.output }}

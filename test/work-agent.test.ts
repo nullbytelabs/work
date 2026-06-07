@@ -45,48 +45,34 @@ function makeCtx(over: {
 }
 
 describe("work/agent primitive", () => {
-  it("passes inline instructions + prompt to the runner and maps the reply to `output`", async () => {
+  it("passes the inline prompt to the runner and maps the reply to `output`", async () => {
     const { runner, calls } = recordingRunner();
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
     try {
-      const { ctx } = makeCtx({ with: { instructions: "Be terse.", prompt: "Summarize." }, workdir: dir });
+      const { ctx } = makeCtx({ with: { prompt: "Summarize." }, workdir: dir });
       const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "success");
       assert.equal(res.stdout, "AGENT REPLY");
       assert.deepEqual(res.outputs, { output: "AGENT REPLY" });
       assert.equal(calls.length, 1);
-      assert.equal(calls[0]!.system, "Be terse.");
       assert.equal(calls[0]!.prompt, "Summarize.");
       assert.equal(calls[0]!.cwd, "/workspace");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("reads instructionsFile / promptFile from the workspace", async () => {
-    const { runner, calls } = recordingRunner();
-    const dir = await mkdtemp(join(tmpdir(), "wa-"));
-    try {
-      await writeFile(join(dir, "sys.md"), "  You are a reviewer.\n");
-      await writeFile(join(dir, "task.md"), "Review the diff.\n");
-      const { ctx } = makeCtx({ with: { instructionsFile: "sys.md", promptFile: "task.md" }, workdir: dir });
-      const res = await createWorkHandler({ runner }).run(ctx);
-      assert.equal(res.status, "success");
-      assert.equal(calls[0]!.system, "You are a reviewer."); // trimmed
-      assert.equal(calls[0]!.prompt, "Review the diff.");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("omits the system prompt entirely when no instructions are given (ambient .pi/ discovery)", async () => {
-    const { runner, calls } = recordingRunner();
-    const dir = await mkdtemp(join(tmpdir(), "wa-"));
-    try {
-      const { ctx } = makeCtx({ with: { prompt: "Triage." }, workdir: dir });
-      const res = await createWorkHandler({ runner }).run(ctx);
-      assert.equal(res.status, "success");
+      // No separate system prompt — the prompt carries the role; ambient .pi/ stands.
       assert.equal(calls[0]!.system, undefined);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads promptFile from the workspace", async () => {
+    const { runner, calls } = recordingRunner();
+    const dir = await mkdtemp(join(tmpdir(), "wa-"));
+    try {
+      await writeFile(join(dir, "task.md"), "Review the diff.\n");
+      const { ctx } = makeCtx({ with: { promptFile: "task.md" }, workdir: dir });
+      const res = await createWorkHandler({ runner }).run(ctx);
+      assert.equal(res.status, "success");
+      assert.equal(calls[0]!.prompt, "Review the diff."); // trimmed
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -96,7 +82,7 @@ describe("work/agent primitive", () => {
     const { runner } = recordingRunner();
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
     try {
-      const { ctx, emitted } = makeCtx({ with: { instructions: "Hi." }, workdir: dir });
+      const { ctx, emitted } = makeCtx({ with: { model: "kimi" }, workdir: dir });
       const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "failure");
       assert.match(res.stderr ?? "", /needs a prompt/);

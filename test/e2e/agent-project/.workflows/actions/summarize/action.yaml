@@ -1,5 +1,5 @@
 # A composite action (the action.yml analog), supplied by THIS project — not the
-# engine. It wraps the built-in `work/agent` primitive with file-backed prompts and
+# engine. It wraps the built-in `work/agent` primitive with a file-backed prompt and
 # maps the agent's final message to a declared output. This is the project-owned
 # "agent package" shape: a composite action over work/agent.
 name: summarize
@@ -16,5 +16,4 @@ runs:
     - id: run
       uses: work/agent
       with:
-        instructionsFile: .workflows/actions/summarize/instructions.md
-        promptFile: .workflows/actions/summarize/task.md
+        promptFile: .workflows/actions/summarize/prompt.md

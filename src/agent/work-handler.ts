@@ -59,23 +59,20 @@ async function readWorkspaceFile(workdir: string, file: string): Promise<string>
   return readFile(resolved, "utf-8");
 }
 
-/** Resolve one prompt source from `with:`: an inline string, or a `<key>File`. */
-async function resolvePromptSource(
-  withMap: Record<string, unknown>,
-  key: "instructions" | "prompt",
-  workdir: string,
-): Promise<string | undefined> {
-  const inline = withMap[key];
+/** Resolve the prompt from `with:`: inline `prompt:`, or `promptFile:` (a file in
+ *  the checkout). The prompt carries any role/persona you want — there is no
+ *  separate system-prompt input. */
+async function resolvePrompt(withMap: Record<string, unknown>, workdir: string): Promise<string | undefined> {
+  const inline = withMap["prompt"];
   if (typeof inline === "string") return inline;
-  const file = withMap[`${key}File`];
+  const file = withMap["promptFile"];
   if (typeof file === "string") return (await readWorkspaceFile(workdir, file)).trim();
   return undefined;
 }
 
-/** The `work/agent` primitive: `with:` is the AgentRequest. */
+/** The `work/agent` primitive: a prompt in, the final message out. */
 async function runWorkAgent(ctx: UsesContext, opts: WorkHandlerOptions): Promise<UsesResult> {
-  const instructions = await resolvePromptSource(ctx.with, "instructions", ctx.workdir);
-  const prompt = await resolvePromptSource(ctx.with, "prompt", ctx.workdir);
+  const prompt = await resolvePrompt(ctx.with, ctx.workdir);
   if (prompt === undefined) {
     const message = `work/agent needs a prompt — set "prompt:" or "promptFile:" in with:`;
     ctx.emit({ stream: "stderr", text: message });
@@ -85,9 +82,9 @@ async function runWorkAgent(ctx: UsesContext, opts: WorkHandlerOptions): Promise
   const modelAlias = typeof ctx.with.model === "string" ? ctx.with.model : undefined;
   const model = opts.config ? resolveModel(opts.config, modelAlias) : undefined;
 
+  // No system prompt is set — Pi's own discovery (a checked-in `.pi/` persona,
+  // `AGENTS.md`) supplies any standing role; the prompt carries the task.
   const res = await selectRunner(opts.runner, ctx).run({
-    // Omitting `system` lets Pi's discovery (.pi/, AGENTS.md) supply the persona.
-    ...(instructions !== undefined ? { system: instructions } : {}),
     prompt,
     cwd: ctx.workspacePath,
     ...(model ? { model } : {}),

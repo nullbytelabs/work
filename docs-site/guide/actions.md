@@ -34,8 +34,7 @@ jobs:
       - id: a
         uses: work/agent
         with:
-          instructions: You are a code reviewer. Flag regressions; never edit files.
-          prompt: Review the diff under /workspace and summarize the risks.
+          prompt: You are a code reviewer. Review the diff under /workspace and summarize the risks.
           model: kimi          # a model alias from work.json (optional)
 ```
 
@@ -50,43 +49,30 @@ agent **in-guest** — mediated egress, host-side key injection (your key never
 enters the guest). It needs a model; see
 [Configure a model](./agent-steps#_1-configure-a-model).
 
-### Prompt sources
+### The prompt
 
-Each prompt can be inline, or read from a file in your checkout — so versioned,
-reviewable prompts don't have to live at the call site:
+There's one prompt input — no separate system prompt. It can be inline (`prompt:`)
+or read from a file in your checkout (`promptFile:`), so versioned, reviewable
+prompts don't have to live at the call site:
 
 | `with:` key | → | |
 |---|---|---|
-| `instructions` | system prompt (the agent's standing role) | inline string |
-| `instructionsFile` | …same, read from the checkout | workspace-relative path |
-| `prompt` | the task prompt | inline string |
+| `prompt` | the prompt (carries any role/persona too) | inline string |
 | `promptFile` | …same, read from the checkout | workspace-relative path |
 | `model` | a model alias from `work.json` | falls back to `defaultModel` |
 
-A **prompt source is required** (`prompt` or `promptFile`); everything else is
-optional.
+A **prompt source is required** (`prompt` or `promptFile`); the rest is optional.
 
 ```yaml
 - uses: work/agent
   with:
-    instructionsFile: prompts/reviewer.md     # checked-in, reviewable
-    promptFile: prompts/review-task.md
+    promptFile: prompts/review.md     # checked-in, reviewable
 ```
 
-### Omitting `instructions`: use what your `.pi/` already enables
-
-`work/agent` runs Pi's own discovery rooted at the checkout. If you **omit**
-`instructions`, no system prompt is forced — so a committed `.pi/` persona or an
-`AGENTS.md` in the repo stands on its own:
-
-```yaml
-- uses: work/agent
-  with:
-    prompt: Triage the failing tests and propose the smallest fix.
-```
-
-"Just use the skills/persona I already have in this repo" works ambiently — no
-re-housing required.
+Need a standing persona without repeating it at every call site? `work/agent` runs
+Pi's own discovery rooted at the checkout, so a committed `.pi/` persona or an
+`AGENTS.md` in the repo is picked up ambiently — "just use the skills/persona I
+already have in this repo" works with no re-housing.
 
 ::: tip Where rich prompts belong
 Inline prompts are fine for one-offs. The versioned, testable home for a real
@@ -191,7 +177,6 @@ runs:
     - id: run
       uses: work/agent                          # the primitive, wrapped
       with:
-        instructionsFile: .workflows/actions/review/system.md
         prompt: Review /tmp/diff.txt for regressions affecting ${{ inputs.target }}.
 ```
 

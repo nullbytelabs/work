@@ -72,7 +72,7 @@ describe("runInit (integration, real temp dir)", () => {
   it("--from-template agent-action scaffolds the composite action", async () => {
     await runInit(["--from-template", "agent-action"], proj);
     assert.ok(existsSync(join(proj, ".workflows", "agent-action.yaml")));
-    assert.ok(existsSync(join(proj, ".workflows", "actions", "agent-action", "instructions.md")));
+    assert.ok(existsSync(join(proj, ".workflows", "actions", "agent-action", "prompt.md")));
   });
 });
 
