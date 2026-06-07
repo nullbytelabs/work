@@ -150,6 +150,18 @@ describe("parseWorkflow — validation", () => {
     assert.match(e.message, /ghost/);
   });
 
+  it("rejects needs naming a prototype property (e.g. toString) as if it were a job", () => {
+    // Guards the `Object.hasOwn` fix — a plain `in` check would let this pass.
+    const e = err(`name: w\njobs:\n  a:\n    needs: toString\n    steps: [{ run: x }]`);
+    assert.equal(e.path, "jobs.a.needs");
+    assert.match(e.message, /toString/);
+  });
+
+  it("rejects a job id that could escape the work dir (path metacharacters)", () => {
+    assert.match(err(`name: w\njobs:\n  "../evil":\n    steps: [{ run: x }]`).message, /invalid job id/);
+    assert.match(err(`name: w\njobs:\n  "a/b":\n    steps: [{ run: x }]`).message, /invalid job id/);
+  });
+
   it("rejects machine with non-numeric cpus", () => {
     const e = err(`name: w\njobs:\n  a:\n    machine: { cpus: "two" }\n    steps: [{ run: x }]`);
     assert.equal(e.path, "jobs.a.machine.cpus");

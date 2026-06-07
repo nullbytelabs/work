@@ -168,6 +168,24 @@ export type Segment = { kind: "key"; name: string } | { kind: "index"; index: nu
  *
  * Exported so the condition engine can share the exact same indexing grammar.
  */
+/** Index of the `]` that closes the `[` at `open`, skipping any `]` that sits
+ *  inside a quoted key (e.g. `event['a]b']`). Returns -1 if unbalanced. Shared
+ *  by the expression and condition parsers so both index brackets identically. */
+export function closingBracket(src: string, open: number): number {
+  let quote: string | undefined;
+  for (let k = open + 1; k < src.length; k++) {
+    const ch = src[k]!;
+    if (quote !== undefined) {
+      if (ch === quote) quote = undefined;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === "]") {
+      return k;
+    }
+  }
+  return -1;
+}
+
 export function parseAccessPath(expr: string): Segment[] {
   const segs: Segment[] = [];
   let i = 0;
@@ -196,7 +214,7 @@ export function parseAccessPath(expr: string): Segment[] {
       continue;
     }
     if (c === "[") {
-      const close = expr.indexOf("]", i);
+      const close = closingBracket(expr, i);
       if (close === -1) throw new WorkflowCompileError(`unbalanced "[" in "\${{ ${expr} }}"`);
       const inner = expr.slice(i + 1, close).trim();
       const sm = /^['"]([\s\S]*)['"]$/.exec(inner);

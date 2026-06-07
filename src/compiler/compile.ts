@@ -360,7 +360,9 @@ export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): Executio
 
   const jobs: Record<string, PlannedJob> = {};
   const addJob = (job: PlannedJob): void => {
-    if (job.id in jobs) {
+    // `Object.hasOwn`, not `in` — `in` walks the prototype, so a job named
+    // `toString`/`constructor` would be a false collision.
+    if (Object.hasOwn(jobs, job.id)) {
       throw new WorkflowCompileError(`job id collision: "${job.id}" is produced by more than one job — rename one`);
     }
     jobs[job.id] = job;

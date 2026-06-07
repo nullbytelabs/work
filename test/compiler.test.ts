@@ -34,6 +34,14 @@ describe("compile — defaults and naming", () => {
     assert.equal(p.jobs["a"]!.runsOn, DEFAULT_RUNS_ON);
   });
 
+  it("compiles a job named like an Object prototype property without a false collision", () => {
+    // Guards the `Object.hasOwn` fix in addJob — a plain `in` check would see the
+    // inherited `toString` and throw a bogus "job id collision".
+    const p = plan(`name: w\njobs:\n  toString:\n    steps: [{ run: "true" }]`);
+    assert.ok(Object.hasOwn(p.jobs, "toString"));
+    assert.deepEqual(p.jobOrder, ["toString"]);
+  });
+
   it("takes runs-on from each job, falling back to the default when omitted", () => {
     const p = plan(`
 name: w

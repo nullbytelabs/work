@@ -42,6 +42,11 @@ describe("interpolate — event context", () => {
     assert.equal(interpolate(`${"${{ event[\"weird key\"] }}"}`, { event: PAYLOAD }), "ok");
   });
 
+  it("supports a bracketed quoted key that itself contains ]", () => {
+    // The `]` inside the quotes must not be mistaken for the closing bracket.
+    assert.equal(interpolate("${{ event['a]b'] }}", { event: { "a]b": "X" } }), "X");
+  });
+
   it("stringifies the whole object / arrays as JSON", () => {
     assert.equal(interpolate("${{ event }}", { event: PAYLOAD }), JSON.stringify(PAYLOAD));
     assert.equal(
@@ -122,6 +127,10 @@ describe("evaluateCondition — event root + array indexing", () => {
 
   it("supports bracketed quoted keys in conditions", () => {
     assert.equal(evaluateCondition("event['commonLabels'].severity == 'critical'", ctx), true);
+  });
+
+  it("supports a bracketed quoted key that contains ] in conditions", () => {
+    assert.equal(evaluateCondition("event['a]b'] == 'X'", { event: { "a]b": "X" } }), true);
   });
 
   it("array indexing works for other roots too (tokenizer-level feature)", () => {

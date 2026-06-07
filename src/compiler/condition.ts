@@ -20,7 +20,7 @@
  * `<`, helper functions like `contains()`) raises a clear error rather than
  * silently passing, so an unsupported condition is never mistaken for `true`.
  */
-import { parseAccessPath, walkPath, type Segment } from "./expr.ts";
+import { parseAccessPath, walkPath, closingBracket, type Segment } from "./expr.ts";
 
 /** A scalar value flowing through the evaluator. */
 type Value = string | number | boolean | null | undefined;
@@ -163,7 +163,7 @@ const scanIdent: Scanner = (src, i) => {
     if (IDENT_PART.test(d) || d === ".") {
       j++;
     } else if (d === "[") {
-      const close = src.indexOf("]", j);
+      const close = closingBracket(src, j);
       if (close === -1) throw new ConditionError("unbalanced '[' in context path");
       j = close + 1;
     } else {

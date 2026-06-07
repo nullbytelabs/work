@@ -452,6 +452,22 @@ function parseUsesJob(raw: Record<string, unknown>, path: string): JobSpec {
   return job;
 }
 
+/** Validate a `jobs:` map key before parsing the job under it: catch the common
+ *  `runs-on`-misplaced-as-a-job slip, and constrain the id to the GitHub-Actions
+ *  charset — a job id becomes a path segment of the job's work dir
+ *  (`<workRoot>/<id>`), so `/`, `.` or `..` could otherwise escape the work root. */
+function assertValidJobKey(jobId: string, rawJob: unknown): void {
+  if ((jobId === "runs-on" || jobId === "runsOn") && typeof rawJob === "string") {
+    throw new WorkflowParseError("runs-on belongs on an individual job, not directly under the jobs map", `jobs.${jobId}`);
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(jobId)) {
+    throw new WorkflowParseError(
+      `invalid job id "${jobId}" — must start with a letter or "_" and contain only letters, digits, "-" or "_"`,
+      `jobs.${jobId}`,
+    );
+  }
+}
+
 /** Parse and validate a workflow YAML document into a WorkflowSpec. */
 export function parseWorkflow(yamlText: string): WorkflowSpec {
   let doc: unknown;
@@ -483,19 +499,15 @@ export function parseWorkflow(yamlText: string): WorkflowSpec {
   for (const [jobId, rawJob] of Object.entries(doc.jobs)) {
     // Common authoring slip: `runs-on` placed as a key inside `jobs:` instead of
     // on a job. Detect it and point at the right spot.
-    if ((jobId === "runs-on" || jobId === "runsOn") && typeof rawJob === "string") {
-      throw new WorkflowParseError(
-        "runs-on belongs on an individual job, not directly under the jobs map",
-        `jobs.${jobId}`,
-      );
-    }
+    assertValidJobKey(jobId, rawJob);
     jobs[jobId] = parseJob(rawJob, `jobs.${jobId}`);
   }
 
-  // Validate `needs` references point at real jobs.
+  // Validate `needs` references point at real jobs. `Object.hasOwn`, not `in` —
+  // `in` walks the prototype, so `needs: [toString]` would slip past validation.
   for (const [jobId, job] of Object.entries(jobs)) {
     for (const dep of job.needs ?? []) {
-      if (!(dep in jobs)) {
+      if (!Object.hasOwn(jobs, dep)) {
         throw new WorkflowParseError(`unknown job in needs: "${dep}"`, `jobs.${jobId}.needs`);
       }
     }
