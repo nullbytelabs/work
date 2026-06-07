@@ -393,7 +393,15 @@ async function runSteps(
       }
 
       ctx.hooks?.onStepStart?.(job.id, step.name);
-      const result = await executeStep(step, job, target, workdir, deps, taskCtx, exprCtx());
+      // A throw from executeStep (a target that rejects, an interpolation error)
+      // must still surface as a failure result — otherwise it bypasses onStepEnd
+      // and leaves the presenter showing the step stuck "running".
+      let result: StepResult;
+      try {
+        result = await executeStep(step, job, target, workdir, deps, taskCtx, exprCtx());
+      } catch (err) {
+        result = { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: `step crashed: ${(err as Error).message}` };
+      }
       ctx.hooks?.onStepEnd?.(job.id, result);
       recordStep(step, result);
     }
@@ -413,33 +421,46 @@ async function runJobInTask(
   const { ctx } = deps;
   ctx.hooks?.onJobStart?.(job.id);
 
-  const workdir = join(ctx.workRoot, job.id);
+  // Anything after onJobStart that throws (staging, an output interpolation, an
+  // unexpected target/handler error) must still fire onJobEnd — otherwise the
+  // job task fails up top but the presenter is left showing it stuck "running".
+  try {
+    const workdir = join(ctx.workRoot, job.id);
 
-  await stageWorkspace(ctx, workdir);
+    await stageWorkspace(ctx, workdir);
 
-  const prov = await provisionTarget(job, deps, workdir);
-  if ("failure" in prov) {
-    ctx.hooks?.onStepEnd?.(job.id, prov.failure);
-    const jobResult: JobResult = { id: job.id, status: "failure", steps: [prov.failure] };
+    const prov = await provisionTarget(job, deps, workdir);
+    if ("failure" in prov) {
+      ctx.hooks?.onStepEnd?.(job.id, prov.failure);
+      const jobResult: JobResult = { id: job.id, status: "failure", steps: [prov.failure] };
+      ctx.hooks?.onJobEnd?.(job.id, jobResult);
+      return jobResult;
+    }
+
+    const { steps, stepOutputs, failed } = await runSteps(job, deps, prov.target, workdir, taskCtx, needs);
+
+    // Resolve job outputs from collected step outputs (and needs).
+    let outputs: Record<string, string> | undefined;
+    if (job.outputs && !failed) {
+      outputs = {};
+      for (const [k, expr] of Object.entries(job.outputs)) {
+        outputs[k] = interpolate(expr, { needs, steps: stepOutputs });
+      }
+    }
+
+    const jobResult: JobResult = { id: job.id, status: failed ? "failure" : "success", steps };
+    if (outputs) jobResult.outputs = outputs;
+    ctx.hooks?.onJobEnd?.(job.id, jobResult);
+    return jobResult;
+  } catch (err) {
+    const jobResult: JobResult = {
+      id: job.id,
+      status: "failure",
+      steps: [{ name: `${job.id}/error`, status: "failure", exitCode: 1, stdout: "", stderr: `job crashed: ${(err as Error).message}` }],
+    };
     ctx.hooks?.onJobEnd?.(job.id, jobResult);
     return jobResult;
   }
-
-  const { steps, stepOutputs, failed } = await runSteps(job, deps, prov.target, workdir, taskCtx, needs);
-
-  // Resolve job outputs from collected step outputs (and needs).
-  let outputs: Record<string, string> | undefined;
-  if (job.outputs && !failed) {
-    outputs = {};
-    for (const [k, expr] of Object.entries(job.outputs)) {
-      outputs[k] = interpolate(expr, { needs, steps: stepOutputs });
-    }
-  }
-
-  const jobResult: JobResult = { id: job.id, status: failed ? "failure" : "success", steps };
-  if (outputs) jobResult.outputs = outputs;
-  ctx.hooks?.onJobEnd?.(job.id, jobResult);
-  return jobResult;
 }
 
 /**

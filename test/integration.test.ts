@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import type { WorkflowResult, StepResult } from "../src/runtime/index.ts";
+import type { ExecutionTarget, RunResult } from "../src/targets/index.ts";
 import { useSharedRuntime } from "./_support.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -304,6 +305,44 @@ jobs:
       assert.match(src, /function helloWorld/);
       assert.match(src, /console\.log\(helloWorld\("Josh"\)\)/);
       assert.ok(src.includes("\n"), "captured source should be multiline");
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+// A target whose run() rejects, to prove a *crash* (not a clean non-zero exit)
+// still surfaces as a failure AND fires the presenter hooks, rather than throwing
+// past onStepEnd/onJobEnd and leaving the TUI/web showing the job stuck "running".
+class CrashingTarget implements ExecutionTarget {
+  readonly kind = "crash";
+  readonly workspacePath = "/tmp/crash";
+  async provision(): Promise<void> {}
+  run(): Promise<RunResult> {
+    return Promise.reject(new Error("boom"));
+  }
+  async dispose(): Promise<void> {}
+}
+const crashingRuntime = useSharedRuntime({ makeTarget: () => new CrashingTarget() });
+
+describe("pipeline — a crashing target still fires the presenter hooks", () => {
+  it("a step whose target rejects → failure result, and onStepEnd + onJobEnd both fire", async () => {
+    const plan = compile(parseWorkflow(`name: crash\njobs:\n  a:\n    steps:\n      - run: "true"`));
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-crash-"));
+    const stepEnds: string[] = [];
+    const jobEnds: string[] = [];
+    try {
+      const result = await crashingRuntime.run(plan, {
+        workRoot,
+        hooks: {
+          onStepEnd: (jobId, r) => stepEnds.push(`${jobId}:${r.status}`),
+          onJobEnd: (jobId, r) => jobEnds.push(`${jobId}:${r.status}`),
+        },
+      });
+      assert.equal(result.status, "failure");
+      assert.equal(result.jobs.find((j) => j.id === "a")!.status, "failure");
+      assert.deepEqual(stepEnds, ["a:failure"]); // not stuck "running"
+      assert.deepEqual(jobEnds, ["a:failure"]);
     } finally {
       await rm(workRoot, { recursive: true, force: true });
     }

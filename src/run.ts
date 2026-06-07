@@ -9,7 +9,7 @@
  * presenter hooks, or the web presenter's SSE sink) and starts/finishes around
  * the call. Keeping presentation out means the web layer reuses this untouched.
  */
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { AbsurdRuntime, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
@@ -64,6 +64,10 @@ export interface StartRunOptions {
  * and the shared-engine web path.
  */
 export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
+  // A caller-provided `workdir` is theirs to keep; a temp one we mint is ours to
+  // remove in `finally` (otherwise every run — especially on the long-lived web
+  // server — leaks a `pi-workflows-*` dir full of job workspaces under tmp).
+  const ownsWorkRoot = opts.workdir === undefined;
   const workRoot = opts.workdir
     ? resolve(opts.workdir)
     : await mkdtemp(join(tmpdir(), "pi-workflows-"));
@@ -112,5 +116,6 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
     });
   } finally {
     await runtime.close();
+    if (ownsWorkRoot) await rm(workRoot, { recursive: true, force: true });
   }
 }

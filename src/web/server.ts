@@ -872,9 +872,12 @@ function bearerToken(req: IncomingMessage, header: string | undefined): string |
 
 /** Constant-time string compare (length-guarded — `timingSafeEqual` throws on length mismatch). */
 function constantTimeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
+  // Compare fixed-length SHA-256 digests so `timingSafeEqual` always runs on
+  // equal-length inputs — a raw length check would short-circuit and leak the
+  // expected secret's length via response timing. (verifyHmacSha256's own length
+  // check is benign: its `expected` digest is always 32 bytes, a public constant.)
+  const ab = createHash("sha256").update(a).digest();
+  const bb = createHash("sha256").update(b).digest();
   return timingSafeEqual(ab, bb);
 }
 

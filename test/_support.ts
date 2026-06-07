@@ -114,7 +114,7 @@ export interface SharedRuntime {
  * `{ realTargets: true }` for the e2e tier (examples) that must boot real
  * gondolin micro-VMs.
  */
-export function useSharedRuntime(opts: { realTargets?: boolean } = {}): SharedRuntime {
+export function useSharedRuntime(opts: { realTargets?: boolean; makeTarget?: TargetFactory } = {}): SharedRuntime {
   let engine: AbsurdEngine | undefined;
   before(async () => {
     engine = await createAbsurdEngine();
@@ -144,7 +144,7 @@ export function useSharedRuntime(opts: { realTargets?: boolean } = {}): SharedRu
         // is injected — but built-in network actions (work/checkout, work/install-node)
         // get the network they need.
         resolveJobNetwork: makeAgentEgressResolver(),
-        ...(opts.realTargets ? {} : { makeTarget: hostTargetFactory }),
+        ...(opts.makeTarget ? { makeTarget: opts.makeTarget } : opts.realTargets ? {} : { makeTarget: hostTargetFactory }),
       }).run(plan, ctx);
     },
   };
