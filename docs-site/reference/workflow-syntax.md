@@ -112,7 +112,7 @@ Built-in catalog:
 | Name | vCPU | Memory |
 |---|---|---|
 | `small` | 2 | 2G |
-| `medium` *(default)* | 2 | 6G |
+| `medium` *(default)* | 2 | 8G |
 | `large` | 4 | 12G |
 | `xlarge` | 8 | 24G |
 

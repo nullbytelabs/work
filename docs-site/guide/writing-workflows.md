@@ -97,7 +97,7 @@ jobs:
     steps: [{ run: npm run build }]
 ```
 
-The catalog: `small` (2 vCPU / 2G), `medium` (2 / 6G, the default), `large`
+The catalog: `small` (2 vCPU / 2G), `medium` (2 / 8G, the default), `large`
 (4 / 12G), `xlarge` (8 / 24G). A custom spec may set `cpus`, `memory`, or both;
 whatever you leave out is taken from `medium`. See the
 [reference](../reference/workflow-syntax#machine-types) for the full table.

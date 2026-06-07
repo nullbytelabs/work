@@ -26,14 +26,19 @@ export interface ResolvedMachine {
 }
 
 /**
- * The built-in catalog of named machine types. `medium` is the default and
- * preserves the engine's historical 6G boot size — knip's parser (oxc) eagerly
- * allocates a single ~4 GiB ArrayBuffer and OOMs below that — so existing
- * workflows keep running unchanged when they don't declare a `machine:`.
+ * The built-in catalog of named machine types. `medium` is the default — sized
+ * so jobs that don't declare a `machine:` run unchanged. The floor is set by
+ * knip's parser (oxc): via raw transfer it eagerly reserves a single ~6 GiB
+ * ArrayBuffer per parse, independent of file size. The buffer is virtual
+ * (overcommit-backed and mostly never faulted in), but the *reservation* must
+ * fit under the guest's commit limit, so the default needs real headroom above
+ * 6 GiB or knip dies at `new ArrayBuffer` with "Array buffer allocation failed".
+ * 8G clears it with ~2 GiB to spare. (Was 6G — fine when oxc's buffer was
+ * ~4 GiB; oxc grew the reservation to ~6 GiB and 6G no longer had room.)
  */
 export const MACHINE_TYPES: Record<string, ResolvedMachine> = {
   small: { cpus: 2, memory: "2G" },
-  medium: { cpus: 2, memory: "6G" },
+  medium: { cpus: 2, memory: "8G" },
   large: { cpus: 4, memory: "12G" },
   xlarge: { cpus: 8, memory: "24G" },
 };
