@@ -34,6 +34,7 @@ export default defineConfig({
 
     nav: [
       { text: "Guide", link: "/guide/introduction", activeMatch: "/guide/" },
+      { text: "Examples", link: "/examples/dogfooding", activeMatch: "/examples/" },
       { text: "Reference", link: "/reference/cli", activeMatch: "/reference/" },
       {
         text: "v0.1.2",
@@ -77,6 +78,12 @@ export default defineConfig({
         {
           text: "Under the hood",
           items: [{ text: "How it works", link: "/guide/how-it-works" }],
+        },
+      ],
+      "/examples/": [
+        {
+          text: "Real-world examples",
+          items: [{ text: "Dogfooding: the engine checks itself", link: "/examples/dogfooding" }],
         },
       ],
       "/reference/": [
