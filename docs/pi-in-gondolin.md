@@ -447,16 +447,15 @@ model/allowlist is known per agent step. Options: provision the VM lazily on fir
 step, or pass agent network needs into `makeTarget` from the compiled plan.
 **(Open question — §7.)**
 
-### 6c. Guest image
+### 6c. Guest image — RESOLVED (no dedicated Pi image)
 
-`runs-on: gondolin:pi` (or fold Pi into the default sandbox image) — a custom
-image with `nodejs`, `npm`, and `@earendil-works/pi-coding-agent` plus the small
-`run-agent.mjs` wrapper, built via the mechanism in
-[`gondolin-custom-images.md`](gondolin-custom-images.md) (`rootfsPackages: [ …,
-nodejs, npm ]` + a `postBuild` `npm i -g` / vendored copy). **UNVERIFIED**: that
-the Pi package installs and runs cleanly on Alpine/musl with its native deps — the
-custom-images doc confirms `nodejs`/`npm` are valid Alpine packages but not that
-this specific package builds there.
+> Pi now runs in-guest on the **stock** sandbox image (the shipped `work/agent`
+> primitive), so the speculative `runs-on: gondolin:pi` custom image this section
+> once proposed is unnecessary and has been dropped. Pi installs and runs cleanly
+> on the default guest, so there is no need to bake it into a custom image. The
+> [custom-images design](gondolin-custom-images.md) keeps its `work:` namespace for
+> **toolchains** (`work:base`, `work:node-25`, `work:devops`, …) — deliberately
+> *not* a `work:pi`, since agent steps already work everywhere.
 
 ---
 

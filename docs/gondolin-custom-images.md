@@ -1,16 +1,22 @@
 # Gondolin Custom Images — Research + Design Sketch
 
-Research for giving `runs-on: gondolin` real toolchains (node, python, …) via
-**custom guest images**, instead of the no-frills Alpine default. Verified
-against the Gondolin docs and the `earendil-works/gondolin` repo (source + its
-own CI). Items that couldn't be confirmed are flagged `UNVERIFIED`.
+Research for giving jobs real toolchains (node, go, python, a devops kit, …) via
+**custom guest images**, instead of the no-frills Alpine default. The design (§6)
+splits the namespace: `runs-on: gondolin` stays the raw upstream sandbox, while
+images **we** curate live under a `work:` namespace (`work:base`, `work:node-25`,
+`work:devops`, …). Verified against the Gondolin docs and the `earendil-works/gondolin`
+repo (source + its own CI). Items that couldn't be confirmed are flagged `UNVERIFIED`.
 
-> **Gondolin version at time of research:** `@earendil-works/gondolin@0.12.0`
-> (Apache-2.0, Node ≥ 23.6, CLI bin `gondolin`, Alpine 3.23.0 default). Pre-1.0,
-> so treat the API surface as stabilizing rather than frozen.
+> **Gondolin version:** `@earendil-works/gondolin@0.12.0` (Apache-2.0, Node ≥ 23.6,
+> CLI bin `gondolin`, Alpine 3.23.0 default). Pre-1.0, so treat the API surface as
+> stabilizing rather than frozen. **Re-verified 2026-06-07** against the *installed*
+> package — still 0.12.0, so the SDK facts below hold, and `VMOptions.sandbox.imagePath`
+> (§3) is confirmed from the shipped type declarations, not just the published docs.
 
-> **Status:** design sketch — **not** Phase 1. The engine work below is a
-> Phase 2+ enhancement. This doc records the capability and a concrete plan.
+> **Status:** design sketch — **not implemented**. The engine work in §6 is unbuilt;
+> this doc records the capability and a concrete, current plan. The "current engine
+> state" callout in §6 lists the exact integration points (with file refs) and flags
+> the two that today **reject** a `work:<variant>` value (our image namespace).
 
 ---
 
@@ -120,6 +126,15 @@ asset directory (it reads `manifest.json`):
 const vm = await VM.create({ sandbox: { imagePath: "./out" } });
 ```
 
+**Verified** against the installed 0.12.0 type declarations:
+`VM.create(options?: VMOptions)`, where `VMOptions.sandbox?: SandboxServerOptions`
+and `SandboxServerOptions.imagePath?: ImagePath` — and `imagePath` can be *either*
+a directory of guest assets *or* an object of explicit asset paths
+(`vm/types.d.ts`, `sandbox/server-options.d.ts`). Note `memory`/`cpus`/`vfs`/
+`httpHooks` are **top-level** `VMOptions` keys, while `imagePath` is **nested under
+`sandbox`** — so this is a new key alongside the flat options our `provision()`
+already builds, not a change to the existing ones.
+
 CLI equivalent: `GONDOLIN_GUEST_DIR=./out gondolin bash`.
 
 Gondolin also supports name:tag selection via a downloadable registry
@@ -196,54 +211,152 @@ hosted runner. Default rootfs size auto-calculated.
 
 ## 6. Proposed design for pi-workflows
 
-### `runs-on` variants → images
+### Two namespaces: `gondolin` (stock) vs `work:*` (ours)
+
+The `runs-on` target name encodes **who maintains the image**, which keeps "raw
+upstream sandbox" and "an image we curate" cleanly separated:
 
 ```
-runs-on: gondolin          # base: built-in alpine-base (no custom build, just download)
-runs-on: gondolin:base     #   explicit synonym for the above
-runs-on: gondolin:node     # custom image with node + npm
-runs-on: gondolin:python   # custom image with python3 + uv + pip tooling
+# the completely untouched upstream gondolin guest — no custom build, just download
+runs-on: gondolin
+
+# images WE maintain (the `work` namespace) — built from images/<variant>/build-config.json
+runs-on: work:base           # our more-capable base (git, curl, jq, ca-certs, … over stock)
+runs-on: work:node-25        # work:base + Node 25 + npm
+runs-on: work:go-1.26        # work:base + Go 1.26 toolchain
+runs-on: work:python-3.13    # work:base + python3 + uv + pip
+runs-on: work:devops         # work:base + kubectl, helm, awscli, gcloud, terraform, docker-cli, jq …
+runs-on: work:rust           # work:base + rustup/cargo + build-base
 ```
 
-Parse the `runs-on` string as `target[:variant]`. `gondolin` / `gondolin:base`
-→ the stock image (today's behavior, no build needed). `gondolin:<variant>` →
-boot from that variant's built asset dir via `sandbox.imagePath`.
+- **`gondolin`** → the stock upstream image (today's behavior, no `imagePath`). The
+  escape hatch — "give me exactly what gondolin ships, nothing of ours."
+- **`work:<variant>`** → an image from our registry, booted via `sandbox.imagePath`.
+  `work:base` is the blessed, more-capable base; every other `work:*` is `work:base`
+  plus a toolchain or role bundle.
 
-### Image definitions: `images/<name>/build-config.json`
+Since Pi already runs in-guest on the *stock* image, there's no `work:pi` —
+agent steps work everywhere. The `work` namespace is about **toolchains for
+`run:` steps**, not the agent.
+
+**Naming convention** inside the `work:` namespace (the part after `:` is just a
+registry key, so this is convention, not parsing rules):
+
+- `<tool>-<version>` — a single pinned toolchain (`node-25`, `go-1.26`,
+  `python-3.13`). The name carries the version; the build-config is what pins it.
+- a bare role name — a curated preset bundling several tools (`base`, `devops`,
+  `rust`, `data`). No version in the name; the build-config is the source of truth.
+
+**`work:base` as the shared floor.** Gondolin builds aren't layered like Docker —
+each image is a full rootfs assembled from one config — so "built on `work:base`"
+means every `work:*` config **includes the base package set** plus its specialty.
+Factor that base set into a shared snippet (a JSON fragment the configs spread in,
+or a small generator) so `work:base` stays the single source of truth for the floor.
+
+**Honesty about pinning a version.** Alpine's apk packages track the *distro*
+release, so `nodejs`/`go`/`python3` in `rootfsPackages` give you "whatever that
+Alpine version ships." A variant named `node-25` therefore pins its version one of
+three ways, decided per image in its `build-config.json` — not by the variant name:
+
+1. **Pick the Alpine version** whose `community`/`main` ships that toolchain version
+   (`alpine.version`), e.g. an Alpine release carrying Node 25. Cleanest when it lines up.
+2. **`postBuild.commands`** that fetch an exact build (`work/install-node`-style musl
+   tarball, `rustup toolchain install 1.x`, a pinned Go tarball). Needs root /
+   `container.force` at build (§4) but pins precisely.
+3. **An `oci.image` base** (`golang:1.26-alpine`, `node:25-alpine`) when an upstream
+   image already nails it — `rootfsPackages` is ignored in that mode.
+
+So the catalog is a small set of **maintained, `work:<variant>`→build-config
+mappings**; adding `work:go-1.27` later is a new folder + registry entry, not an
+engine change.
+
+> **Open decision — the default.** `DEFAULT_RUNS_ON` is `gondolin` (stock) today,
+> which needs zero image build. Once image-building is wired into CI and local init,
+> we could flip the default to `work:base` so an omitted `runs-on` gets the capable
+> floor. Trade-off: a more useful default vs. requiring a built image before the
+> first run. Left as `gondolin` until the build path exists; revisit then.
+
+### Image definitions: `images/<variant>/build-config.json`
 
 Mirror the `test/e2e/<name>/` convention — one folder per image:
 
 ```
 images/
-├── node/
-│   └── build-config.json     # rootfsPackages: [ …, nodejs, npm ]
-├── python/
-│   └── build-config.json     # rootfsPackages: [ …, python3, py3-pip, uv ]
+├── _base.json                # shared floor package set, spread into each config below
+├── base/
+│   └── build-config.json     # work:base — _base.json (git, curl, jq, bash, ca-certs …)
+├── node-25/
+│   └── build-config.json     # work:node-25 — base + Alpine w/ Node 25, rootfsPackages:[…,nodejs,npm]
+├── go-1.26/
+│   └── build-config.json     # work:go-1.26 — base + postBuild fetch of the pinned Go 1.26 tarball
+├── python-3.13/
+│   └── build-config.json     # work:python-3.13 — base + python3 + py3-pip + uv
+├── devops/
+│   ├── build-config.json     # work:devops — base + kubectl, helm, awscli, gcloud, terraform, docker-cli …
+│   └── kubeconfig.tpl         # postBuild.copy source can sit beside the config
 └── README.md
 ```
 
-(The flat `images/node-build-config.json` form the original idea suggested also
-works — `--config` takes any path. A folder per image leaves room for
-`postBuild.copy` source files to sit next to their config, and matches the e2e
-layout.) Built output goes to `images/<name>/out/` (gitignored) or a cache dir —
-never committed (arch-specific, large).
+The folder name maps to the variant after `work:` — `images/node-25/` ↔
+`work:node-25` — so it doubles as the registry key. `images/base/` is `work:base`,
+and `_base.json` holds the shared floor every config pulls in (so the base set lives
+in one place; see "`work:base` as the shared floor" above). (The flat
+`images/node-25-build-config.json` form also works — `--config` takes any path — but
+a folder per image leaves room for `postBuild.copy` source files to sit next to
+their config, and matches the `test/e2e/<name>/` layout.) Built output goes to
+`images/<variant>/out/` (gitignored) or a cache dir — never committed (arch-specific,
+large).
 
-### Engine integration (small, additive)
+### Current engine state — the dependents that must change (verified 2026-06-07)
 
-- `GondolinTargetConfig` gains `imagePath?: string`; `provision()` passes
-  `sandbox: { imagePath }` to `VM.create` when set (omit → built-in default).
-- The factory resolves `gondolin:<variant>` → the variant's asset dir. An
-  **image registry/config** maps variant → `images/<variant>/out` (and could let
-  a workflow/repo register more). Resolution should fail fast with a
-  `UserFacingError` ("image 'node' not built — run `npm run build:images`") when
-  the asset dir is missing, mirroring the existing missing-dependency handling.
-- Arch-awareness: the asset dir is per-arch, so resolve to
-  `images/<variant>/out` built for the current host arch (CI builds x86_64; local
-  mac builds aarch64). Don't cache across arches.
+`runs-on` is treated as an **opaque exact-match string** end-to-end today, so two
+places **actively reject** any `work:<variant>` value and must learn the
+`namespace[:variant]` grammar (`gondolin` = stock, `work:<variant>` = ours) before
+anything else works. A third (a warning added after this doc was first written)
+should treat a `work:` value as "explicit". The runtime needs **no** change — it
+threads `job.runsOn` through verbatim.
+
+| Where | Today | Needs |
+|---|---|---|
+| `src/compiler/compile.ts` — `validateRunsOn()` | **throws** `unknown runs-on "<x>"` for anything but `gondolin` | also accept `work:<variant>` for a **known** variant; reject unknown variants; keep `gondolin` and the `local`-was-removed message |
+| `src/compiler/compile.ts` — `runsOnWarning()` | only an *omitted* `runs-on` warns; explicit `gondolin` is silent | treat an explicit `work:<variant>` as explicit too (no nag) |
+| `src/targets/factory.ts` — `makeTarget()` | `switch (runsOn)` exact-match, `default:` **throws** | parse `namespace[:variant]`; `gondolin` → stock (no `imagePath`); `work:<variant>` → resolve to its asset dir and pass `imagePath` in `TargetContext`/config |
+| `src/targets/gondolin.ts` — `GondolinTargetConfig` + `provision()` | `createOpts` is flat (`memory`/`cpus`/`vfs`/`env`/`httpHooks`); no image hook | add `imagePath?: string`; when set, add `sandbox: { imagePath }` to `createOpts` (omit → stock upstream image, today's behavior) |
+| `src/runtime/absurd/runtime.ts` (~`:297`) | `makeTarget(job.runsOn, { workdir, machine, …network })` | **no change** — `job.runsOn` (incl. the `work:` namespace) already flows straight to the factory |
+
+So the change is additive but **spans the compiler and the target layer**, not just
+the factory: the compiler owns *validating* the namespace + variant name; the
+factory/target own *resolving* `work:<variant>` to an asset dir and booting it.
+`gondolin` stays the stock download (today's path, no `imagePath`).
+
+### Resolution + arch-awareness
+
+- An **image registry/config** maps `work:<variant> → images/<variant>/out` (and
+  could let a workflow/repo register more). Resolution should fail fast with a
+  `UserFacingError` ("image 'work:node-25' not built — run `npm run build:images`")
+  when the asset dir is missing — mirroring the existing optional-dependency /
+  missing-QEMU handling in `provision()`. (Note today the factory throws a bare
+  `Error` for an unknown `runs-on`; variant-resolution failures should be
+  `UserFacingError` so
+  `main()` prints them cleanly.)
+- The asset dir is **per-arch**, so resolve to the `images/<variant>/out` built for
+  the current host arch (CI builds x86_64; local mac builds aarch64). Don't cache
+  across arches.
 
 ### CI pipeline
 
-A `build-images` job (ubuntu-latest, Node ≥ 23.6):
+Slots into the **existing** `.github/workflows/ci.yml`, which today has two jobs:
+`lint-and-typecheck` (lint + typecheck + knip + fan-in) and `test` (full suite incl.
+gondolin VMs; installs QEMU, enables KVM, and already **caches the guest image** via
+`actions/cache` on `~/.cache/gondolin/images`). Custom images extend this with a
+`build-images` job that `test` then `needs:` — building needs no KVM, so it can run
+ahead of (or beside) the QEMU work. The image build artifacts join, or extend the
+key of, that same gondolin-image cache. (The repo *also* dog-foods its own engine in
+`.workflows/ci.yaml` — lint/typecheck/knip as gondolin jobs — but that one can't
+build images yet; image-building stays in the GitHub-Actions CI until the engine
+itself can drive it.)
+
+A `build-images` job (ubuntu-latest, Node ≥ 23.6 — the repo pins Node 25 in CI):
 
 ```yaml
 build-images:
@@ -255,7 +368,7 @@ build-images:
     - run: sudo apt-get update && sudo apt-get install -y lz4 cpio e2fsprogs
     - run: npm ci
     - run: |
-        for img in node python; do
+        for img in base node-25 go-1.26 python-3.13 devops; do
           npx @earendil-works/gondolin build \
             --arch x86_64 \
             --config images/$img/build-config.json \
@@ -265,20 +378,23 @@ build-images:
       with: { name: gondolin-images, path: images/*/out }
 ```
 
-The `test` job `needs: [build-images]`, downloads the artifact, and runs the e2e
-suite (with `gondolin:node`/`gondolin:python` examples). Add `sudo` to the build
-step only if an image uses `postBuild.commands`. Optionally swap upload-artifact
-for `actions/cache` keyed on `hashFiles('images/**/build-config.json')`.
+The existing `test` job gains `build-images` to its `needs:` (becoming
+`needs: [lint-and-typecheck, build-images]`), downloads the artifact, and runs the
+e2e suite (with `work:node-25`/`work:go-1.26` examples). Add `sudo` to the build
+step only if an image uses `postBuild.commands`. Because `buildId` is
+content-addressed, the cleanest caching is `actions/cache` keyed on
+`hashFiles('images/**/build-config.json')` — folding image builds into the same
+cache step the `test` job already uses for `~/.cache/gondolin/images`.
 
 ### Local dev — build on the host, on clone/init
 
 Images are **not committed and not distributed** — they're built on each
 developer's machine for that machine's architecture. The flow is: clone the repo,
-then run an init/build step (not built yet) that compiles each `images/<name>/`
+then run an init/build step (not built yet) that compiles each `images/<variant>/`
 for the **host arch** (native — no `--arch`, no cross-build, no container):
 
 ```bash
-npm run build:images   # (future) gondolin build --config images/<name>/build-config.json --output images/<name>/out
+npm run build:images   # (future) gondolin build --config images/<variant>/build-config.json --output images/<variant>/out
 ```
 
 First build downloads apks + krun assets (cached at `~/.cache/gondolin/images/`);
