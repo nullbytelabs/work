@@ -46,9 +46,9 @@ The agent's **final message** becomes the step's single `output`:
 ```
 
 `work/agent` runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
-agent **in-guest**, exactly like an `agent/<name>` step — same mediated egress,
-same host-side key injection (your key never enters the guest). It needs a model;
-see [Configure a model](./agent-steps#_1-configure-a-model).
+agent **in-guest** — mediated egress, host-side key injection (your key never
+enters the guest). It needs a model; see
+[Configure a model](./agent-steps#_1-configure-a-model).
 
 ### Prompt sources
 

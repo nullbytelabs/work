@@ -127,8 +127,9 @@ out is taken from `medium`.
 ## Steps
 
 A step is either a `run` command or a `uses:` reference — never both. A step
-`uses:` resolves to an agent, the built-in `work/agent` primitive, or a
-user-space action (see [Step `uses:` forms](#step-uses-forms)).
+`uses:` resolves to the built-in `work/agent` primitive, a user-space
+`action/<name>`, or a built-in `work/*` action (see
+[Step `uses:` forms](#step-uses-forms)).
 
 ```yaml
 steps:
@@ -147,7 +148,7 @@ steps:
 | `name` | string | Human-readable label. Defaults to the `run` command if omitted. |
 | `id` | string | Stable id. Required to read this step's outputs via `steps.<id>.outputs.*`. |
 | `run` | string | Shell command or multi-line script. Mutually exclusive with `uses`. |
-| `uses` | string | A step reference: `agent/<name>`, `work/agent`, or `action/<name>`. Mutually exclusive with `run`. See [Step `uses:` forms](#step-uses-forms). |
+| `uses` | string | A step reference: `work/agent`, `action/<name>`, or a built-in `work/*` action. Mutually exclusive with `run`. See [Step `uses:` forms](#step-uses-forms). |
 | `with` | map | Inputs for a `uses` step. Meaning depends on the form — see [Step `uses:` forms](#step-uses-forms). |
 | `if` / `when` | string | Conditional guard; a false result skips the step. Use one, not both. |
 | `env` | `map<string,string>` | Step-level env, layered over job and workflow env. |
