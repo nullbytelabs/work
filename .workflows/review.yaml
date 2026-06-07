@@ -1,35 +1,135 @@
-# review
-# description: reusable agent review — one gondolin VM runs a real Pi agent
-#              (uses: work/agent) over the checked-out source and prints its findings.
-#              Workspace-aware: the agent reads src/ straight from the checkout (the
-#              same checkout `checks`/`test` lint and build), so there's no `npm ci`,
-#              no git, and no diff to compute. Needs a model in work.json — the agent
-#              egress allowlists the model host and injects the key host-side, so the
-#              key never enters the guest. Called by `ci` via `uses: workflow/review`;
-#              also runnable directly: `work run review`.
+# review (multi-agent)
+# description: reusable agent review — fan-out / fan-in. Four reviewers each scan a
+#              single subsystem in parallel (their own small gondolin VM, reading
+#              src/ straight from the checkout), expose their findings as a job
+#              output, and a `collect` editor agent fans them in: de-duplicating,
+#              dropping over-flags, ranking by severity, and capping the result.
+#              This keeps the review focused and bounded instead of letting raw
+#              findings pile up. Needs a model in work.json (the agent egress
+#              allowlists the model host and injects the key host-side). Called by
+#              `ci` via `uses: workflow/review`; also runnable directly: `work run review`.
+#
+#              Sizing: reviewers are read-only, so `machine: small` (2G) — four in
+#              parallel ≈ 8G peak. Bump to `medium` if a reviewer OOMs installing Pi.
 ---
 name: review
 
 on: workflow_call
 
 jobs:
-  review:
+  scan-compiler:
     runs-on: gondolin
+    machine: small
+    outputs:
+      findings: ${{ steps.r.outputs.output }}
     steps:
-      - id: review
-        name: agent code review
+      - id: r
+        name: review compiler + spec
         uses: work/agent
         with:
           prompt: |
-            You are a senior engineer reviewing the pi-workflows codebase — a local
-            workflow engine whose source lives under `src/`. Read the source and
-            report the most important correctness, security, or quality issues you
-            find (aim for 3–5). Format each as: `path/to/file` — the issue — a
-            one-line fix. Prioritise real bugs over style. If the code looks solid,
-            say so briefly. Be concise.
+            Review ONLY the compiler/spec subsystem of this workflow engine:
+            `src/compiler/` (parse-to-plan, expressions, conditions, matrix,
+            reusable-workflow inlining, machine sizing) and `src/spec/` (YAML →
+            WorkflowSpec). Read those files and report the most important
+            correctness or robustness issues — bad parsing, unsafe expansion,
+            edge cases. Each finding: `path/to/file` — the issue — a one-line fix.
+            Aim for 3–5, prioritise real bugs over style, be concise. Ignore other
+            subsystems.
+
+  scan-runtime:
+    runs-on: gondolin
+    machine: small
+    outputs:
+      findings: ${{ steps.r.outputs.output }}
+    steps:
+      - id: r
+        name: review runtime + targets
+        uses: work/agent
+        with:
+          prompt: |
+            Review ONLY the runtime/targets subsystem: `src/runtime/` (the durable
+            Absurd-backed executor — job/step orchestration, needs/outputs
+            threading, durability) and `src/targets/` (the gondolin micro-VM
+            target). Read those files and report the most important correctness,
+            durability, or resource-handling issues. Each finding: `path/to/file`
+            — the issue — a one-line fix. Aim for 3–5, real bugs over style, be
+            concise. Ignore other subsystems.
+
+  scan-web:
+    runs-on: gondolin
+    machine: small
+    outputs:
+      findings: ${{ steps.r.outputs.output }}
+    steps:
+      - id: r
+        name: review web + persistence
+        uses: work/agent
+        with:
+          prompt: |
+            Review ONLY the web/persistence subsystem: `src/web/` (the loopback
+            HTTP console, webhook receiver + auth, SSE) and `src/persistence/`
+            (run/event/delivery storage). Read those files and report the most
+            important correctness or security issues — auth, input handling,
+            resource limits, persistence bugs. Each finding: `path/to/file` — the
+            issue — a one-line fix. Aim for 3–5, real bugs over style, be concise.
+            Ignore other subsystems.
+
+  scan-agent-security:
+    runs-on: gondolin
+    machine: small
+    outputs:
+      findings: ${{ steps.r.outputs.output }}
+    steps:
+      - id: r
+        name: review agent + egress + config
+        uses: work/agent
+        with:
+          prompt: |
+            Review ONLY the agent/security surface: `src/agent/` (the in-guest Pi
+            runner + work/agent primitive), `src/egress/` (mediated egress) and
+            `src/config/` (provider/model config and secret expansion). Focus on
+            the security properties: the model API key must never enter the guest,
+            egress is deny-by-default, secrets are expanded host-side. Report the
+            most important correctness or security issues. Each finding:
+            `path/to/file` — the issue — a one-line fix. Aim for 3–5, real bugs
+            over style, be concise. Ignore other subsystems.
+
+  collect:
+    runs-on: gondolin
+    machine: small
+    needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security]
+    steps:
+      - id: editor
+        name: prioritize + organize the reviews
+        uses: work/agent
+        with:
+          prompt: |
+            You are the review editor. Four subsystem reviewers each reported
+            findings on this codebase (verbatim below). Produce ONE prioritized
+            review:
+              - De-duplicate findings that overlap across reviewers.
+              - DROP anything low-confidence, stylistic, or that reads as already
+                handled — be skeptical; a few high-confidence issues beat a long list.
+              - Rank by severity (critical / high / medium / low) and keep at most 6.
+              - Format each as: `<severity>` · `path/to/file` · the issue · the fix.
+            If a subsystem reported nothing real, just note it in one line. Do not
+            invent issues that no reviewer raised.
+
+            === compiler + spec ===
+            ${{ needs.scan-compiler.outputs.findings }}
+
+            === runtime + targets ===
+            ${{ needs.scan-runtime.outputs.findings }}
+
+            === web + persistence ===
+            ${{ needs.scan-web.outputs.findings }}
+
+            === agent + egress + config ===
+            ${{ needs.scan-agent-security.outputs.findings }}
       - name: show review
         env:
-          REVIEW: ${{ steps.review.outputs.output }}
+          REVIEW: ${{ steps.editor.outputs.output }}
         run: |
-          printf '%s\n' "----- agent review -----"
+          printf '%s\n' "===== prioritized review ====="
           printf '%s\n' "$REVIEW"
