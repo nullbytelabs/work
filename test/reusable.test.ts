@@ -1,8 +1,9 @@
 /**
- * Compiler tests for reusable workflows (Strategy A inlining). An in-memory
+ * Compiler tests for reusable workflows (inlining by substitution). An in-memory
  * resolver stands in for the filesystem so these stay pure — no temp files.
- * Verifies namespacing, needs rewiring, the virtual join + output rewrite,
- * compile-time `with:` binding, matrix-on-the-call, and the guards.
+ * Verifies single-job collapse onto the call id, multi-job namespacing + needs
+ * rewiring, caller-side output rewrites, compile-time `with:` binding,
+ * matrix-on-the-call, and the guards. No synthetic join nodes are produced.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -30,56 +31,71 @@ function plan(callerYaml: string, callees: Record<string, string> = {}, inputs?:
   });
 }
 
-describe("reusable — single-level inlining", () => {
-  it("inlines a single-job callee + synthesizes a virtual join", () => {
+describe("reusable — single-job collapse", () => {
+  it("collapses a single-job callee onto the call id (the call IS the job)", () => {
     const p = plan(`name: caller\njobs:\n  lint:\n    uses: workflow/lint`, {
       lint: `name: lint\non: workflow_call\njobs:\n  run:\n    steps:\n      - run: echo hi`,
     });
-    assert.deepEqual(Object.keys(p.jobs).sort(), ["lint", "lint__run"]);
-    const join = p.jobs["lint"]!;
-    assert.equal(join.virtual, true);
-    assert.deepEqual(join.steps, []);
-    assert.deepEqual(join.needs, ["lint__run"]);
-    const sub = p.jobs["lint__run"]!;
-    assert.equal(sub.virtual, undefined);
-    assert.deepEqual(sub.needs, []);
-    assert.equal(sub.steps[0]!.run, "echo hi");
-    // The join runs after its sub-DAG.
-    assert.ok(p.jobOrder.indexOf("lint__run") < p.jobOrder.indexOf("lint"));
+    // One real job, named after the call — no namespaced sub-job, no join node.
+    assert.deepEqual(Object.keys(p.jobs), ["lint"]);
+    const job = p.jobs["lint"]!;
+    assert.deepEqual(job.needs, []);
+    assert.equal(job.steps[0]!.run, "echo hi");
+    assert.deepEqual(p.jobOrder, ["lint"]);
   });
 
-  it("rewrites the callee's workflow_call.outputs onto the join (jobs.* → needs.<call>__*)", () => {
+  it("exposes the callee's curated workflow_call.outputs on the collapsed call id", () => {
     const p = plan(
       `name: caller\njobs:\n  build:\n    uses: workflow/build\n  deploy:\n    needs: [build]\n    steps:\n      - run: 'echo "v=\${{ needs.build.outputs.version }}"'`,
       {
         build: `name: build\non:\n  workflow_call:\n    outputs:\n      version: "\${{ jobs.compile.outputs.version }}"\njobs:\n  compile:\n    steps:\n      - id: meta\n        run: 'echo "version=1" >> "$WORK_OUTPUT"'\n    outputs:\n      version: "\${{ steps.meta.outputs.version }}"`,
       },
     );
-    const join = p.jobs["build"]!;
-    assert.deepEqual(join.outputs, { version: "${{ needs.build__compile.outputs.version }}" });
-    assert.ok(join.needs.includes("build__compile"));
-    // Caller-side downstream is untouched: it references the join by its id.
+    // The collapsed `build` carries the producer's steps AND the curated output.
+    const build = p.jobs["build"]!;
+    assert.equal(build.steps[0]!.id, "meta");
+    assert.deepEqual(build.outputs, { version: "${{ steps.meta.outputs.version }}" });
+    // Downstream is untouched: it reads needs.build.outputs.version against the call id.
     assert.deepEqual(p.jobs["deploy"]!.needs, ["build"]);
     assert.match(p.jobs["deploy"]!.steps[0]!.run!, /needs\.build\.outputs\.version/);
-    // Inside the callee, the producer's own output expr is unchanged.
-    assert.deepEqual(p.jobs["build__compile"]!.outputs, { version: "${{ steps.meta.outputs.version }}" });
+    // No namespaced producer job exists anymore.
+    assert.equal(p.jobs["build__compile"], undefined);
   });
 
-  it("re-points intra-callee needs references to namespaced ids", () => {
+  it("flows the caller's needs into the collapsed callee", () => {
+    const p = plan(`name: caller\njobs:\n  pre:\n    steps: [{ run: "true" }]\n  call:\n    needs: [pre]\n    uses: workflow/lib`, {
+      lib: `name: lib\non: workflow_call\njobs:\n  j:\n    steps: [{ run: "echo hi" }]`,
+    });
+    assert.deepEqual(p.jobs["call"]!.needs, ["pre"]);
+    assert.equal(p.jobs["call"]!.steps[0]!.run, "echo hi");
+  });
+});
+
+describe("reusable — multi-job inlining", () => {
+  it("namespaces a multi-job callee and re-points intra-callee needs", () => {
     const p = plan(`name: caller\njobs:\n  call:\n    uses: workflow/lib`, {
       lib: `name: lib\non: workflow_call\njobs:\n  produce:\n    steps:\n      - id: m\n        run: 'echo "x=1" >> "$WORK_OUTPUT"'\n    outputs:\n      x: "\${{ steps.m.outputs.x }}"\n  consume:\n    needs: [produce]\n    steps:\n      - run: 'echo "\${{ needs.produce.outputs.x }}"'`,
     });
+    // Two namespaced jobs, no join.
+    assert.deepEqual(Object.keys(p.jobs).sort(), ["call__consume", "call__produce"]);
     assert.deepEqual(p.jobs["call__consume"]!.needs, ["call__produce"]);
     assert.match(p.jobs["call__consume"]!.steps[0]!.run!, /needs\.call__produce\.outputs\.x/);
     assert.deepEqual(p.jobs["call__produce"]!.needs, []);
   });
 
-  it("flows the caller's needs into the callee's root jobs", () => {
-    const p = plan(`name: caller\njobs:\n  pre:\n    steps: [{ run: "true" }]\n  call:\n    needs: [pre]\n    uses: workflow/lib`, {
-      lib: `name: lib\non: workflow_call\njobs:\n  j:\n    steps: [{ run: "true" }]`,
-    });
-    assert.deepEqual(p.jobs["call__j"]!.needs, ["pre"]);
-    assert.deepEqual(p.jobs["call"]!.needs, ["call__j"]);
+  it("attaches a downstream needs to the callee's leaf and rewrites its output ref onto the producer", () => {
+    const p = plan(
+      `name: caller\njobs:\n  build:\n    uses: workflow/lib\n  deploy:\n    needs: [build]\n    steps:\n      - run: 'echo "\${{ needs.build.outputs.x }}"'`,
+      {
+        lib: `name: lib\non:\n  workflow_call:\n    outputs:\n      x: "\${{ jobs.produce.outputs.x }}"\njobs:\n  produce:\n    steps:\n      - id: m\n        run: 'echo "x=1" >> "$WORK_OUTPUT"'\n    outputs:\n      x: "\${{ steps.m.outputs.x }}"\n  finalize:\n    needs: [produce]\n    steps: [{ run: "true" }]`,
+      },
+    );
+    // The producer is mid-DAG; the leaf is `finalize`. Downstream needs both
+    // (leaf for convergence, producer for the output it references).
+    assert.deepEqual(p.jobs["deploy"]!.needs.sort(), ["build__finalize", "build__produce"]);
+    // The output reference is rewritten onto the producing job.
+    assert.match(p.jobs["deploy"]!.steps[0]!.run!, /needs\.build__produce\.outputs\.x/);
+    assert.doesNotMatch(p.jobs["deploy"]!.steps[0]!.run!, /needs\.build\.outputs/);
   });
 });
 
@@ -89,7 +105,7 @@ describe("reusable — with: binding", () => {
       `name: caller\ninputs:\n  env: { default: staging }\njobs:\n  dep:\n    uses: workflow/deploy\n    with:\n      target: "\${{ inputs.env }}"`,
       { deploy: `name: deploy\non: workflow_call\ninputs:\n  target: { required: true }\njobs:\n  go:\n    steps:\n      - run: 'echo "deploy to \${{ inputs.target }}"'` },
     );
-    assert.equal(p.jobs["dep__go"]!.steps[0]!.run, 'echo "deploy to staging"');
+    assert.equal(p.jobs["dep"]!.steps[0]!.run, 'echo "deploy to staging"');
   });
 
   it("rejects a runtime value (needs.*) in with:", () => {
@@ -114,16 +130,15 @@ describe("reusable — with: binding", () => {
 });
 
 describe("reusable — matrix on the call", () => {
-  it("fans the whole call out per cell, binding matrix.* into with:", () => {
+  it("fans the whole call out per cell, each collapsing onto the cell's leg id", () => {
     const p = plan(
       `name: caller\njobs:\n  dep:\n    strategy:\n      matrix:\n        env: [staging, prod]\n    uses: workflow/deploy\n    with:\n      target: "\${{ matrix.env }}"`,
       { deploy: `name: deploy\non: workflow_call\ninputs:\n  target: { required: true }\njobs:\n  go:\n    steps:\n      - run: 'echo "\${{ inputs.target }}"'` },
     );
-    // One join per cell (keeps `::`), sub-jobs hang off the `\w`-safe prefix.
-    assert.equal(p.jobs["dep::env-staging"]!.virtual, true);
-    assert.equal(p.jobs["dep::env-prod"]!.virtual, true);
-    assert.equal(p.jobs["dep__env-staging__go"]!.steps[0]!.run, 'echo "staging"');
-    assert.equal(p.jobs["dep__env-prod__go"]!.steps[0]!.run, 'echo "prod"');
+    // One real job per cell (id = the call leg id), no join, no namespaced sub-job.
+    assert.deepEqual(Object.keys(p.jobs).sort(), ["dep::env-prod", "dep::env-staging"]);
+    assert.equal(p.jobs["dep::env-staging"]!.steps[0]!.run, 'echo "staging"');
+    assert.equal(p.jobs["dep::env-prod"]!.steps[0]!.run, 'echo "prod"');
   });
 });
 
@@ -163,8 +178,10 @@ describe("reusable — guards", () => {
   it("rejects a job-id collision between a real job and an inlined sub-job", () => {
     assert.throws(
       () =>
+        // A *multi-job* callee namespaces as call__produce / call__consume, which
+        // collides with the caller's own `call__produce`.
         plan(`name: caller\njobs:\n  call:\n    uses: workflow/lib\n  call__produce:\n    steps: [{ run: "true" }]`, {
-          lib: `name: lib\non: workflow_call\njobs:\n  produce:\n    steps: [{ run: "true" }]`,
+          lib: `name: lib\non: workflow_call\njobs:\n  produce:\n    steps: [{ run: "true" }]\n  consume:\n    needs: [produce]\n    steps: [{ run: "true" }]`,
         }),
       (e) => e instanceof WorkflowCompileError && /collision/.test(e.message),
     );

@@ -1,33 +1,42 @@
 /**
- * Reusable-workflow inlining (Strategy A — see docs/reusable-workflows.md).
+ * Reusable-workflow inlining by **substitution** (see docs/reusable-workflows.md).
  *
  * A `uses:` job calls a whole workflow as a unit. The compiler resolves the
  * callee, binds the caller's `with:` to its inputs, **recursively compiles it**,
- * and splices its jobs into the caller's flat plan with namespaced ids — then
- * synthesizes a single *virtual join* node (keeping the caller job's id) that
- * aggregates the callee's declared outputs. Downstream `needs: [C]` and
- * `needs.C.outputs.x` therefore resolve unchanged: the call is transparent.
+ * and splices its jobs into the caller's flat plan — as if the callee's jobs had
+ * been written in place. There is no synthetic "join" node: the call is replaced
+ * by the callee's actual jobs.
  *
- * This mirrors how matrix already flattens one spec job into many `PlannedJob`s —
- * it's a sibling expansion step, not a rewrite of the matrix path.
+ * Two shapes, one rule (collapse when unambiguous):
+ *
+ *  - **Single-job callee** → that one job *adopts the call's id*. `uses: workflow/checks`
+ *    where `checks.yaml` has a lone job `static` compiles to a single real job
+ *    `checks` (with `static`'s steps). A downstream `needs: [checks]` and
+ *    `needs.checks.outputs.*` resolve against it directly — the call id *is* the job.
+ *
+ *  - **Multi-job callee** → its jobs are inlined with namespaced ids `<call>__<job>`.
+ *    A downstream `needs: [C]` attaches to the callee's leaf jobs (its terminal
+ *    nodes); `needs.C.outputs.<name>` is rewritten by the compiler onto the job
+ *    that actually produces it. The call boundary disappears into the DAG.
+ *
+ * In both cases the caller's `needs:` flow into the callee's root jobs and a
+ * call-level `if:` propagates to them, so runtime data and gating reach the
+ * callee through the normal `needs` graph (see §8).
  *
  * ## Namespacing separator
- * Inlined sub-jobs get ids `<call>__<subjob>`. We deliberately use `__` (not
- * matrix's `::`): a callee's jobs reference each other at runtime via
- * `${{ needs.<job>.outputs.* }}` / `if: needs.<job>.result`, and those ids must
- * be re-pointed at the namespaced ids and stay parseable by the `needs.<id>`
- * expression/condition grammar — which only accepts `[\w-]`. `::` would not
- * parse there; `__` does, with no change to the shared expression language.
- * (Matrix gets away with `::` because a matrix leg's *outputs* are never
- * referenced in an expression.)
+ * Inlined sub-jobs (multi-job case) get ids `<call>__<subjob>`. We deliberately
+ * use `__` (not matrix's `::`): a callee's jobs reference each other at runtime
+ * via `${{ needs.<job>.outputs.* }}` / `if: needs.<job>.result`, and those ids
+ * must be re-pointed at the namespaced ids and stay parseable by the `needs.<id>`
+ * expression/condition grammar — which only accepts `[\w-]`. `::` would not parse
+ * there; `__` does, with no change to the shared expression language.
  */
 import type { JobSpec, WorkflowSpec, WorkflowCallSpec } from "../spec/index.ts";
 import type { PlannedJob, PlannedStep } from "./plan.ts";
 import type { MatrixCell } from "./matrix.ts";
 import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
-import { resolveMachine } from "./machines.ts";
 import { interpolate, expressionBodies, replaceExpressions, parseAccessPath, type ExprContext } from "./expr.ts";
-import { compile, WorkflowCompileError, DEFAULT_RUNS_ON, type CompileOptions } from "./compile.ts";
+import { compile, WorkflowCompileError, type CompileOptions } from "./compile.ts";
 
 /** A resolved callee workflow: its parsed spec, its directory (the next level's
  *  base for relative `./` refs), and its canonical file path (the cycle key). */
@@ -42,7 +51,7 @@ export interface ResolvedWorkflow {
  *  filesystem-pure; the CLI supplies the real (synchronous) implementation. */
 export type ResolveWorkflow = (ref: string, fromDir: string) => ResolvedWorkflow;
 
-/** Separator joining a call's id to its inlined sub-job ids (see file header). */
+/** Separator joining a call's id to its inlined sub-job ids (multi-job case). */
 const NS_SEP = "__";
 
 /** Max reusable-workflow nesting depth (GitHub.com cloud parity). */
@@ -53,10 +62,8 @@ export interface InlineParams {
   baseId: string;
   /** The `uses:` job spec. */
   job: JobSpec;
-  /** This call leg — `{ id: C }` non-matrix, `{ id: C::<cell>, cell, title }` per matrix cell. The id is the join's id. */
+  /** This call leg — `{ id: C }` non-matrix, `{ id: C::<cell>, cell, title }` per matrix cell. */
   leg: { id: string; title?: string; cell?: MatrixCell };
-  /** The caller job's `needs`, already expanded to concrete leg ids. */
-  callerNeeds: string[];
   /** The caller's resolved inputs (compile-time context for binding `with:`). */
   inputs: ResolvedInputs;
   /** The run's event payload, threaded into the callee unchanged. */
@@ -65,14 +72,27 @@ export interface InlineParams {
   opts: CompileOptions;
 }
 
-/** Inline one call leg: returns the namespaced sub-jobs and the virtual join. */
-export function inlineCall(p: InlineParams): { subJobs: PlannedJob[]; join: PlannedJob; warnings: string[] } {
-  // The join keeps the call leg's id (`C` or, for a matrix call, `C::<cell>`) so
-  // downstream `needs: [C]` converges on it. Sub-jobs hang off a `\w`-safe prefix
-  // (matrix's `::` swapped to `__`) so the join's `needs.<sub>` output references
-  // parse — `::` is not valid in the `needs.<id>` expression grammar.
-  const nsId = p.leg.id;
-  const nsPrefix = nsId.split("::").join(NS_SEP);
+/** The result of inlining one call leg. The caller (`compile`) wires the roots'
+ *  `needs` (and a call-level `if:`) once the whole DAG's leg ids are known. */
+export interface InlineResult {
+  /** The inlined jobs (ids final). Root jobs carry `needs: []` here. */
+  jobs: PlannedJob[];
+  /** Root job ids (no intra-callee `needs`) — they receive the caller's `needs`. */
+  rootIds: string[];
+  /** Ids a downstream `needs: [<call>]` attaches to: the collapsed job, or the
+   *  multi-job callee's leaves plus any job producing an exposed output. */
+  legIds: string[];
+  /** Caller-side rewrites: `needs.<call>.outputs.<name>` → `needs.<producer>.outputs.<key>`.
+   *  Empty for the single-job collapse (the producer id *is* the call id). */
+  outputRewrites: Record<string, string>;
+  /** Authoring warnings bubbled up from the recursive callee compile. */
+  warnings: string[];
+}
+
+/** Inline one call leg via substitution. */
+export function inlineCall(p: InlineParams): InlineResult {
+  const legId = p.leg.id; // `C` or `C::<cell>`
+  const nsPrefix = legId.split("::").join(NS_SEP);
   const ns = (id: string): string => `${nsPrefix}${NS_SEP}${id}`;
 
   // A. Resolve the callee + assert it opted in.
@@ -104,69 +124,61 @@ export function inlineCall(p: InlineParams): { subJobs: PlannedJob[]; join: Plan
     _chain: [...chain, file],
     _depth: (p.opts._depth ?? 0) + 1,
   });
+  const warnings = sub.warnings ?? [];
+  const subIds = Object.keys(sub.jobs);
 
-  // D. Namespace every sub-job id + re-point its deferred `needs.*` references.
-  const subIds = new Set(Object.keys(sub.jobs));
-  const rename = (id: string): string | undefined => (subIds.has(id) ? ns(id) : undefined);
+  // D1. Single-job callee → the one job adopts the call's id (the leg id).
+  if (subIds.length === 1) {
+    const only = sub.jobs[subIds[0]!]!;
+    const job = collapseSingle(only, legId, p.leg, wc, W);
+    return { jobs: [job], rootIds: [legId], legIds: [legId], outputRewrites: {}, warnings };
+  }
+
+  // D2. Multi-job callee → namespace every sub-job; no join node. A downstream
+  // `needs: [C]` attaches to the leaves (and any exposed-output producer).
+  const rename = (id: string): string | undefined => (subIds.includes(id) ? ns(id) : undefined);
   const titlePrefix = p.leg.title ?? p.baseId;
-  const subJobs: PlannedJob[] = Object.values(sub.jobs).map((sj) => renameJob(sj, ns, rename, titlePrefix));
+  const subJobs = Object.values(sub.jobs).map((sj) => renameJob(sj, ns, rename, titlePrefix));
 
-  // E + F. Rewire the call boundary and synthesize the virtual join.
-  const join = rewireAndBuildJoin(subJobs, p, wc, W, nsId, nsPrefix);
-  return { subJobs, join, warnings: sub.warnings ?? [] };
-}
-
-/**
- * Rewire the inlined sub-DAG to the call boundary and build the virtual join.
- * Mutates `subJobs` in place: roots inherit the call's `needs`, and a call-level
- * `if:` propagates onto roots. Returns the virtual join (keeps the call's id).
- */
-function rewireAndBuildJoin(
-  subJobs: PlannedJob[],
-  p: InlineParams,
-  wc: WorkflowCallSpec | boolean,
-  W: WorkflowSpec,
-  nsId: string,
-  nsPrefix: string,
-): PlannedJob {
-  // Roots/leaves on the namespaced intra-call graph.
   const nsIds = new Set(subJobs.map((j) => j.id));
   const referenced = new Set<string>();
   for (const sj of subJobs) for (const n of sj.needs) if (nsIds.has(n)) referenced.add(n);
-  const rootJobs = subJobs.filter((j) => j.needs.length === 0);
+  const rootIds = subJobs.filter((j) => j.needs.length === 0).map((j) => j.id);
   const leafIds = subJobs.filter((j) => !referenced.has(j.id)).map((j) => j.id);
 
-  // Sub-DAG roots inherit the call's `needs` — this is how runtime data reaches
-  // the callee, through the normal needs graph (see §8). A call-level `if:` gates
-  // the whole call, so it propagates to roots (skip) and the join (downstream
-  // sees it skipped); v1 rejects the case where a root already carries its own.
-  for (const r of rootJobs) {
-    r.needs = [...p.callerNeeds];
-    if (p.job.if !== undefined) {
-      if (r.if !== undefined) {
-        throw new WorkflowCompileError(
-          `job "${p.baseId}": if: on a reusable call is not supported when callee root job "${r.id}" has its own if: (v1)`,
-        );
-      }
-      r.if = p.job.if;
-    }
-  }
+  // Matrix calls can't expose outputs unambiguously (one set per cell), so only a
+  // single-leg (non-matrix) call rewrites caller-side output references.
+  const { outputRewrites, producers } = p.leg.cell ? { outputRewrites: {}, producers: [] } : buildOutputRewrites(wc, ns, W);
+  const legIds = [...new Set([...leafIds, ...producers])];
+  return { jobs: subJobs, rootIds, legIds, outputRewrites, warnings };
+}
 
-  const { outputs, referencedProducers } = rewriteCallOutputs(wc, nsPrefix, W);
-  const joinNeeds = subJobs.length === 0 ? [...p.callerNeeds] : [...new Set([...leafIds, ...referencedProducers])];
-  const join: PlannedJob = {
-    id: nsId,
-    runsOn: DEFAULT_RUNS_ON,
-    machine: resolveMachine(undefined, nsId),
-    needs: joinNeeds,
-    virtual: true,
-    steps: [],
+/**
+ * Collapse a single-job callee: its lone job becomes the call node, taking the
+ * call's id (`C` / `C::cell`) and exposing the callee's curated `workflow_call`
+ * outputs. Its `needs` are cleared (the caller injects its own); a call-level
+ * `if:` is applied by the caller alongside that.
+ */
+function collapseSingle(
+  only: PlannedJob,
+  legId: string,
+  leg: { title?: string; cell?: MatrixCell },
+  wc: WorkflowCallSpec | boolean,
+  W: WorkflowSpec,
+): PlannedJob {
+  const out: PlannedJob = {
+    ...only,
+    id: legId,
+    needs: [],
+    title: leg.title ?? legId,
+    // The lone job has no siblings, so no intra-callee `needs.*` refs to re-point.
+    steps: only.steps.map((st) => renameStep(st, only.id, legId, () => undefined)),
   };
-  if (outputs) join.outputs = outputs;
-  if (p.leg.cell) join.matrix = p.leg.cell;
-  if (p.leg.title) join.title = p.leg.title;
-  if (p.job.if !== undefined) join.if = p.job.if;
-  return join;
+  const outputs = curateSingleOutputs(wc, only, W);
+  if (outputs) out.outputs = outputs;
+  else delete out.outputs;
+  if (leg.cell) out.matrix = leg.cell;
+  return out;
 }
 
 /** Bind a call's `with:` against the caller's compile-time context, rejecting any
@@ -207,53 +219,90 @@ function bindWith(p: InlineParams, W: WorkflowSpec): Record<string, unknown> {
   return boundWith;
 }
 
-/**
- * Rewrite a callee's declared `workflow_call.outputs` onto the virtual join.
- * Each value must be `${{ jobs.<id>.outputs.<key> }}` (a callee-vocabulary root
- * the engine does NOT otherwise support) — a purely syntactic compile-time
- * rewrite turns it into `${{ needs.<call>__<id>.outputs.<key> }}`, which the
- * runtime resolves over the join's `needs`. Every referenced producer is returned
- * so the caller can add it to the join's `needs` (a curated mid-DAG output's job
- * may not be a leaf).
- */
-function rewriteCallOutputs(
-  wc: WorkflowCallSpec | boolean,
-  nsPrefix: string,
+/** Parse a `workflow_call.outputs` value, which must be `${{ jobs.<id>.outputs.<key> }}`,
+ *  into `{ jobId, key }`. Throws (citing `name`) on any other shape or unknown/matrix job. */
+function parseOutputProducer(
+  expr: string,
+  name: string,
   W: WorkflowSpec,
-): { outputs?: Record<string, string>; referencedProducers: string[] } {
-  if (wc === true || wc === false || !wc.outputs) return { referencedProducers: [] };
-  const wJobIds = new Set(Object.keys(W.jobs));
-  const matrixJobIds = new Set(
-    Object.entries(W.jobs)
-      .filter(([, j]) => j.strategy?.matrix)
-      .map(([id]) => id),
-  );
-  const referenced = new Set<string>();
-  const outputs: Record<string, string> = {};
-  for (const [name, expr] of Object.entries(wc.outputs)) {
-    outputs[name] = replaceExpressions(expr, (body) => {
-      const m = /^jobs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(body);
-      if (!m) {
-        throw new WorkflowCompileError(
-          `workflow "${W.name}" workflow_call.outputs.${name}: only "\${{ jobs.<id>.outputs.<key> }}" is allowed (got "\${{ ${body} }}")`,
-        );
-      }
-      const wJobId = m[1]!;
-      const key = m[2]!;
-      if (!wJobIds.has(wJobId)) {
-        throw new WorkflowCompileError(`workflow "${W.name}" workflow_call.outputs.${name} references unknown job "${wJobId}"`);
-      }
-      if (matrixJobIds.has(wJobId)) {
-        throw new WorkflowCompileError(
-          `workflow "${W.name}" workflow_call.outputs.${name} cannot reference matrix job "${wJobId}" (ambiguous across legs)`,
-        );
-      }
-      const producer = `${nsPrefix}${NS_SEP}${wJobId}`;
-      referenced.add(producer);
-      return `\${{ needs.${producer}.outputs.${key} }}`;
-    });
+): { jobId: string; key: string } {
+  let result: { jobId: string; key: string } | undefined;
+  replaceExpressions(expr, (body) => {
+    const m = /^jobs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(body);
+    if (!m) {
+      throw new WorkflowCompileError(
+        `workflow "${W.name}" workflow_call.outputs.${name}: only "\${{ jobs.<id>.outputs.<key> }}" is allowed (got "\${{ ${body} }}")`,
+      );
+    }
+    const jobId = m[1]!;
+    if (!(jobId in W.jobs)) {
+      throw new WorkflowCompileError(`workflow "${W.name}" workflow_call.outputs.${name} references unknown job "${jobId}"`);
+    }
+    if (W.jobs[jobId]!.strategy?.matrix) {
+      throw new WorkflowCompileError(
+        `workflow "${W.name}" workflow_call.outputs.${name} cannot reference matrix job "${jobId}" (ambiguous across legs)`,
+      );
+    }
+    result = { jobId, key: m[2]! };
+    return body;
+  });
+  if (!result) {
+    throw new WorkflowCompileError(`workflow "${W.name}" workflow_call.outputs.${name} must be a single \${{ }} expression`);
   }
-  return { outputs, referencedProducers: [...referenced] };
+  return result;
+}
+
+/**
+ * Curated exposed outputs for a collapsed single-job callee: each
+ * `workflow_call.outputs.<name>: ${{ jobs.<only>.outputs.<key> }}` becomes
+ * `<name>: <the job's own output value for <key>>`, so the collapsed node (id =
+ * call id) exposes exactly the call's declared surface.
+ */
+function curateSingleOutputs(
+  wc: WorkflowCallSpec | boolean,
+  only: PlannedJob,
+  W: WorkflowSpec,
+): Record<string, string> | undefined {
+  if (wc === true || wc === false || !wc.outputs) return undefined;
+  const out: Record<string, string> = {};
+  for (const [name, expr] of Object.entries(wc.outputs)) {
+    const { jobId, key } = parseOutputProducer(expr, name, W);
+    if (jobId !== only.id) {
+      throw new WorkflowCompileError(`workflow "${W.name}" workflow_call.outputs.${name} references unknown job "${jobId}"`);
+    }
+    const value = only.outputs?.[key];
+    if (value === undefined) {
+      throw new WorkflowCompileError(
+        `workflow "${W.name}" workflow_call.outputs.${name}: job "${jobId}" does not declare output "${key}"`,
+      );
+    }
+    out[name] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Caller-side rewrites for a multi-job callee's exposed outputs. Each
+ * `workflow_call.outputs.<name>: ${{ jobs.<id>.outputs.<key> }}` yields
+ * `needs.<call>.outputs.<name>` → `needs.<ns(id)>.outputs.<key>`, applied by the
+ * compiler to the caller's downstream jobs. Returns every producer so the caller
+ * can attach it to the downstream `needs` (a mid-DAG producer may not be a leaf).
+ */
+function buildOutputRewrites(
+  wc: WorkflowCallSpec | boolean,
+  ns: (id: string) => string,
+  W: WorkflowSpec,
+): { outputRewrites: Record<string, string>; producers: string[] } {
+  if (wc === true || wc === false || !wc.outputs) return { outputRewrites: {}, producers: [] };
+  const outputRewrites: Record<string, string> = {};
+  const producers = new Set<string>();
+  for (const [name, expr] of Object.entries(wc.outputs)) {
+    const { jobId, key } = parseOutputProducer(expr, name, W);
+    const producer = ns(jobId);
+    producers.add(producer);
+    outputRewrites[name] = `needs.${producer}.outputs.${key}`;
+  }
+  return { outputRewrites, producers: [...producers] };
 }
 
 /** Namespace one sub-job: rename its id, its intra-call `needs`, its step names,
@@ -314,4 +363,19 @@ function mapStr(obj: Record<string, string>, fn: (v: string) => string): Record<
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj)) out[k] = fn(v);
   return out;
+}
+
+/** Rewrite caller-side `needs.<call>.outputs.<name>` references onto the callee's
+ *  real producers, using the map an `InlineResult` returned for that call. Applied
+ *  by `compile()` to the caller's own jobs (`run`/`env`/`if`/`with`/`outputs`). */
+export function rewriteOutputRefs(s: string, callId: string, rewrites: Record<string, string>): string {
+  let out = s;
+  for (const [name, replacement] of Object.entries(rewrites)) {
+    out = out.replace(new RegExp(`needs\\.${escapeRe(callId)}\\.outputs\\.${escapeRe(name)}\\b`, "g"), replacement);
+  }
+  return out;
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

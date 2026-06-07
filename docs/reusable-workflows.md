@@ -11,12 +11,20 @@
 >
 > **Status: implemented (v1).** The core vertical shipped — spec (`uses:`/`with:`
 > jobs + `on: workflow_call`), compile-time inlining (`src/compiler/reusable.ts`),
-> the virtual join (`PlannedJob.virtual`), and the CLI resolver
-> (`resolveWorkflowRef` in `src/project.ts`). Two design points were **revised in
-> implementation** and are flagged inline: the compiler takes an *injected*
-> resolver (stays filesystem-pure) rather than reading files itself (§7), and the
-> inlining namespace uses `__` not `::` (§14-Q2). `work --web` returns a clear
-> "not yet" error for `uses:` jobs; remote/cross-repo refs are reserved (§14-Q6).
+> and the CLI resolver (`resolveWorkflowRef` in `src/project.ts`). Two design
+> points were **revised in implementation** and are flagged inline: the compiler
+> takes an *injected* resolver (stays filesystem-pure) rather than reading files
+> itself (§7), and the inlining namespace uses `__` not `::` (§14-Q2).
+> remote/cross-repo refs are reserved (§14-Q6).
+>
+> **Superseded — inlining is now by substitution, not a join node.** This doc was
+> written around a synthesized *virtual join* node (`PlannedJob.virtual`) per call.
+> That was replaced: a single-job callee now **collapses onto the call's id** (the
+> call *is* the job) and a multi-job callee is spliced in with namespaced ids and
+> **no join** — a downstream `needs:[C]` attaches to the callee's real leaves and
+> `needs.C.outputs.*` is rewritten onto the producing job. There are no virtual
+> nodes. The "join node" passages below (§§ "Synthesize a join", "Algorithm")
+> describe the old shape; `src/compiler/reusable.ts` is the source of truth.
 
 ## 1. The problem
 

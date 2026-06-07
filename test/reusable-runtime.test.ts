@@ -1,8 +1,8 @@
 /**
  * Runtime test for reusable workflows: compile a caller that invokes a callee
  * producing an output, run it on the HostTarget double (no VM), and prove the
- * virtual join boots nothing yet threads the callee's output to a downstream
- * caller job via `needs.<call>.outputs.*`.
+ * collapsed call node runs the callee's job for real and exposes its output to a
+ * downstream caller job via `needs.<call>.outputs.*`.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -52,7 +52,7 @@ function jobOf(result: WorkflowResult, id: string) {
 }
 
 describe("reusable — runtime", () => {
-  it("inlines a callee and threads its output through the virtual join", async () => {
+  it("collapses a single-job callee and threads its output downstream", async () => {
     const plan = compile(parseWorkflow(CALLER), {
       resolveWorkflow: resolver,
       _fromDir: "/wf",
@@ -69,13 +69,13 @@ describe("reusable — runtime", () => {
       });
 
       assert.equal(result.status, "success");
-      // The producer ran for real and captured its output.
-      assert.deepEqual(jobOf(result, "build__compile").outputs, { version: "42" });
-      // The virtual join aggregated it from its needs (boots no VM, no steps).
-      const joinJob = jobOf(result, "build");
-      assert.equal(joinJob.status, "success");
-      assert.deepEqual(joinJob.steps, []);
-      assert.deepEqual(joinJob.outputs, { version: "42" });
+      // The callee's job ran for real AS the call id `build` and captured its output.
+      const buildJob = jobOf(result, "build");
+      assert.equal(buildJob.status, "success");
+      assert.equal(buildJob.steps.length, 1);
+      assert.deepEqual(buildJob.outputs, { version: "42" });
+      // No separate namespaced producer job exists — the call IS the job.
+      assert.equal(result.jobs.find((x) => x.id === "build__compile"), undefined);
       // The downstream caller job read it through needs.build.outputs.version.
       assert.match(output, /deployed version=42/);
     } finally {

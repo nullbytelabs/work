@@ -264,7 +264,7 @@ function parseWebhook(wh: unknown, wp: string): WebhookTrigger | boolean {
  * Parse the `workflow_call` trigger: boolean opt-in/out, or a `{ outputs }`
  * mapping declaring the flat output surface the callee exposes to its caller.
  * Output *values* are `${{ }}` expressions validated structurally here (strings);
- * the compiler rewrites them onto the call's virtual join node.
+ * the compiler rewrites them onto the callee's real producer job when inlining.
  */
 function parseWorkflowCall(wc: unknown, wp: string): WorkflowCallSpec | boolean {
   if (typeof wc === "boolean") return wc;

@@ -155,7 +155,8 @@ export interface WebhookTrigger {
  * value an expression in the callee's vocabulary (`${{ jobs.<id>.outputs.<k> }}`).
  *
  * Unlike `webhook`, this trigger IS load-bearing: the compiler asserts a callee
- * has opted in, and reads `outputs` to build the call's virtual join node.
+ * has opted in, and reads `outputs` to expose the call's outputs on the inlined
+ * producer job.
  */
 export interface WorkflowCallSpec {
   /** Outputs exposed to the caller as `needs.<callJob>.outputs.<name>`; values are `${{ jobs.<id>.outputs.<key> }}` expressions. */

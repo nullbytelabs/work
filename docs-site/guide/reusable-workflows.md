@@ -165,11 +165,15 @@ the caller-job shape, `on: workflow_call`, explicit outputs — lines up.
 
 ## How it runs
 
-Callees are **inlined** at compile time: each one's jobs are spliced into the
-caller's flat DAG (namespaced so ids never collide), plus a small virtual node per
-call that carries the declared outputs and does no work (it boots no VM). The
-runtime, durability, parallelism, the TUI board, and `work graph` all operate on
-that one flattened DAG — reusable workflows need no special handling at run time.
+Callees are **inlined by substitution** at compile time: the call is replaced by
+the callee's actual jobs. A callee with a single job collapses onto the call's id
+(`uses: workflow/checks` calling a one-job `checks.yaml` becomes one real job
+`checks`); a multi-job callee is spliced in with namespaced ids (`<call>__<job>`)
+so they never collide. A downstream `needs: [<call>]` attaches to the callee's
+real leaf job(s), and `needs.<call>.outputs.*` resolves against the job that
+produces it — there are no synthetic placeholder nodes. The runtime, durability,
+parallelism, the TUI board, and `work graph` all operate on that one flattened
+DAG — reusable workflows need no special handling at run time.
 
 All inlined jobs share the caller's checkout (they're one logical pipeline), and
 nesting is capped at **10 levels**; a cycle (`a` → `b` → `a`) or an over-deep
