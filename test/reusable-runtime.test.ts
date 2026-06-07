@@ -82,4 +82,62 @@ describe("reusable — runtime", () => {
       await rm(workRoot, { recursive: true, force: true });
     }
   });
+
+  // The checks→review pattern: a producer job's output reaches a *reusable
+  // workflow's* root job via inherited needs. The caller's `uses:` job
+  // `needs: [producer]`, so the callee's root jobs inherit that need and read
+  // `${{ needs.producer.outputs.* }}` at runtime — without any with:/inputs.
+  const CALLER2 = `name: caller2
+jobs:
+  producer:
+    steps:
+      - id: m
+        run: 'echo "x=carried" >> "$WORK_OUTPUT"'
+    outputs:
+      x: "\${{ steps.m.outputs.x }}"
+  consumer:
+    needs: [producer]
+    uses: workflow/sink
+`;
+  const SINK2 = `name: sink
+on: workflow_call
+jobs:
+  reader:
+    steps:
+      - run: 'echo "got=\${{ needs.producer.outputs.x }}"'
+  tail:
+    needs: [reader]
+    steps:
+      - run: "true"
+`;
+
+  it("threads a producer's output into a reusable callee's root job via inherited needs", async () => {
+    const sinkResolver: ResolveWorkflow = (ref) => {
+      if (ref.replace(/^workflow\//, "") !== "sink") throw new Error(`unexpected ref ${ref}`);
+      return { spec: parseWorkflow(SINK2), dir: "/wf", file: "/wf/sink.yaml" };
+    };
+    const plan = compile(parseWorkflow(CALLER2), {
+      resolveWorkflow: sinkResolver,
+      _fromDir: "/wf",
+      _chain: ["/wf/caller.yaml"],
+      _depth: 0,
+    });
+
+    // Multi-job callee → namespaced; the root reader inherits the caller's needs.
+    assert.deepEqual(plan.jobs["consumer__reader"]!.needs, ["producer"]);
+
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-inherit-"));
+    let output = "";
+    try {
+      const result = await runtime.run(plan, {
+        workRoot,
+        hooks: { onOutput: (_j, _s, c) => (output += c.text) },
+      });
+      assert.equal(result.status, "success");
+      // The callee root read the producer's output through the inherited need.
+      assert.match(output, /got=carried/);
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
+  });
 });

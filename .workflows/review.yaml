@@ -1,16 +1,18 @@
 # review (multi-agent)
-# description: reusable agent review — fan-out / fan-in. Four reviewers each scan a
-#              single subsystem in parallel (their own small gondolin VM, reading
-#              src/ straight from the checkout), expose their findings as a job
-#              output, and a `collect` editor agent fans them in: de-duplicating,
-#              dropping over-flags, ranking by severity, and capping the result.
-#              This keeps the review focused and bounded instead of letting raw
-#              findings pile up. Needs a model in work.json (the agent egress
-#              allowlists the model host and injects the key host-side). Called by
-#              `ci` via `uses: workflow/review`; also runnable directly: `work run review`.
+# description: reusable agent review — fan-out / fan-in. Five reviewers run in
+#              parallel, each in its own small gondolin VM: four read a single source
+#              subsystem from the checkout, and `scan-checks` reads the tool output
+#              `ci`'s `checks`/`test` jobs already captured (via inherited needs — no
+#              re-running). Each exposes findings as a job output, and a `collect`
+#              editor agent fans them in: de-duplicating, dropping over-flags, ranking
+#              by severity, and capping the result — keeping the review focused instead
+#              of letting raw findings pile up. Needs a model in work.json (the agent
+#              egress allowlists the model host and injects the key host-side). Called
+#              by `ci` via `uses: workflow/review`; also runnable: `work run review`
+#              (standalone, scan-checks just notes there was no ci feeding it).
 #
-#              Sizing: reviewers are read-only, so `machine: small` (2G) — four in
-#              parallel ≈ 8G peak. Bump to `medium` if a reviewer OOMs installing Pi.
+#              Sizing: every reviewer is agent-only → `machine: small` (2G); five in
+#              parallel ≈ 10G peak.
 ---
 name: review
 
@@ -95,19 +97,59 @@ jobs:
             `path/to/file` — the issue — a one-line fix. Aim for 3–5, real bugs
             over style, be concise. Ignore other subsystems.
 
+  # The tooling reviewer. It does NOT re-run anything: when `review` is called by
+  # `ci` (which does `needs: [checks, test]`), this job inherits those needs and
+  # reads the tool output `checks`/`test` already captured as their outputs. Run
+  # standalone (`work run review`) there is no ci, so these resolve to empty and
+  # the agent just notes there was no tooling output. Agent-only → small.
+  scan-checks:
+    runs-on: gondolin
+    machine: small
+    outputs:
+      findings: ${{ steps.r.outputs.output }}
+    steps:
+      - id: r
+        name: review the captured tooling output
+        uses: work/agent
+        with:
+          prompt: |
+            Below is the captured output of this project's own tooling from the ci
+            run that called this review (each block starts with its exit code).
+            Review it and report anything that warrants attention: lint or type
+            errors, knip dead-code / unused-export findings, failing or flaky tests,
+            or a fan-in distribution showing an over-relied-on ("god") symbol. Each
+            finding: `<source>` — the issue — a one-line note. If a tool is clean
+            (exit 0, no output) say so in one line. If a block is empty there was no
+            ci run feeding this; say that. Don't invent problems the output doesn't show.
+
+            === lint ===
+            ${{ needs.checks.outputs.lint }}
+
+            === typecheck ===
+            ${{ needs.checks.outputs.typecheck }}
+
+            === knip ===
+            ${{ needs.checks.outputs.knip }}
+
+            === fan-in ===
+            ${{ needs.checks.outputs.fanin }}
+
+            === test:unit ===
+            ${{ needs.test.outputs.test }}
+
   collect:
     runs-on: gondolin
     machine: small
-    needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security]
+    needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security, scan-checks]
     steps:
       - id: editor
         name: prioritize + organize the reviews
         uses: work/agent
         with:
           prompt: |
-            You are the review editor. Four subsystem reviewers each reported
-            findings on this codebase (verbatim below). Produce ONE prioritized
-            review:
+            You are the review editor. Five reviewers each reported findings on this
+            codebase — four read source subsystems, one read the project's own
+            tooling output (verbatim below). Produce ONE prioritized review:
               - De-duplicate findings that overlap across reviewers.
               - DROP anything low-confidence, stylistic, or that reads as already
                 handled — be skeptical; a few high-confidence issues beat a long list.
@@ -127,6 +169,9 @@ jobs:
 
             === agent + egress + config ===
             ${{ needs.scan-agent-security.outputs.findings }}
+
+            === tooling (lint / typecheck / knip / fan-in / test:unit) ===
+            ${{ needs.scan-checks.outputs.findings }}
       - name: show review
         env:
           REVIEW: ${{ steps.editor.outputs.output }}

@@ -1,20 +1,36 @@
-# unit-tests
+# test
 # description: reusable test workflow — one gondolin VM, a single `npm ci`, then the
-#              non-QEMU test tier (`npm run test:unit`). The unit + component/integration
-#              suites run on the host-process double; the e2e + VM-smoke tiers self-skip
-#              under WORK_SKIP_VM (nested QEMU isn't available inside the guest). Those
-#              tiers still run in GitHub Actions, which has QEMU. Called by `ci` via
-#              `uses: workflow/unit-tests`; also runnable directly: `work run unit-tests`.
+#              non-QEMU test tier (`npm run test:unit`) run in CAPTURE mode: its
+#              combined output (and exit code) is recorded as a workflow_call output
+#              rather than gating the job, so `ci` can carry it into `review` (which
+#              reads needs.test.outputs.test) for an agent to interpret. The e2e +
+#              VM-smoke tiers self-skip under WORK_SKIP_VM; they still run in GitHub
+#              Actions, which is also the real gate. Called by `ci` via
+#              `uses: workflow/test`; also runnable directly: `work run test`.
 ---
 name: test
 
-on: workflow_call
+on:
+  workflow_call:
+    outputs:
+      test: ${{ jobs.unit.outputs.test }}
 
 jobs:
   unit:
     runs-on: gondolin
+    outputs:
+      test: ${{ steps.run.outputs.test }}
     steps:
       - name: install
         run: npm ci
-      - name: test
-        run: npm run test:unit
+      - id: run
+        name: run test:unit (capture output; never gate)
+        run: |
+          set +e
+          out=$(npm run test:unit 2>&1); rc=$?
+          {
+            printf '%s\n' "test<<__WF_EOF__"
+            printf 'exit %s\n' "$rc"
+            printf '%s\n' "$out"
+            printf '%s\n' "__WF_EOF__"
+          } >> "$WORK_OUTPUT"

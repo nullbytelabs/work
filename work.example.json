@@ -9,7 +9,7 @@
     "kimi": {
       "provider": "fireworks",
       "model": "accounts/fireworks/models/kimi-k2p6",
-      "maxTokens": 2048,
+      "maxTokens": 32768,
       "temperature": 0
     }
   },

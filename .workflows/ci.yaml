@@ -21,5 +21,5 @@ jobs:
     uses: workflow/test # ./workflows/test.yaml, or ./workflows/reusable/test.yaml
 
   review:
-    needs: [test]
+    needs: [checks, test] # both, so review's jobs inherit them and can read needs.checks/test.outputs.*
     uses: workflow/review # ./workflows/review.yaml, or ./workflows/reusable/review.yaml
