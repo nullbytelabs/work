@@ -14,12 +14,12 @@ on: webhook
 
 jobs:
   checks:
-    uses: workflow/checks # ./workflows/checks.yaml
+    uses: workflow/checks # ./workflows/checks.yaml, or ./workflows/reusable/checks.yaml
 
   test:
     needs: [checks]
-    uses: workflow/test # ./workflows/test.yaml
+    uses: workflow/test # ./workflows/test.yaml, or ./workflows/reusable/test.yaml
 
   review:
     needs: [test]
-    uses: workflow/review # ./workflows/review.yaml
+    uses: workflow/review # ./workflows/review.yaml, or ./workflows/reusable/review.yaml
