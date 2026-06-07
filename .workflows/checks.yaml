@@ -1,0 +1,24 @@
+# checks
+# description: reusable static-checks workflow — one gondolin VM, a single `npm ci`,
+#              then lint, typecheck, knip, and fan-in as ordered steps (fail-fast on
+#              the first that errors). Mirrors the GitHub Actions lint job. Called by
+#              `ci` via `uses: workflow/checks`; also runnable directly: `work run checks`.
+---
+name: checks
+
+on: workflow_call
+
+jobs:
+  static:
+    runs-on: gondolin
+    steps:
+      - name: install
+        run: npm ci
+      - name: lint
+        run: npm run lint
+      - name: typecheck
+        run: npm run typecheck
+      - name: knip
+        run: npm run knip
+      - name: fan-in
+        run: npm run fan-in

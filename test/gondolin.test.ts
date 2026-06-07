@@ -8,6 +8,7 @@ import { GondolinTarget, buildExecArgs } from "../src/targets/index.ts";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { AbsurdRuntime } from "../src/runtime/index.ts";
+import { vmTestSkip } from "./_support.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -28,10 +29,12 @@ describe("GondolinTarget — unit (no VM)", () => {
 });
 
 /**
- * Real micro-VM execution. Always runs — it needs Node >= 23.6, QEMU, and the
- * optional @earendil-works/gondolin package (CI provisions all three).
+ * Real micro-VM execution. Needs Node >= 23.6, QEMU, and the optional
+ * @earendil-works/gondolin package. Self-skips without QEMU (or under
+ * WORK_SKIP_VM, the non-qemu `test:unit` target); the full `npm test` runs it
+ * wherever QEMU is installed.
  */
-describe("GondolinTarget — VM smoke", () => {
+describe("GondolinTarget — VM smoke", { skip: vmTestSkip() }, () => {
   it("runs the test/e2e/hello-world-gondolin/workflow.yaml workflow in a VM", async () => {
     const dir = resolve(HERE, "e2e", "hello-world-gondolin");
     const plan = compile(parseWorkflow(await readFile(resolve(dir, "workflow.yaml"), "utf-8")));

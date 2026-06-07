@@ -1,10 +1,10 @@
 # ci
-# description: dogfoods the engine to run its own static checks — lint, typecheck,
-#              and knip — each as its own job in its own gondolin micro-VM. Mirrors
-#              the lint-and-typecheck job in .github/workflows/ci.yml, minus `npm test`
-#              (which boots QEMU). The jobs are chained via `needs:` so they run
-#              sequentially — lint → typecheck → knip — each re-running `npm ci` in its
-#              own isolated VM. A little wasteful, but it short-circuits on first failure.
+# description: dogfoods the engine on itself — composes two reusable workflows via
+#              job-level `uses:`. `checks` runs lint/typecheck/knip/fan-in in one VM;
+#              `unit-tests` then runs the non-QEMU test tier. Sequential (unit-tests
+#              needs checks) for fail-fast and one 8G VM at a time. The e2e/VM-smoke
+#              tiers live in GitHub Actions (.github/workflows/ci.yml), where QEMU is
+#              available and nested virtualization isn't needed.
 # usage: work run ci
 ---
 name: ci
@@ -12,28 +12,9 @@ name: ci
 on: webhook
 
 jobs:
-  lint:
-    runs-on: gondolin
-    steps:
-      - name: install
-        run: npm ci
-      - name: lint
-        run: npm run lint
+  checks:
+    uses: workflow/checks
 
-  typecheck:
-    runs-on: gondolin
-    needs: [lint]
-    steps:
-      - name: install
-        run: npm ci
-      - name: typecheck
-        run: npm run typecheck
-
-  knip:
-    runs-on: gondolin
-    needs: [typecheck]
-    steps:
-      - name: install
-        run: npm ci
-      - name: knip
-        run: npm run knip
+  test:
+    needs: [checks]
+    uses: workflow/test

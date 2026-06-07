@@ -1,0 +1,20 @@
+# unit-tests
+# description: reusable test workflow — one gondolin VM, a single `npm ci`, then the
+#              non-QEMU test tier (`npm run test:unit`). The unit + component/integration
+#              suites run on the host-process double; the e2e + VM-smoke tiers self-skip
+#              under WORK_SKIP_VM (nested QEMU isn't available inside the guest). Those
+#              tiers still run in GitHub Actions, which has QEMU. Called by `ci` via
+#              `uses: workflow/unit-tests`; also runnable directly: `work run unit-tests`.
+---
+name: test
+
+on: workflow_call
+
+jobs:
+  unit:
+    runs-on: gondolin
+    steps:
+      - name: install
+        run: npm ci
+      - name: test
+        run: npm run test:unit

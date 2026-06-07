@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { resolveWorkflowLayout, resolveWorkflowRef } from "../src/project.ts";
-import { useSharedRuntime } from "./_support.ts";
+import { useSharedRuntime, vmTestSkip } from "./_support.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXAMPLES = resolve(HERE, "e2e");
@@ -95,10 +95,11 @@ async function runExample(file: string, name: string) {
   }
 }
 
-// Every example runs unconditionally on a real gondolin micro-VM (the guest
-// ships sh/bash/node/npm/python3, so every step language runs in the sandbox).
-// CI provisions Node >= 23.6 + QEMU; some pipelines also install real npm deps.
-describe("examples — every workflow runs to success", () => {
+// Every example runs on a real gondolin micro-VM (the guest ships
+// sh/bash/node/npm/python3, so every step language runs in the sandbox). This is
+// the QEMU tier — it self-skips without QEMU (or under WORK_SKIP_VM, the non-qemu
+// `test:unit` target). The full `npm test` boots VMs wherever QEMU is installed.
+describe("examples — every workflow runs to success", { skip: vmTestSkip() }, () => {
   for (const ex of examples) {
     it(`runs ${ex.label}`, { skip: NETWORK_EXAMPLES.has(ex.name) && !RUN_NETWORK ? "external network (set WORK_TEST_NETWORK=1)" : false }, async () => {
       const result = await runExample(ex.file, ex.name);

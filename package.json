@@ -27,6 +27,7 @@
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",
     "hello": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts ./test/e2e/hello-world-gondolin/workflow.yaml",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "test:unit": "WORK_SKIP_VM=1 node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "knip": "knip",

@@ -2,14 +2,31 @@
 // file and hand out AbsurdRuntime instances bound to it, so we don't re-apply
 // the schema for every workflow run. Not a *.test.ts file, so the runner ignores it.
 import { before, after } from "node:test";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
+import { qemuBinaryFor } from "../src/doctor/checks.ts";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunContext, type WorkflowResult } from "../src/runtime/index.ts";
 import type { ExecutionPlan } from "../src/compiler/index.ts";
 import type { ExecutionTarget, RunOptions, RunResult, TargetFactory } from "../src/targets/index.ts";
 import { createWorkHandler, makeAgentEgressResolver, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
 import { createActionUsesHandler, type SubUsesDispatch } from "../src/actions/index.ts";
 import type { UsesHandler } from "../src/runtime/index.ts";
+
+/**
+ * Skip reason for the real-VM (QEMU) test tiers, or `false` to run them. Pass it
+ * to `describe(name, { skip: vmTestSkip() }, …)` so the e2e / VM-smoke suites
+ * self-skip where booting a micro-VM isn't possible:
+ *   - `WORK_SKIP_VM=1` — the non-QEMU `test:unit` target (and the in-guest CI tier,
+ *     where nested QEMU isn't available), and
+ *   - any host without `qemu-system-*` on PATH.
+ * The full suite (`npm test`) still boots real VMs wherever QEMU is installed.
+ */
+export function vmTestSkip(): string | false {
+  if (process.env["WORK_SKIP_VM"]) return "WORK_SKIP_VM set (non-qemu tier)";
+  const bin = qemuBinaryFor(process.arch);
+  const probe = spawnSync(bin, ["--version"], { stdio: "ignore" });
+  return probe.status === 0 ? false : `${bin} not found on PATH`;
+}
 
 /** Deterministic agent runner for tests — no network. Echoes a canned summary. */
 export const mockAgentRunner: AgentRunner = {
