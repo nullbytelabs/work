@@ -63,6 +63,14 @@ export interface GuestNodeResult {
   outputs: Record<string, string>;
 }
 
+/** POSIX single-quote a value so the guest shell treats it as one literal word.
+ *  The stage path and an action manifest's `main` field flow into a `sh -lc`
+ *  command, so quoting keeps a space or metacharacter in either from splitting
+ *  the command or injecting extra ones. */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 /** Stage the action dir into the guest mount, optionally `npm install`, run it. */
 export async function runGuestNode(deps: GuestNodeDeps, req: GuestNodeRequest): Promise<GuestNodeResult> {
   const { exec, hostDir, guestDir, emit } = deps;
@@ -78,7 +86,7 @@ export async function runGuestNode(deps: GuestNodeDeps, req: GuestNodeRequest): 
   await rm(hostOutFile, { force: true });
 
   if (req.hasPackageJson) {
-    const install = await exec(`npm install --prefix ${gStage} --no-audit --no-fund`, {
+    const install = await exec(`npm install --prefix ${shq(gStage)} --no-audit --no-fund`, {
       ...(emit ? { onOutput: emit } : {}),
     });
     if (!install.ok) {
@@ -92,7 +100,7 @@ export async function runGuestNode(deps: GuestNodeDeps, req: GuestNodeRequest): 
     }
   }
 
-  const run = await exec(`node ${gStage}/${req.main}`, {
+  const run = await exec(`node ${shq(`${gStage}/${req.main}`)}`, {
     env: {
       ...req.env,
       WORK_OUTPUT: `${gStage}/${OUTPUT_FILE}`,

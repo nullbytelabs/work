@@ -22,6 +22,12 @@ describe("evaluateCondition — literals and truthiness", () => {
     assert.equal(T("0"), false);
     assert.equal(T("null"), false);
   });
+
+  it("unescapes a doubled quote inside a string literal (GHA-style ''→')", () => {
+    // The literal 'a''b' is the 3-char string a'b — not two adjacent strings.
+    assert.equal(T("inputs.s == 'a''b'", { inputs: { s: "a'b" } }), true);
+    assert.equal(T("inputs.s == 'a''b'", { inputs: { s: "ab" } }), false);
+  });
 });
 
 describe("evaluateCondition — operators", () => {

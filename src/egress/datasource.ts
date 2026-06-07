@@ -21,7 +21,7 @@
  * job's reachable hosts an explicit, auditable decision.
  */
 import type { PlannedJob } from "../compiler/index.ts";
-import { expandEnv, type DatasourceConfig, type PiWorkflowsConfig } from "../config/index.ts";
+import { expandEnvStrict, type DatasourceConfig, type PiWorkflowsConfig } from "../config/index.ts";
 
 /** Structural `JobNetwork` (kept local to avoid an egress→runtime import cycle). */
 export interface DatasourceJobNetwork {
@@ -54,8 +54,8 @@ function tokenEnvFor(name: string, ds: DatasourceConfig): string {
  *
  * The returned shape is structurally a `JobNetwork`: `allowedHosts` lists the
  * scoped datasources' hosts, and each datasource with a token contributes a
- * `secrets[ENV] = { hosts:[host], value: expandEnv(token) }` entry scoped to just
- * that datasource's host.
+ * `secrets[ENV] = { hosts:[host], value: expandEnvStrict(token) }` entry scoped to
+ * just that datasource's host.
  */
 export function makeDatasourceEgressResolver(
   config: PiWorkflowsConfig | undefined,
@@ -79,7 +79,7 @@ export function makeDatasourceEgressResolver(
       // Only datasources with a token contribute a secret; a token-less datasource
       // still gets host allowlisted (a public read endpoint, say).
       if (ds.token !== undefined) {
-        secrets[tokenEnvFor(name, ds)] = { hosts: [host], value: expandEnv(ds.token) };
+        secrets[tokenEnvFor(name, ds)] = { hosts: [host], value: expandEnvStrict(ds.token, `datasource "${name}" token`) };
       }
     }
 

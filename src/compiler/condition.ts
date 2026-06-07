@@ -120,12 +120,16 @@ const scanString: Scanner = (src, i) => {
   const n = src.length;
   let j = i + 1;
   let out = "";
-  while (j < n && src[j] !== quote) {
-    // GHA escapes a quote by doubling it inside the same quote style.
-    if (src[j] === quote && src[j + 1] === quote) {
-      out += quote;
-      j += 2;
-      continue;
+  while (j < n) {
+    if (src[j] === quote) {
+      // GHA escapes a quote by doubling it inside the same quote style; a lone
+      // quote ends the literal.
+      if (src[j + 1] === quote) {
+        out += quote;
+        j += 2;
+        continue;
+      }
+      break;
     }
     out += src[j];
     j++;

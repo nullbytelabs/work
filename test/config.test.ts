@@ -31,6 +31,15 @@ describe("config", () => {
     delete process.env["FW_KEY"];
   });
 
+  it("throws (not a blank key) when the apiKey's $ENV is unset", () => {
+    delete process.env["FW_KEY"];
+    const c = parseConfig(sample);
+    assert.throws(
+      () => resolveModel(c),
+      (e) => e instanceof UserFacingError && /FW_KEY/.test(e.message) && /not set/.test(e.message),
+    );
+  });
+
   it("rejects a model that references an unknown provider", () => {
     assert.throws(
       () => parseConfig({ providers: {}, models: { x: { provider: "ghost", model: "m" } } }),

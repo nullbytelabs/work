@@ -130,6 +130,22 @@ describe("web server", () => {
     assert.match(body.error, /number/);
   });
 
+  it("POST /api/runs with an oversized body is rejected (413), never dispatched", async () => {
+    const big = "x".repeat(300 * 1024); // exceeds the 256 KiB cap
+    let status = 0;
+    try {
+      const r = await fetch(`${base}/api/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Work-Token": server.token },
+        body: JSON.stringify({ name: "echo", inputs: { blob: big } }),
+      });
+      status = r.status;
+    } catch {
+      status = -1; // the cap aborted the connection mid-stream — also acceptable
+    }
+    assert.ok(status === 413 || status === -1, `expected 413 or abort, got ${status}`);
+  });
+
   it("rejects a forged Host header with 403", async () => {
     // Node's `fetch` (undici) forces the Host header to match the connection, so
     // we issue a raw `http.request` to forge it.

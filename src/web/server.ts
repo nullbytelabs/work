@@ -49,6 +49,8 @@ const PORT_RETRIES = 8;
 const HEARTBEAT_MS = 15_000;
 /** Hard cap on a webhook body before buffering — abort larger payloads (webhook §4 L2). */
 const MAX_HOOK_BODY_BYTES = 256 * 1024;
+/** Hard cap on a JSON API request body (`POST /api/runs`), same rationale. */
+const MAX_API_BODY_BYTES = 256 * 1024;
 /** Window in which an identical webhook re-delivery is treated as a duplicate (no new run). */
 const DEDUPE_TTL_MS = 300_000;
 /** Bounded in-memory delivery audit ring — so the UI shows recent deliveries even with no `dataDir`. */
@@ -316,9 +318,16 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
 
   // POST /api/runs → compile + dispatch → 202 { runId }.
   async function postRuns(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let raw: string;
+    try {
+      raw = await readBodyCapped(req, MAX_API_BODY_BYTES);
+    } catch {
+      sendJson(res, 413, { error: "request body too large" });
+      return;
+    }
     let body: { name?: unknown; inputs?: unknown };
     try {
-      body = JSON.parse(await readBody(req));
+      body = JSON.parse(raw);
     } catch {
       sendJson(res, 400, { error: "body must be JSON" });
       return;
@@ -820,15 +829,6 @@ function listen(server: ReturnType<typeof createServer>, startPort: number): Pro
 }
 
 /** Read a request body to a string (small JSON bodies only). */
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (c) => (data += c));
-    req.on("end", () => resolve(data));
-    req.on("error", reject);
-  });
-}
-
 /**
  * Read a body but **abort once it exceeds `max` bytes** — we never buffer an
  * oversized/JSON-bomb webhook payload (webhook §4 L2). Rejects on overflow.

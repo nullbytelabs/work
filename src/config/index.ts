@@ -95,13 +95,31 @@ export interface ResolvedModel {
 }
 
 /**
- * Expand `$VAR` / `${VAR}` against the environment; pass literals through.
- * Exported so the egress resolvers reuse the *same* secret-expansion semantics
- * the model `apiKey` uses (one secret surface: `$ENV` in config -> real value
- * injected host-side only).
+ * Expand `$VAR` / `${VAR}` against the environment; pass literals through. A
+ * **missing** variable expands to `""` — lenient on purpose, for callers where an
+ * empty result means "not configured" and is handled as such (e.g. the webhook
+ * secret probe, which then fails closed). For a credential that is *injected and
+ * used*, prefer `expandEnvStrict`.
  */
 export function expandEnv(value: string): string {
   return value.replace(/\$\{([A-Z0-9_]+)\}|\$([A-Z0-9_]+)/gi, (_m, a, b) => process.env[a ?? b] ?? "");
+}
+
+/**
+ * Like `expandEnv`, but **throws** if a referenced variable is unset. Use for a
+ * secret that gets injected and used (a model `apiKey`, a datasource `token`),
+ * where silently expanding `$MISSING` to `""` would inject a blank credential.
+ * `label` names the config field in the error.
+ */
+export function expandEnvStrict(value: string, label: string): string {
+  return value.replace(/\$\{([A-Z0-9_]+)\}|\$([A-Z0-9_]+)/gi, (_m, a, b) => {
+    const name = a ?? b;
+    const v = process.env[name];
+    if (v === undefined) {
+      throw new UserFacingError(`${label} references environment variable $${name}, which is not set`);
+    }
+    return v;
+  });
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -404,7 +422,7 @@ export function resolveModel(config: PiWorkflowsConfig, alias?: string): Resolve
   const provider = config.providers[model.provider]!; // validated in parseConfig
   const resolved: ResolvedModel = {
     baseUrl: provider.baseUrl,
-    apiKey: expandEnv(provider.apiKey),
+    apiKey: expandEnvStrict(provider.apiKey, `config provider "${model.provider}" apiKey`),
     model: model.model,
   };
   if (model.maxTokens !== undefined) resolved.maxTokens = model.maxTokens;
