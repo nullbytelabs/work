@@ -26,7 +26,8 @@ import { WebPresenter, type Frame } from "./web-presenter.ts";
  * A run's lifecycle state. "queued" while waiting for a concurrency slot,
  * "running" once started, then a terminal "success"/"failure".
  */
-export type RunStatus = "queued" | "running" | "success" | "failure";
+// `interrupted` = the run didn't finish (orchestrator torn out mid-flight) — resumable.
+export type RunStatus = "queued" | "running" | "success" | "failure" | "interrupted";
 
 /** How a run was started: the UI's "Run workflow" button, or an authenticated webhook POST. */
 export type RunTrigger = "dispatch" | "webhook";

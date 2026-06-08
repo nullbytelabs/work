@@ -228,9 +228,10 @@ export class AbsurdRuntime implements Runtime {
         snap = await awaitTaskTerminal(app, retried.taskID);
       }
       if (snap.state === "completed") return snap.result as unknown as WorkflowResult;
-      // The orchestrator failed (a job was interrupted) and couldn't be resumed in
-      // this invocation — report failure; re-running with the same runId resumes it.
-      return { name: plan.name, status: "failure", jobs: [] };
+      // The orchestrator task failed — the run was interrupted (a job torn out) and
+      // couldn't finish in this invocation. Report `interrupted` (not `failure`):
+      // it's resumable, and re-running with the same runId picks it back up.
+      return { name: plan.name, status: "interrupted", jobs: [] };
     } finally {
       await orchWorker.close();
       await jobsWorker.close();

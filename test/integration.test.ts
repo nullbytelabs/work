@@ -339,7 +339,7 @@ describe("pipeline — a crashing target still fires the presenter hooks", () =>
           onJobEnd: (jobId, r) => jobEnds.push(`${jobId}:${r.status}`),
         },
       });
-      assert.equal(result.status, "failure");
+      assert.equal(result.status, "interrupted");
       // A target crash interrupts the job, which fails the durable orchestrator
       // task (so the run stays resumable). The per-job failure is delivered through
       // the hooks — the contract that matters: the presenter isn't left showing the

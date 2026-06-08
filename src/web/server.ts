@@ -817,7 +817,12 @@ async function reconcileInterruptedRuns(deps: {
   workspace: string;
   dispatch: (opts: DispatchOptions) => DispatchResult;
 }): Promise<void> {
-  const interrupted = (await deps.runStore.list()).filter((r) => r.status === "running" || r.status === "queued");
+  // Non-terminal rows a prior process left behind: `running`/`queued` zombies (a
+  // hard kill before the terminal write) and `interrupted` (the run reported it
+  // didn't finish). All are resumable; a genuine `failure`/`success` is not touched.
+  const interrupted = (await deps.runStore.list()).filter(
+    (r) => r.status === "running" || r.status === "queued" || r.status === "interrupted",
+  );
   for (const r of interrupted) {
     const layout = await findWorkflowByName(deps.workspace, r.name).catch(() => undefined);
     if (!layout) {

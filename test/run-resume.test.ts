@@ -67,7 +67,7 @@ describe("startRun — resumable across invocations (the CLI path)", () => {
     try {
       // Phase 1 — the run is interrupted under `second`.
       const res1 = await startRun({ plan, runId, dataDir, workdir, makeTarget: crashSecond });
-      assert.equal(res1.status, "failure");
+      assert.equal(res1.status, "interrupted");
       assert.equal(await byteLen(join(sideDir, "first")), 1, "first ran once in phase 1");
       assert.equal(await byteLen(join(sideDir, "second")), 0, "second was torn out before it ran");
 

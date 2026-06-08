@@ -418,10 +418,13 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
 
   presenter.finish(result);
   if (result.status === "success") process.exit(0);
-  if (persistent) {
+  // An `interrupted` run didn't finish (the platform was torn out) — point at
+  // `--resume`. A genuine `failure` ran to a verdict; the presenter already showed
+  // it, and re-running is the user's call (a `retry` verb is coming).
+  if (persistent && result.status === "interrupted") {
     const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
     const how = args.name !== undefined ? `run ${args.name}` : args.file!;
-    process.stderr.write(`pi-workflows: run ${runId} did not finish — resume with: ${prog} ${how} --resume ${runId}\n`);
+    process.stderr.write(`pi-workflows: run ${runId} was interrupted — resume with: ${prog} ${how} --resume ${runId}\n`);
   }
   process.exit(1);
 }

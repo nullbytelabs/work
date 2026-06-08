@@ -97,7 +97,7 @@ describe("durable execution — whole-workflow crash-resume", () => {
       e1 = undefined;
 
       // The symptom: the interrupted run is reported as a failure.
-      assert.equal(res1.status, "failure");
+      assert.equal(res1.status, "interrupted");
       assert.equal(await byteLen(join(sideDir, "first")), 1, "first should have run once in phase 1");
       assert.equal(await byteLen(join(sideDir, "second")), 0, "second was torn out before it could run");
 

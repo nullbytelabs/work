@@ -30,7 +30,13 @@ export interface JobResult {
 
 export interface WorkflowResult {
   name: string;
-  status: "success" | "failure";
+  /**
+   * `success` / `failure` are run-to-verdict outcomes. `interrupted` means the run
+   * did NOT finish — its orchestrator was torn out mid-flight (the platform
+   * stopped) — so it's resumable, distinct from a `failure` where a job ran and
+   * exited non-zero. Recovery differs: `interrupted` → resume; `failure` → re-run.
+   */
+  status: "success" | "failure" | "interrupted";
   jobs: JobResult[];
 }
 

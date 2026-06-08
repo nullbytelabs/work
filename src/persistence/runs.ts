@@ -16,7 +16,9 @@
  */
 import type { AbsurdEngine } from "../runtime/index.ts";
 
-export type RunStatus = "queued" | "running" | "success" | "failure";
+// `interrupted` = the run didn't finish (its orchestrator was torn out mid-flight);
+// resumable, distinct from `failure` (a job ran and exited non-zero).
+export type RunStatus = "queued" | "running" | "success" | "failure" | "interrupted";
 export type RunTrigger = "dispatch" | "webhook";
 
 export interface RunRow {
