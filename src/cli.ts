@@ -16,6 +16,8 @@ import { randomUUID } from "node:crypto";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError, type ExecutionPlan } from "./compiler/index.ts";
 import { resolveConfigLayers, loadMergedConfig, PROJECT_CONFIG_FILENAME, type PiWorkflowsConfig } from "./config/index.ts";
+import { createAbsurdEngine } from "./runtime/index.ts";
+import { RunRepository, type RunRow, type RunStatus } from "./persistence/runs.ts";
 import { resolveWorkflowLayout, findWorkflowByName, resolveWorkflowRef, WORKFLOWS_DIR, type WorkflowLayout } from "./project.ts";
 import { startRun } from "./run.ts";
 import { startWebServer } from "./web/index.ts";
@@ -51,6 +53,10 @@ interface CliArgs {
   port?: number;
   /** `--resume <id>`: continue a prior run's persisted journal instead of starting fresh. */
   resume?: string;
+  /** `runs`: list the workspace's run history instead of running a workflow. */
+  runs?: boolean;
+  /** `runs --status <s>`: filter the history by status. */
+  runStatus?: string;
 }
 
 /** Mutable accumulator filled by the flag handlers, resolved into CliArgs after. */
@@ -67,6 +73,7 @@ interface FlagState {
   web: boolean;
   port?: number;
   resume?: string;
+  status?: string;
 }
 
 /** A flag handler: consumes from `argv` starting at `i` and returns the new index. */
@@ -109,6 +116,11 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
   "--resume": (argv, i, s) => {
     s.resume = argv[++i];
     if (!s.resume) fail("--resume requires a run id");
+    return i;
+  },
+  "--status": (argv, i, s) => {
+    s.status = argv[++i];
+    if (!s.status) fail("--status requires a value (e.g. interrupted, failure)");
     return i;
   },
   "--config": (argv, i, s) => {
@@ -173,11 +185,23 @@ type CommonArgs = ReturnType<typeof buildCommon>;
 function parseArgs(argv: string[]): CliArgs {
   const s = parseFlags(argv);
   const common = buildCommon(s);
+  if (s.positionals[0] === "runs") return resolveRuns(s, common);
+  if (s.status) fail("--status only applies to `runs`");
   if (s.web) return resolveWeb(s, common);
   if (s.port !== undefined) fail("--port only applies to `--web`");
   if (s.positionals[0] === "graph") return resolveGraph(s, common);
   if (s.positionals[0] === "run") return resolveRun(s, common);
   return resolveFile(s, common);
+}
+
+// `runs [--status <s>]` — list the workspace's run history (newest-first), no
+// workflow target. Reads the shared `.workflows/db` store both the CLI and the web
+// write, so it lists runs from either.
+function resolveRuns(s: FlagState, common: CommonArgs): CliArgs {
+  if (s.positionals.length > 1) fail(`runs takes no positional arguments (got ${s.positionals[1]})`);
+  if (s.format || s.steps) fail("--format / --steps only apply to `graph`");
+  if (s.resume) fail("--resume applies to a workflow run, not `runs`");
+  return { runs: true, ...(s.status ? { runStatus: s.status } : {}), ...common };
 }
 
 // `--web` — boot the local web UI over the workspace's `.workflows/` (it
@@ -235,6 +259,7 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
+      `  ${prog} [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]\n` +
       `  ${prog} [--workspace <dir>] --web [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
@@ -282,6 +307,64 @@ async function runWebServer(args: CliArgs): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
+const RUN_STATUSES: RunStatus[] = ["queued", "running", "success", "failure", "interrupted"];
+
+/** A short, human relative time ("2m ago") for the run list. */
+function relTime(epochMs: number): string {
+  const s = Math.max(0, Math.round((Date.now() - epochMs) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+/** Print the run history as an aligned table, newest-first, with a resume hint. */
+function printRuns(rows: RunRow[], filter: string | undefined): void {
+  if (rows.length === 0) {
+    process.stdout.write(filter ? `no ${filter} runs\n` : "no runs yet\n");
+    return;
+  }
+  const idW = 8;
+  const nameW = Math.max("WORKFLOW".length, ...rows.map((r) => r.name.length));
+  const statusW = Math.max("STATUS".length, ...rows.map((r) => r.status.length));
+  process.stdout.write(`${"ID".padEnd(idW)}  ${"WORKFLOW".padEnd(nameW)}  ${"STATUS".padEnd(statusW)}  WHEN\n`);
+  for (const r of rows) {
+    process.stdout.write(`${r.id.slice(0, idW).padEnd(idW)}  ${r.name.padEnd(nameW)}  ${r.status.padEnd(statusW)}  ${relTime(r.startedAt)}\n`);
+  }
+  // Resumable runs (didn't finish) are the actionable ones — show how to continue.
+  const resumable = rows.filter((r) => r.status === "interrupted" || r.status === "running" || r.status === "queued");
+  if (resumable.length > 0) {
+    const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
+    const ex = resumable[0]!;
+    process.stdout.write(`\n${resumable.length} unfinished — resume one with: ${prog} run ${ex.name} --resume ${ex.id}\n`);
+  }
+}
+
+/** `runs` — open the shared `.workflows/db` store and print the run history. */
+async function listRuns(args: CliArgs): Promise<void> {
+  const workspace = args.workspace ?? process.cwd();
+  const dataDir = join(workspace, WORKFLOWS_DIR, "db");
+  if (!existsSync(dataDir)) {
+    process.stdout.write("no runs yet\n");
+    process.exit(0);
+  }
+  if (args.runStatus && !(RUN_STATUSES as string[]).includes(args.runStatus)) {
+    fail(`--status must be one of: ${RUN_STATUSES.join(", ")}`);
+  }
+  const engine = await createAbsurdEngine({ dataDir });
+  try {
+    const repo = new RunRepository(engine);
+    await repo.ensureSchema();
+    const rows = await repo.list();
+    printRuns(args.runStatus ? rows.filter((r) => r.status === args.runStatus) : rows, args.runStatus);
+  } finally {
+    await engine.close();
+  }
+  process.exit(0);
+}
+
 async function main(): Promise<void> {
   // Dispatch first, then per-command parse. `doctor` has a disjoint flag set
   // (`--json`) from run/graph, so it owns its own parsing; everything else flows
@@ -298,6 +381,12 @@ async function main(): Promise<void> {
   }
 
   const args = parseArgs(argv);
+
+  // `runs` — list the workspace's run history and exit (no workflow target).
+  if (args.runs) {
+    await listRuns(args);
+    return;
+  }
 
   // `--web` — boot the local web UI and keep the process alive (it does NOT
   // resolve a single workflow; the UI enumerates every pipeline in the
