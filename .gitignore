@@ -4,7 +4,8 @@ dist/
 .DS_Store
 .pi-workflows-work/
 
-# Durable run-history DB the web UI (`work --web`) writes under a workspace.
+# Durable run store: the journal + history that both the web UI (`work --web`)
+# and the CLI (`work run`, resumable via `--resume <id>`) write under a workspace.
 **/.workflows/db/
 
 # Local provider/model config (holds API keys). Commit the *.example.json instead.

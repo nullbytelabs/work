@@ -9,16 +9,18 @@
  * presenter hooks, or the web presenter's SSE sink) and starts/finishes around
  * the call. Keeping presentation out means the web layer reuses this untouched.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { AbsurdRuntime, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
+import { randomUUID } from "node:crypto";
+import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
 import type { ExecutionPlan } from "./compiler/index.ts";
 import type { TargetFactory } from "./targets/index.ts";
 import { createWorkHandler, makeAgentEgressResolver } from "./agent/index.ts";
 import { createActionUsesHandler, type SubUsesDispatch } from "./actions/index.ts";
 import type { UsesHandler } from "./runtime/index.ts";
 import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.ts";
+import { RunRepository } from "./persistence/runs.ts";
 import type { PiWorkflowsConfig } from "./config/index.ts";
 
 export interface StartRunOptions {
@@ -47,6 +49,19 @@ export interface StartRunOptions {
   datasources?: string[];
   /** Base working directory; a fresh temp dir is allocated when omitted. */
   workdir?: string;
+  /**
+   * Persistent store location (a PGLite `dataDir`) — the same `.workflows/db` the
+   * web UI uses. When set and no `engine` is injected, `startRun` owns an engine
+   * rooted here, so the run is durable: its Absurd journal persists (a later
+   * `startRun` with the same `runId` *resumes* — finished jobs are reused, an
+   * interrupted job is re-driven) AND the run is recorded in the shared `work.runs`
+   * history (so a `work run` shows up in the web UI alongside web-triggered runs).
+   * Omit for an ephemeral in-memory run (no resume, no history). Ignored when
+   * `engine` is injected — that engine owns its storage and its own history
+   * recording (the web's RunManager). PGLite is single-process, so a `dataDir`
+   * must not be open in two engines at once.
+   */
+  dataDir?: string;
   /**
    * A shared `AbsurdEngine` to run on. When provided the runtime does NOT own it
    * (the `ownsEngine` flag is false), so `runtime.close()` is a no-op for it and
@@ -96,26 +111,59 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
     createActionUsesHandler({ dispatch }),
   );
 
+  // Own the engine unless one is injected. When we own it AND a `dataDir` is given,
+  // it persists there (the shared `.workflows/db`) so the run is durable + recorded
+  // in history; otherwise it's ephemeral in-memory. An injected engine (the web)
+  // brings its own storage and history recording, so we touch neither here.
+  const ownsEngine = opts.engine === undefined;
+  const persistent = ownsEngine && opts.dataDir !== undefined;
+  if (persistent) await mkdir(opts.dataDir!, { recursive: true });
+  const engine = opts.engine ?? (await createAbsurdEngine(opts.dataDir ? { dataDir: opts.dataDir } : {}));
+
+  // Resolve the run id up front so the journal, the history row, and the runtime
+  // all key on the same id (and a `--resume` reuses it).
+  const runId = opts.runId ?? randomUUID();
+
+  // Record the run in the shared history (`work.runs`) when we own a persistent
+  // engine — the same table the web UI lists, so a CLI run is a first-class run.
+  // `insert` is idempotent (on conflict do nothing), so resuming re-uses the row.
+  let runStore: RunRepository | undefined;
+  if (persistent) {
+    runStore = new RunRepository(engine);
+    await runStore.ensureSchema();
+    await runStore.insert({
+      id: runId,
+      name: opts.plan.name,
+      status: "running",
+      trigger: "dispatch",
+      startedAt: Date.now(),
+      ...(opts.plan.inputs ? { inputs: opts.plan.inputs } : {}),
+    });
+  }
+
   const runtime = new AbsurdRuntime({
+    engine,
     usesHandlers: handlers,
     resolveJobNetwork: composeResolvers(
       makeAgentEgressResolver(opts.config),
       makeDatasourceEgressResolver(opts.config, opts.datasources ? { datasources: opts.datasources } : {}),
     ),
-    ...(opts.engine ? { engine: opts.engine } : {}),
     ...(opts.makeTarget ? { makeTarget: opts.makeTarget } : {}),
   });
 
   try {
-    return await runtime.run(opts.plan, {
+    const result = await runtime.run(opts.plan, {
       workRoot,
       ...(opts.workspaceSource !== undefined ? { workspaceSource: opts.workspaceSource } : {}),
       ...(opts.workflowDir !== undefined ? { workflowDir: opts.workflowDir } : {}),
       ...(opts.hooks ? { hooks: opts.hooks } : {}),
-      ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
+      runId,
     });
+    if (runStore) await runStore.setStatus(runId, result.status, { finishedAt: Date.now() });
+    return result;
   } finally {
-    await runtime.close();
+    await runtime.close(); // no-op for the injected (web) engine
+    if (ownsEngine) await engine.close();
     if (ownsWorkRoot) await rm(workRoot, { recursive: true, force: true });
   }
 }
