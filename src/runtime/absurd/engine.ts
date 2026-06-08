@@ -22,9 +22,17 @@ const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), "schema.sql");
 /** Pinned Absurd schema version vendored at ./schema.sql. */
 export const ABSURD_SCHEMA_VERSION = "0.4.0";
 
+/** The queue the per-job tasks run on — separate from the orchestrator's queue so
+ *  an orchestrator awaiting its jobs can never starve them of worker slots (a
+ *  same-queue await would deadlock). See docs/durable-orchestrator.md. */
+export const JOBS_QUEUE = "jobs";
+
 export interface AbsurdEngine {
-  /** The Absurd client, bound to a single-connection pool over PGLite. */
+  /** The Absurd client for the orchestrator queue, bound to the PGLite pool. */
   readonly app: Absurd;
+  /** A second client bound to the `jobs` queue (shares the same pool) — job tasks
+   *  run here so the orchestrator (on `app`'s queue) can await them deadlock-free. */
+  readonly jobsApp: Absurd;
   /**
    * Run a SQL query against the underlying PGLite. The durable core uses Absurd's
    * own tables for execution state; this seam is for engine-*adjacent* records the
@@ -93,20 +101,30 @@ export async function createAbsurdEngine(opts: AbsurdEngineOptions = {}): Promis
   const pool = new pg.Pool({ host: "127.0.0.1", port, database: "postgres", user: "postgres", max: 1 });
 
   const app = new Absurd({ db: pool, queueName, ...(opts.log ? { log: opts.log } : {}) });
-  try {
-    await app.createQueue(queueName);
-  } catch {
-    // Queue may already exist (reused dataDir) — fine.
+  // A second client bound to the jobs queue — same pool (PGLite is single-conn, so
+  // they serialize on it). Job tasks run here; the orchestrator (on `app`) awaits
+  // them across the queue boundary, which Absurd requires to avoid slot deadlock.
+  const jobsApp = new Absurd({ db: pool, queueName: JOBS_QUEUE, ...(opts.log ? { log: opts.log } : {}) });
+  for (const [client, q] of [[app, queueName], [jobsApp, JOBS_QUEUE]] as const) {
+    try {
+      await client.createQueue(q);
+    } catch {
+      // Queue may already exist (reused dataDir) — fine.
+    }
   }
 
   return {
     app,
+    jobsApp,
     async query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
       const r = await pool.query(text, params as unknown[] | undefined);
       return r.rows as T[];
     },
     async close() {
+      // Stop both clients' workers; the pool is passed-in (not owned by either
+      // client), so we end it once here after both have stopped polling it.
       await app.close().catch(() => {});
+      await jobsApp.close().catch(() => {});
       await pool.end().catch(() => {});
       await server.stop().catch(() => {});
       await db.close().catch(() => {});

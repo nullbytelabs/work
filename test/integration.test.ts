@@ -340,7 +340,11 @@ describe("pipeline — a crashing target still fires the presenter hooks", () =>
         },
       });
       assert.equal(result.status, "failure");
-      assert.equal(result.jobs.find((j) => j.id === "a")!.status, "failure");
+      // A target crash interrupts the job, which fails the durable orchestrator
+      // task (so the run stays resumable). The per-job failure is delivered through
+      // the hooks — the contract that matters: the presenter isn't left showing the
+      // job "running". (An interrupted run's WorkflowResult carries status only; the
+      // job detail lives in the hooks + the journal, not the returned object.)
       assert.deepEqual(stepEnds, ["a:failure"]); // not stuck "running"
       assert.deepEqual(jobEnds, ["a:failure"]);
     } finally {

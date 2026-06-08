@@ -38,13 +38,20 @@ import {
   type ConditionContext,
   type ConditionBag,
 } from "../../compiler/index.ts";
-import { createAbsurdEngine, type AbsurdEngine } from "./engine.ts";
+import { createAbsurdEngine, JOBS_QUEUE, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
 import type { JobResult, RunContext, Runtime, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
 import { parseOutputFile } from "../output.ts";
 
+/** The orchestrator task's queue. Job tasks run on a *separate* queue
+ *  (`JOBS_QUEUE`) so the orchestrator can await them without starving them of
+ *  worker slots — see docs/durable-orchestrator.md. */
 const QUEUE = "default";
 const DEFAULT_MAX_CONCURRENCY = 16;
+/** How often the orchestrator task heartbeats its lease while awaiting jobs
+ *  (well under the worker's claim timeout). Short runs finish before it ever
+ *  fires; long ones keep their lease alive. */
+const ORCH_HEARTBEAT_MS = 300_000;
 
 /** Upstream job outputs + status passed to a job's task (JSON-serializable). */
 type NeedsBag = OutputBag & { result?: JobResult["status"] };
@@ -159,7 +166,7 @@ export class AbsurdRuntime implements Runtime {
   }
 
   async run(plan: ExecutionPlan, ctx: RunContext): Promise<WorkflowResult> {
-    const { app } = await this.ensureEngine();
+    const { app, jobsApp } = await this.ensureEngine();
     const runId = ctx.runId ?? randomUUID();
     const deps: JobDeps = {
       ctx,
@@ -171,104 +178,62 @@ export class AbsurdRuntime implements Runtime {
     };
 
     const jobTaskName = `job:${plan.name}:${runId}`;
-    app.registerTask(
-      { name: jobTaskName, queue: QUEUE, defaultMaxAttempts: 1 },
+    const orchTaskName = `orch:${plan.name}:${runId}`;
+
+    // Each job is a durable task on the JOBS queue.
+    jobsApp.registerTask(
+      { name: jobTaskName, queue: JOBS_QUEUE, defaultMaxAttempts: 1 },
       async (params: unknown, taskCtx: TaskContext) => {
         const p = params as { jobId: string; needs: NeedsContext };
         return runJobInTask(plan.jobs[p.jobId]!, deps, taskCtx, p.needs ?? {});
       },
     );
 
+    // The whole workflow is a durable ORCHESTRATOR task: it walks the needs DAG,
+    // spawning + awaiting job tasks (on the jobs queue, so it can't starve them of
+    // slots) and threading outputs. Because it's a task, a crashed run self-resumes
+    // when a worker re-claims it — the orchestration state lives in the journal, not
+    // in this process's memory. It heartbeats its own lease while awaiting jobs.
+    app.registerTask(
+      { name: orchTaskName, queue: QUEUE, defaultMaxAttempts: 1 },
+      async (_params: unknown, taskCtx: TaskContext) => {
+        const beat = setInterval(() => void taskCtx.heartbeat().catch(() => {}), ORCH_HEARTBEAT_MS);
+        beat.unref?.();
+        try {
+          return await runOrchestration({ plan, deps, jobsApp, runId, jobTaskName });
+        } finally {
+          clearInterval(beat);
+        }
+      },
+    );
+
     const jobCount = Object.keys(plan.jobs).length;
     const concurrency = Math.max(1, this.maxConcurrency ?? Math.min(jobCount, DEFAULT_MAX_CONCURRENCY));
-    const worker = await app.startWorker({ concurrency, batchSize: concurrency, claimTimeout: 600, pollInterval: 0.05 });
+    // A worker on each queue — separate pools so an orchestrator awaiting jobs can
+    // never deadlock the jobs it's waiting on.
+    const jobsWorker = await jobsApp.startWorker({ concurrency, batchSize: concurrency, claimTimeout: 600, pollInterval: 0.05 });
+    const orchWorker = await app.startWorker({ concurrency, batchSize: concurrency, claimTimeout: 600, pollInterval: 0.05 });
 
     try {
-      const scheduled = new Map<string, Promise<JobResult>>();
-      const schedule = (jobId: string): Promise<JobResult> => {
-        const existing = scheduled.get(jobId);
-        if (existing) return existing;
-        const job = plan.jobs[jobId]!;
-        const p = (async (): Promise<JobResult> => {
-          const depResults = await Promise.all(job.needs.map((d) => schedule(d)));
-          const depsAllSucceeded = depResults.every((d) => d.status === "success");
-          const depsSomeFailed = depResults.some((d) => d.status === "failure");
-
-          // Build the needs context from dependencies' resolved outputs + status.
-          const needs: NeedsContext = {};
-          for (const dep of depResults) needs[dep.id] = { outputs: dep.outputs ?? {}, result: dep.status };
-
-          // Gate the job. With no `if`, a job runs only if every dependency
-          // succeeded (the default). An `if:` takes over entirely — letting
-          // `always()` / `failure()` run a job after an upstream failure.
-          if (job.if !== undefined) {
-            let run: boolean;
-            try {
-              run = evaluateCondition(job.if, {
-                inputs: deps.inputs,
-                needs: toConditionBags(needs),
-                ...(deps.event ? { event: deps.event } : {}),
-                ...(job.matrix ? { matrix: job.matrix } : {}),
-                status: { success: depsAllSucceeded, failure: depsSomeFailed },
-              });
-            } catch (err) {
-              if (err instanceof ConditionError) {
-                return jobConditionError(jobId, `job if: ${err.message}`);
-              }
-              throw err;
-            }
-            if (!run) return { id: jobId, status: "skipped", steps: [] };
-          } else if (!depsAllSucceeded) {
-            return { id: jobId, status: "skipped", steps: [] };
-          }
-
-          // Spawning is idempotent on the run+job key: a job that already ran in an
-          // earlier invocation of this run (same `runId`) returns the existing task
-          // instead of a fresh one (`created: false`). That's what makes resume
-          // cheap — a finished job's journaled result is reused, not recomputed.
-          const spawned = await app.spawn(
-            jobTaskName,
-            { jobId, needs },
-            { queue: QUEUE, idempotencyKey: `${runId}:${jobId}` },
-          );
-          let snap = await awaitTaskTerminal(app, spawned.taskID);
-          // Resume: a pre-existing *failed* task is a job that was interrupted in an
-          // earlier invocation (its target was torn out). Re-drive it — Absurd
-          // fast-forwards the `ctx.step` checkpoints it already completed and re-runs
-          // only the step that didn't finish. A task that *completed* (even with a
-          // failure result — a step that ran and exited non-zero) is a real outcome
-          // and is reused as-is, never silently retried.
-          if (!spawned.created && snap.state === "failed") {
-            const retried = await app.retryTask(spawned.taskID, { spawnNewTask: false });
-            snap = await awaitTaskTerminal(app, retried.taskID);
-          }
-          if (snap.state === "completed") return snap.result as unknown as JobResult;
-          return {
-            id: jobId,
-            status: "failure",
-            steps: [
-              {
-                name: `${jobId}/error`,
-                status: "failure",
-                exitCode: 1,
-                stdout: "",
-                stderr: `job task did not complete: ${JSON.stringify("failure" in snap ? snap.failure : snap)}`,
-              },
-            ],
-          };
-        })();
-        scheduled.set(jobId, p);
-        return p;
-      };
-
-      const jobs = await Promise.all(plan.jobOrder.map((id) => schedule(id)));
-      return {
-        name: plan.name,
-        status: jobs.some((j) => j.status === "failure") ? "failure" : "success",
-        jobs,
-      };
+      // Spawn the orchestrator (idempotent on runId) and await its result — the
+      // WorkflowResult. Resume: a pre-existing *failed* orchestrator (a run
+      // interrupted mid-flight) is re-driven via retryTask, which re-walks the DAG,
+      // reuses finished jobs, and re-drives the interrupted one. A *completed*
+      // orchestrator (even one whose WorkflowResult is `failure` — a job that ran
+      // and failed) is a real outcome, reused as-is.
+      const spawned = await app.spawn(orchTaskName, {}, { queue: QUEUE, idempotencyKey: runId });
+      let snap = await awaitTaskTerminal(app, spawned.taskID);
+      if (!spawned.created && snap.state === "failed") {
+        const retried = await app.retryTask(spawned.taskID, { spawnNewTask: false });
+        snap = await awaitTaskTerminal(app, retried.taskID);
+      }
+      if (snap.state === "completed") return snap.result as unknown as WorkflowResult;
+      // The orchestrator failed (a job was interrupted) and couldn't be resumed in
+      // this invocation — report failure; re-running with the same runId resumes it.
+      return { name: plan.name, status: "failure", jobs: [] };
     } finally {
-      await worker.close();
+      await orchWorker.close();
+      await jobsWorker.close();
     }
   }
 
@@ -289,14 +254,95 @@ function jobConditionError(jobId: string, message: string): JobResult {
   };
 }
 
-async function awaitTaskTerminal(app: AbsurdEngine["app"], taskID: string) {
+async function awaitTaskTerminal(client: AbsurdEngine["app"], taskID: string) {
   for (;;) {
-    const snap = await app.fetchTaskResult(taskID);
+    const snap = await client.fetchTaskResult(taskID);
     if (snap && (snap.state === "completed" || snap.state === "failed" || snap.state === "cancelled")) {
       return snap;
     }
     await new Promise((r) => setTimeout(r, 20));
   }
+}
+
+/**
+ * The DAG walk, run inside the orchestrator task. Independent jobs run in parallel
+ * (each spawned as a job task and awaited concurrently); a job spawns the instant
+ * its own deps resolve — fine-grained, no wave barrier. Awaits are raw polling (not
+ * `ctx.step`), so the parallel awaits don't race on checkpoints; the durable state
+ * lives in the job tasks, which the orchestrator re-derives by re-walking on a
+ * re-claim. Returns the assembled WorkflowResult, but **throws** if any job task
+ * ended `failed` (an interruption — its target was torn out), so the orchestrator
+ * task itself fails and a re-spawn re-drives the run. A job that ran and exited
+ * non-zero is a `completed` task with a failure result and is reported normally.
+ */
+async function runOrchestration(args: {
+  plan: ExecutionPlan;
+  deps: JobDeps;
+  jobsApp: AbsurdEngine["jobsApp"];
+  runId: string;
+  jobTaskName: string;
+}): Promise<WorkflowResult> {
+  const { plan, deps, jobsApp, runId, jobTaskName } = args;
+  const scheduled = new Map<string, Promise<JobResult>>();
+  const schedule = (jobId: string): Promise<JobResult> => {
+    const existing = scheduled.get(jobId);
+    if (existing) return existing;
+    const job = plan.jobs[jobId]!;
+    const p = (async (): Promise<JobResult> => {
+      const depResults = await Promise.all(job.needs.map((d) => schedule(d)));
+      const depsAllSucceeded = depResults.every((d) => d.status === "success");
+      const depsSomeFailed = depResults.some((d) => d.status === "failure");
+
+      // Build the needs context from dependencies' resolved outputs + status.
+      const needs: NeedsContext = {};
+      for (const dep of depResults) needs[dep.id] = { outputs: dep.outputs ?? {}, result: dep.status };
+
+      // Gate the job. With no `if`, a job runs only if every dependency succeeded
+      // (the default). An `if:` takes over entirely — letting `always()`/`failure()`
+      // run a job after an upstream failure.
+      if (job.if !== undefined) {
+        let run: boolean;
+        try {
+          run = evaluateCondition(job.if, {
+            inputs: deps.inputs,
+            needs: toConditionBags(needs),
+            ...(deps.event ? { event: deps.event } : {}),
+            ...(job.matrix ? { matrix: job.matrix } : {}),
+            status: { success: depsAllSucceeded, failure: depsSomeFailed },
+          });
+        } catch (err) {
+          if (err instanceof ConditionError) return jobConditionError(jobId, `job if: ${err.message}`);
+          throw err;
+        }
+        if (!run) return { id: jobId, status: "skipped", steps: [] };
+      } else if (!depsAllSucceeded) {
+        return { id: jobId, status: "skipped", steps: [] };
+      }
+
+      // Idempotent on the run+job key: a job that already ran in an earlier
+      // invocation (same runId) returns the existing task instead of a fresh one,
+      // so a finished job's journaled result is reused, not recomputed.
+      const spawned = await jobsApp.spawn(jobTaskName, { jobId, needs }, { queue: JOBS_QUEUE, idempotencyKey: `${runId}:${jobId}` });
+      let snap = await awaitTaskTerminal(jobsApp, spawned.taskID);
+      // Resume: a pre-existing *failed* job task was interrupted in an earlier
+      // invocation — re-drive it (Absurd fast-forwards its completed step
+      // checkpoints). A *completed* task (success, or a step that exited non-zero)
+      // is a real outcome, reused as-is.
+      if (!spawned.created && snap.state === "failed") {
+        const retried = await jobsApp.retryTask(spawned.taskID, { spawnNewTask: false });
+        snap = await awaitTaskTerminal(jobsApp, retried.taskID);
+      }
+      if (snap.state === "completed") return snap.result as unknown as JobResult;
+      // A `failed` job task = an interruption. Propagate so the orchestrator task
+      // fails and a re-spawn re-drives the whole run.
+      throw new JobInterrupted(jobId, "failure" in snap ? snap.failure : snap);
+    })();
+    scheduled.set(jobId, p);
+    return p;
+  };
+
+  const jobs = await Promise.all(plan.jobOrder.map((id) => schedule(id)));
+  return { name: plan.name, status: jobs.some((j) => j.status === "failure") ? "failure" : "success", jobs };
 }
 
 /** Expression context shape threaded to the step runners (needs + step outputs). */
