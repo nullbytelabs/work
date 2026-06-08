@@ -15,8 +15,15 @@
  * Failure/skip: a job runs only if every `needs` dependency succeeded; otherwise
  * it's skipped. The workflow fails if any job failed.
  *
- * NOTE: cross-job orchestration lives in the runtime (JS), not a durable task,
- * so whole-workflow crash-resume isn't covered yet. See docs/phase-1.md.
+ * Resume: each job spawns with an idempotency key of `${runId}:${jobId}`, so
+ * re-invoking `run()` with the same `runId` against a persistent journal reuses a
+ * finished job's recorded result instead of recomputing it, and re-drives a job
+ * that was *interrupted* (its target torn out mid-step — surfaced as a failed
+ * task) via `retryTask`, fast-forwarding the `ctx.step` checkpoints it already
+ * completed. A job that ran and *failed cleanly* (a step exited non-zero) is a
+ * real terminal outcome and is never silently retried. The cross-job walk itself
+ * is still plain JS (not yet a durable task) and there's no user-facing `--resume`
+ * entrypoint or persistent-by-default storage — see docs/phase-1.md.
  */
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -45,6 +52,24 @@ type NeedsContext = Record<string, NeedsBag>;
 
 /** Resolved workflow inputs threaded to the runtime for `if:` evaluation. */
 type WorkflowInputs = Record<string, string | number | boolean>;
+
+/**
+ * Marks a step that was torn out *before it could produce a verdict* — the target
+ * VM died, the host process was stopped — as opposed to a step that ran and
+ * exited non-zero. The distinction is the resumability boundary: an interruption
+ * **fails the job task** so a later invocation of the same run can resume it (via
+ * `retryTask`, fast-forwarding the `ctx.step` checkpoints that did complete),
+ * whereas a clean non-zero exit stays a recorded step failure — a real, terminal
+ * outcome that resume must not silently retry.
+ */
+class JobInterrupted extends Error {
+  readonly stepName: string;
+  constructor(stepName: string, reason: unknown) {
+    super(`job interrupted at step "${stepName}": ${reason instanceof Error ? reason.message : String(reason)}`);
+    this.name = "JobInterrupted";
+    this.stepName = stepName;
+  }
+}
 
 /** Convert a needs/steps output map into condition bags (outputs + result). */
 function toConditionBags(
@@ -197,12 +222,26 @@ export class AbsurdRuntime implements Runtime {
             return { id: jobId, status: "skipped", steps: [] };
           }
 
-          const { taskID } = await app.spawn(
+          // Spawning is idempotent on the run+job key: a job that already ran in an
+          // earlier invocation of this run (same `runId`) returns the existing task
+          // instead of a fresh one (`created: false`). That's what makes resume
+          // cheap — a finished job's journaled result is reused, not recomputed.
+          const spawned = await app.spawn(
             jobTaskName,
             { jobId, needs },
             { queue: QUEUE, idempotencyKey: `${runId}:${jobId}` },
           );
-          const snap = await awaitTaskTerminal(app, taskID);
+          let snap = await awaitTaskTerminal(app, spawned.taskID);
+          // Resume: a pre-existing *failed* task is a job that was interrupted in an
+          // earlier invocation (its target was torn out). Re-drive it — Absurd
+          // fast-forwards the `ctx.step` checkpoints it already completed and re-runs
+          // only the step that didn't finish. A task that *completed* (even with a
+          // failure result — a step that ran and exited non-zero) is a real outcome
+          // and is reused as-is, never silently retried.
+          if (!spawned.created && snap.state === "failed") {
+            const retried = await app.retryTask(spawned.taskID, { spawnNewTask: false });
+            snap = await awaitTaskTerminal(app, retried.taskID);
+          }
           if (snap.state === "completed") return snap.result as unknown as JobResult;
           return {
             id: jobId,
@@ -393,14 +432,19 @@ async function runSteps(
       }
 
       ctx.hooks?.onStepStart?.(job.id, step.name);
-      // A throw from executeStep (a target that rejects, an interpolation error)
-      // must still surface as a failure result — otherwise it bypasses onStepEnd
-      // and leaves the presenter showing the step stuck "running".
+      // A throw from executeStep means the step never reached a verdict — the
+      // target/VM was torn out under it. Surface it to the presenter (so the step
+      // isn't left "running"), then raise `JobInterrupted` so the job *task* fails
+      // and a later invocation can resume from here. This is distinct from a step
+      // that runs and exits non-zero (a normal failure StepResult below).
       let result: StepResult;
       try {
         result = await executeStep(step, job, target, workdir, deps, taskCtx, exprCtx());
       } catch (err) {
-        result = { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: `step crashed: ${(err as Error).message}` };
+        const interrupted: StepResult = { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: `step interrupted: ${(err as Error).message}` };
+        ctx.hooks?.onStepEnd?.(job.id, interrupted);
+        recordStep(step, interrupted);
+        throw new JobInterrupted(step.name, err);
       }
       ctx.hooks?.onStepEnd?.(job.id, result);
       recordStep(step, result);
@@ -453,12 +497,16 @@ async function runJobInTask(
     ctx.hooks?.onJobEnd?.(job.id, jobResult);
     return jobResult;
   } catch (err) {
+    const interrupted = err instanceof JobInterrupted;
     const jobResult: JobResult = {
       id: job.id,
       status: "failure",
-      steps: [{ name: `${job.id}/error`, status: "failure", exitCode: 1, stdout: "", stderr: `job crashed: ${(err as Error).message}` }],
+      steps: [{ name: `${job.id}/error`, status: "failure", exitCode: 1, stdout: "", stderr: interrupted ? (err as JobInterrupted).message : `job crashed: ${(err as Error).message}` }],
     };
     ctx.hooks?.onJobEnd?.(job.id, jobResult);
+    // An interruption fails the *task* (re-thrown) so the run can resume it later;
+    // any other unexpected error stays an in-task terminal failure.
+    if (interrupted) throw err;
     return jobResult;
   }
 }
