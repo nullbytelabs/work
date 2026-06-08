@@ -29,7 +29,7 @@ import { UserFacingError } from "../errors.ts";
 import { RunRepository } from "../persistence/runs.ts";
 import { RunEventRepository } from "../persistence/run-events.ts";
 import { DeliveryRepository, type DeliveryResult, type DeliveryRow } from "../persistence/deliveries.ts";
-import { RunManager } from "./run-manager.ts";
+import { RunManager, type DispatchOptions, type DispatchResult } from "./run-manager.ts";
 import { renderShell } from "./client.ts";
 
 /**
@@ -216,6 +216,11 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   });
 
   const port = await listen(server, opts.port ?? DEFAULT_PORT);
+
+  // Boot reconciliation: when we own a persistent store, resume any runs a prior
+  // process left non-terminal (re-dispatched with their original run id, so the
+  // durable journal picks them back up) instead of leaving zombie `running` rows.
+  if (runStore) await reconcileInterruptedRuns({ runStore, workspace: opts.workspace, dispatch: (o) => runManager.dispatch(o) });
 
   // The valid Host header values for the bound port (loopback only).
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -791,6 +796,45 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       if (ownsEngine) await engine.close();
     },
   };
+}
+
+/**
+ * On boot, reconcile runs left non-terminal by a previous process (a crashed or
+ * hard-killed server). Each `running`/`queued` row in history is re-dispatched
+ * with its ORIGINAL run id, so the durable journal *resumes* it — finished jobs
+ * are reused, an interrupted job is re-driven — and it reaches a terminal status
+ * instead of sitting as a zombie `running` row forever. A run whose workflow no
+ * longer resolves or compiles can't be resumed, so it's honestly marked failed.
+ *
+ * Dispatching only re-enqueues the runs (each returns immediately and proceeds in
+ * the background under the run-concurrency cap); it does not await completion.
+ * (A webhook run resumes without its original `datasources` egress scope — that
+ * isn't persisted in history — so a datasource `run:` step would fail closed;
+ * tracked as a follow-up.)
+ */
+async function reconcileInterruptedRuns(deps: {
+  runStore: RunRepository;
+  workspace: string;
+  dispatch: (opts: DispatchOptions) => DispatchResult;
+}): Promise<void> {
+  const interrupted = (await deps.runStore.list()).filter((r) => r.status === "running" || r.status === "queued");
+  for (const r of interrupted) {
+    const layout = await findWorkflowByName(deps.workspace, r.name).catch(() => undefined);
+    if (!layout) {
+      await deps.runStore.setStatus(r.id, "failure", { finishedAt: Date.now(), error: "interrupted: workflow no longer resolvable" });
+      continue;
+    }
+    let plan;
+    try {
+      const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
+      plan = compile(spec, { inputs: r.inputs ?? {}, ...reusableOpts(layout) });
+    } catch (err) {
+      await deps.runStore.setStatus(r.id, "failure", { finishedAt: Date.now(), error: `interrupted: ${(err as Error).message}` });
+      continue;
+    }
+    // Same runId → the durable journal resumes rather than starting a fresh run.
+    deps.dispatch({ name: r.name, layout: layoutFields(layout), plan, runId: r.id, trigger: r.trigger });
+  }
 }
 
 /** The dispatch `layout` fields, dropping undefined ones (one spot, four call sites). */
