@@ -57,6 +57,8 @@ interface CliArgs {
   runs?: boolean;
   /** `runs --status <s>`: filter the history by status. */
   runStatus?: string;
+  /** `resume <id>` / `rerun <id>`: recover a prior run by id (workflow + inputs from history). */
+  recover?: { id: string; mode: "resume" | "rerun" };
 }
 
 /** Mutable accumulator filled by the flag handlers, resolved into CliArgs after. */
@@ -187,11 +189,25 @@ function parseArgs(argv: string[]): CliArgs {
   const common = buildCommon(s);
   if (s.positionals[0] === "runs") return resolveRuns(s, common);
   if (s.status) fail("--status only applies to `runs`");
+  if (s.positionals[0] === "resume") return resolveRecover(s, common, "resume");
+  if (s.positionals[0] === "rerun") return resolveRecover(s, common, "rerun");
   if (s.web) return resolveWeb(s, common);
   if (s.port !== undefined) fail("--port only applies to `--web`");
   if (s.positionals[0] === "graph") return resolveGraph(s, common);
   if (s.positionals[0] === "run") return resolveRun(s, common);
   return resolveFile(s, common);
+}
+
+// `resume <id>` / `rerun <id>` — recover a prior run by id (its workflow + inputs
+// come from history). `resume` continues the same run (reuses finished jobs);
+// `rerun` starts fresh with the same inputs. Both resolve to the normal run path.
+function resolveRecover(s: FlagState, common: CommonArgs, mode: "resume" | "rerun"): CliArgs {
+  const id = s.positionals[1];
+  if (!id) fail(`${mode} requires a run id, e.g. \`pi-workflows ${mode} <id>\` (see \`pi-workflows runs\`)`);
+  if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
+  if (s.resume) fail(`--resume can't be combined with the \`${mode}\` verb`);
+  if (s.format || s.steps) fail("--format / --steps only apply to `graph`");
+  return { recover: { id, mode }, ...common };
 }
 
 // `runs [--status <s>]` — list the workspace's run history (newest-first), no
@@ -259,6 +275,8 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
+      `  ${prog} [--workspace <dir>] resume <id>   # continue an interrupted run (reuse finished jobs)\n` +
+      `  ${prog} [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs\n` +
       `  ${prog} [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]\n` +
       `  ${prog} [--workspace <dir>] --web [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
@@ -365,6 +383,35 @@ async function listRuns(args: CliArgs): Promise<void> {
   process.exit(0);
 }
 
+/** Look up a past run's workflow + inputs from the shared store (for resume/rerun). */
+async function lookupRun(workspace: string, id: string): Promise<{ name: string; inputs?: Record<string, unknown> } | undefined> {
+  const dataDir = join(workspace, WORKFLOWS_DIR, "db");
+  if (!existsSync(dataDir)) return undefined;
+  const engine = await createAbsurdEngine({ dataDir });
+  try {
+    const repo = new RunRepository(engine);
+    await repo.ensureSchema();
+    const row = await repo.get(id);
+    return row ? { name: row.name, ...(row.inputs ? { inputs: row.inputs } : {}) } : undefined;
+  } finally {
+    await engine.close();
+  }
+}
+
+/** For `resume`/`rerun`: resolve the run id to its workflow + inputs and fold them
+ *  into `args` so the normal run path takes over (resume reuses the id). */
+async function applyRecover(args: CliArgs): Promise<void> {
+  if (!args.recover) return;
+  const stored = await lookupRun(args.workspace ?? process.cwd(), args.recover.id);
+  if (!stored) {
+    const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
+    fail(`no run "${args.recover.id}" found in history (see \`${prog} runs\`)`);
+  }
+  args.name = stored.name;
+  if (Object.keys(args.inputs).length === 0 && stored.inputs) args.inputs = stored.inputs;
+  if (args.recover.mode === "resume") args.resume = args.recover.id;
+}
+
 async function main(): Promise<void> {
   // Dispatch first, then per-command parse. `doctor` has a disjoint flag set
   // (`--json`) from run/graph, so it owns its own parsing; everything else flows
@@ -395,6 +442,11 @@ async function main(): Promise<void> {
     await runWebServer(args);
     return; // keep the event loop alive on the listening server
   }
+
+  // `resume <id>` / `rerun <id>` — fill the workflow + inputs from history, then
+  // fall through to the normal run path. `resume` reuses the run id (continues the
+  // run); `rerun` leaves it unset (a fresh run with the same inputs).
+  await applyRecover(args);
 
   // Resolve where the workflow lives and what its checkout is. By name:
   // `<workspace>/.workflows/*.yaml` whose `name:` matches (workspace defaults to
