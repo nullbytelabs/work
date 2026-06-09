@@ -14,7 +14,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
-import type { ExecutionPlan } from "./compiler/index.ts";
+import { parseRunsOn, type ExecutionPlan } from "./compiler/index.ts";
+import { resolveImageConfig, ensureImageTag } from "./images/index.ts";
 import type { TargetFactory } from "./targets/index.ts";
 import { createWorkHandler, makeAgentEgressResolver } from "./agent/index.ts";
 import { createActionUsesHandler, type SubUsesDispatch } from "./actions/index.ts";
@@ -148,6 +149,16 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
       makeAgentEgressResolver(opts.config),
       makeDatasourceEgressResolver(opts.config, opts.datasources ? { datasources: opts.datasources } : {}),
     ),
+    // Resolve a job's guest image: a `work:<image>` resolves to a build-config
+    // (user images override bundled) and is built on first use, returning the
+    // selector to boot; stock `gondolin` resolves to undefined. Tests inject a
+    // `makeTarget` double that ignores this, so they never build.
+    resolveImagePath: async (runsOn) => {
+      const spec = parseRunsOn(runsOn);
+      if (spec.namespace !== "work" || spec.variant === undefined) return undefined;
+      const configPath = resolveImageConfig(spec.variant, opts.workspaceSource);
+      return ensureImageTag(spec.variant, configPath, (text) => process.stderr.write(text));
+    },
     ...(opts.makeTarget ? { makeTarget: opts.makeTarget } : {}),
   });
 

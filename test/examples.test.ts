@@ -27,6 +27,19 @@ const EXAMPLE_INPUTS: Record<string, Record<string, unknown>> = {
 const NETWORK_EXAMPLES = new Set(["checkout", "install-node"]);
 const RUN_NETWORK = process.env["WORK_TEST_NETWORK"] === "1";
 
+// Examples that build a custom `work:<image>` (a real `gondolin build` — slow, and
+// fetches apk packages), skipped by default like the network examples. Run with
+// WORK_TEST_IMAGES=1.
+const IMAGE_EXAMPLES = new Set(["work-base-image"]);
+const RUN_IMAGES = process.env["WORK_TEST_IMAGES"] === "1";
+
+/** Skip reason for an example that needs an opt-in (network / image build), else false. */
+function exampleSkip(name: string): string | false {
+  if (NETWORK_EXAMPLES.has(name) && !RUN_NETWORK) return "external network (set WORK_TEST_NETWORK=1)";
+  if (IMAGE_EXAMPLES.has(name) && !RUN_IMAGES) return "builds a custom image (set WORK_TEST_IMAGES=1)";
+  return false;
+}
+
 /** Every workflow file an example folder contributes: a root `workflow.yaml`, or
  *  every `.workflows/*.yaml` (a project may ship several pipelines, e.g. ci + review). */
 function workflowFiles(name: string): string[] {
@@ -101,7 +114,7 @@ async function runExample(file: string, name: string) {
 // `test:unit` target). The full `npm test` boots VMs wherever QEMU is installed.
 describe("examples — every workflow runs to success", { skip: vmTestSkip() }, () => {
   for (const ex of examples) {
-    it(`runs ${ex.label}`, { skip: NETWORK_EXAMPLES.has(ex.name) && !RUN_NETWORK ? "external network (set WORK_TEST_NETWORK=1)" : false }, async () => {
+    it(`runs ${ex.label}`, { skip: exampleSkip(ex.name) }, async () => {
       const result = await runExample(ex.file, ex.name);
       assert.equal(result.status, "success", `${ex.label} should succeed`);
     });

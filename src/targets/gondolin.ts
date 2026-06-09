@@ -56,6 +56,13 @@ export interface GondolinTargetConfig {
   allowedHosts?: string[];
   /** Secrets injected into outbound HTTP headers only; never visible in-guest. */
   secrets?: Record<string, { hosts: string[]; value: string }>;
+  /**
+   * Resolve the guest image to boot, lazily, at provision time — returns an image
+   * selector (a `name:tag` like `work:base`) for a custom `work:<image>`, or
+   * `undefined` for the stock guest. Building a custom image happens here (first
+   * use), so it's awaited inside `provision()`, not at construction.
+   */
+  resolveImagePath?: () => Promise<string | undefined>;
 }
 
 /**
@@ -111,6 +118,11 @@ export class GondolinTarget implements ExecutionTarget {
       cpus: machine.cpus,
       vfs: { mounts: { [GUEST_WORKSPACE]: new RealFSProvider(this.cfg.workdir) } },
     };
+
+    // A custom `work:<image>` resolves (and, on first use, builds) here, then boots
+    // by selector. Stock `gondolin` leaves it unset → the upstream guest image.
+    const imagePath = await this.cfg.resolveImagePath?.();
+    if (imagePath) createOpts["sandbox"] = { imagePath };
 
     // Only mediate network when something is configured; otherwise the default
     // deny-by-default posture applies (fine for steps that need no network).

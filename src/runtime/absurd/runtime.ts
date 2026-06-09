@@ -114,6 +114,13 @@ export interface AbsurdRuntimeOptions {
    */
   resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
   /**
+   * Resolve a job's guest image from its `runs-on` — an image selector for a
+   * `work:<image>` (built on first use), or `undefined` for the stock guest. The
+   * composition root supplies it (it knows the workspace + builder); the core just
+   * forwards a job-bound thunk to the target. Stays agent/image-agnostic.
+   */
+  resolveImagePath?: (runsOn: string) => Promise<string | undefined>;
+  /**
    * Override how a job's `runs-on` becomes an ExecutionTarget. Defaults to the
    * production factory (gondolin micro-VM only). Tests inject a lightweight
    * host-process double so they exercise the runtime↔target contract without
@@ -136,6 +143,8 @@ interface JobDeps {
   event?: Record<string, unknown>;
   /** Optional per-job sandbox network policy (allowlist + secrets). */
   resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
+  /** Optional resolver for a job's guest image (a `work:<image>` selector). */
+  resolveImagePath?: (runsOn: string) => Promise<string | undefined>;
   /** Builds the ExecutionTarget for a job's `runs-on`. */
   makeTarget: TargetFactory;
 }
@@ -148,6 +157,7 @@ export class AbsurdRuntime implements Runtime {
   private readonly maxConcurrency: number | undefined;
   private readonly usesHandlers: UsesHandler[];
   private readonly resolveJobNetwork: ((job: PlannedJob) => JobNetwork | undefined) | undefined;
+  private readonly resolveImagePath: ((runsOn: string) => Promise<string | undefined>) | undefined;
   private readonly makeTarget: TargetFactory;
 
   constructor(opts: AbsurdRuntimeOptions = {}) {
@@ -157,6 +167,7 @@ export class AbsurdRuntime implements Runtime {
     this.maxConcurrency = opts.maxConcurrency;
     this.usesHandlers = opts.usesHandlers ?? [];
     this.resolveJobNetwork = opts.resolveJobNetwork;
+    this.resolveImagePath = opts.resolveImagePath;
     this.makeTarget = opts.makeTarget ?? defaultMakeTarget;
   }
 
@@ -175,6 +186,7 @@ export class AbsurdRuntime implements Runtime {
       makeTarget: this.makeTarget,
       ...(plan.event ? { event: plan.event } : {}),
       ...(this.resolveJobNetwork ? { resolveJobNetwork: this.resolveJobNetwork } : {}),
+      ...(this.resolveImagePath ? { resolveImagePath: this.resolveImagePath } : {}),
     };
 
     const jobTaskName = `job:${plan.name}:${runId}`;
@@ -380,7 +392,17 @@ async function provisionTarget(
     // the model API). The composition root supplies this per job; the core stays
     // agent-agnostic — it just forwards the allowlist/secrets to the target.
     const network = deps.resolveJobNetwork?.(job);
-    const target = deps.makeTarget(job.runsOn, { workdir, machine: job.machine, ...(network ?? {}) });
+    // Bind the image resolver to this job's `runs-on` — the target awaits it at
+    // provision time (a `work:<image>` builds on first use; stock → undefined).
+    const resolveImagePath = deps.resolveImagePath
+      ? () => deps.resolveImagePath!(job.runsOn)
+      : undefined;
+    const target = deps.makeTarget(job.runsOn, {
+      workdir,
+      machine: job.machine,
+      ...(network ?? {}),
+      ...(resolveImagePath ? { resolveImagePath } : {}),
+    });
     await target.provision();
     return { target };
   } catch (err) {

@@ -6,7 +6,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { qemuBinaryFor } from "../src/doctor/checks.ts";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunContext, type WorkflowResult } from "../src/runtime/index.ts";
-import type { ExecutionPlan } from "../src/compiler/index.ts";
+import { parseRunsOn, type ExecutionPlan } from "../src/compiler/index.ts";
+import { resolveImageConfig, ensureImageTag } from "../src/images/index.ts";
 import type { ExecutionTarget, RunOptions, RunResult, TargetFactory } from "../src/targets/index.ts";
 import { createWorkHandler, makeAgentEgressResolver, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
 import { createActionUsesHandler, type SubUsesDispatch } from "../src/actions/index.ts";
@@ -144,6 +145,14 @@ export function useSharedRuntime(opts: { realTargets?: boolean; makeTarget?: Tar
         // is injected — but built-in network actions (work/checkout, work/install-node)
         // get the network they need.
         resolveJobNetwork: makeAgentEgressResolver(),
+        // Mirror production image resolution so a `runs-on: work:<image>` example
+        // boots the real custom image (only reached with real targets; the host
+        // double ignores it).
+        resolveImagePath: async (runsOn) => {
+          const spec = parseRunsOn(runsOn);
+          if (spec.namespace !== "work" || spec.variant === undefined) return undefined;
+          return ensureImageTag(spec.variant, resolveImageConfig(spec.variant, ctx.workspaceSource));
+        },
         ...(opts.makeTarget ? { makeTarget: opts.makeTarget } : opts.realTargets ? {} : { makeTarget: hostTargetFactory }),
       }).run(plan, ctx);
     },

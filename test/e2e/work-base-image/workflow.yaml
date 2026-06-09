@@ -1,0 +1,14 @@
+# The work:base custom image — booted via `runs-on: work:base`. It builds the
+# bundled image on first use (gondolin build) and adds git/jq over the stock guest,
+# so this asserts a tool the stock guest lacks (git). Gated behind WORK_TEST_IMAGES=1
+# in the suite (a real image build is slow + needs network), like the network examples.
+name: work-base-image
+jobs:
+  tools:
+    runs-on: work:base
+    steps:
+      - name: git and jq are present
+        run: |
+          git --version
+          jq --version
+          echo "work:base ok"

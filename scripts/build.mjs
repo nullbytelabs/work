@@ -39,4 +39,9 @@ await copyFile(resolve(root, "src/agent/guest-runner-script.mjs"), resolve(dist,
 // after bundling — so copy the whole tree flat next to cli.js.
 await cp(resolve(root, "src/actions/builtin"), resolve(dist, "builtin"), { recursive: true });
 
-console.log("built dist/cli.js (+ schema.sql, guest-runner-script.mjs, builtin/)");
+// Bundled image build-configs (work:base) are loaded via
+// `new URL("./image-builtin", import.meta.url)` — a distinct name from the
+// actions' `builtin/` so the two don't collide under `dist/`.
+await cp(resolve(root, "src/images/image-builtin"), resolve(dist, "image-builtin"), { recursive: true });
+
+console.log("built dist/cli.js (+ schema.sql, guest-runner-script.mjs, builtin/, image-builtin/)");

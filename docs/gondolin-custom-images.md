@@ -16,9 +16,23 @@ Gondolin's:
 > `--config`/`--output`/`--arch`. Official docs:
 > https://earendil-works.github.io/gondolin/custom-images/
 
-> **Status:** design — **not implemented**. §3 lists the exact engine integration
-> points; the two compiler/factory call-sites that today reject a `work:<variant>`
-> value are flagged.
+> **Status:** **implemented** for `work:base` — `runs-on: work:base` builds the
+> bundled image on first use and boots it (git/jq over the stock guest), proven by
+> a real run + the gated `test/e2e/work-base-image/` example (`WORK_TEST_IMAGES=1`).
+> Done: the `work:*` grammar (`src/compiler/runs-on.ts`), the `src/images/`
+> subsystem (registry + tag build), the target/runtime/run.ts wiring, and packaging
+> (`dist/image-builtin/`). **Not yet:** the `work image build|ls` CLI (build is lazy
+> on first use, so it's optional), and flipping `DEFAULT_RUNS_ON`.
+>
+> **Key change vs. the original design:** gondolin 0.12.0 added a **tagged local
+> image store**. We `gondolin build --config <cfg> --tag work:<variant>` (no
+> `--output` dir to manage) and boot via the image **selector** `imagePath:
+> "work:<variant>"`. So `ensureImageTag` just builds-if-absent (checked via
+> `gondolin image ls`) and returns the selector — no per-arch output-dir caching of
+> our own. Build-configs ship **arch-agnostic** (no `arch` field); the engine
+> injects the host arch before `gondolin build` (gondolin requires it). The bundled
+> dir is `src/images/image-builtin/` (a name distinct from the actions' `builtin/`,
+> since esbuild bundles both `new URL("./…", import.meta.url)` under `dist/`).
 
 ---
 

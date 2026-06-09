@@ -21,6 +21,7 @@ export class WorkflowCompileError extends Error {
 // Imported after the error class so the (function-level) circular references
 // with inputs.ts / expr.ts are resolved by the time these are called.
 import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
+import { parseRunsOn } from "./runs-on.ts";
 import { interpolate } from "./expr.ts";
 import { expandMatrix, cellId, cellLabel, type MatrixCell } from "./matrix.ts";
 import { resolveMachine } from "./machines.ts";
@@ -56,23 +57,21 @@ export interface CompileOptions {
 export const DEFAULT_RUNS_ON = "gondolin";
 
 /**
- * Validate a job's `runs-on`. `gondolin` is the only supported target — every
- * job runs in the sandbox. `runs-on: local` (host execution) has been removed
- * outright: allowing it would let a workflow run a step on the host, defeating
- * the isolation the engine exists to provide, so it's a hard error rather than a
- * silent footgun. Any other value is rejected too. Throws on an invalid value.
+ * Validate a job's `runs-on` (shape only). The supported targets are the stock
+ * `gondolin` guest and a `work:<image>` custom image — every job runs in the
+ * sandbox either way. `runs-on: local` (host execution) was removed outright:
+ * allowing it would let a step run on the host, defeating the isolation the engine
+ * exists to provide. Whether a `work:<image>` actually resolves/builds is a
+ * runtime concern; here we only check the value is well-formed. Throws on an
+ * invalid value.
  */
 function validateRunsOn(jobId: string, runsOn: string | undefined): void {
-  if (runsOn === undefined || runsOn === DEFAULT_RUNS_ON) return;
-  if (runsOn === "local") {
-    throw new WorkflowCompileError(
-      `job "${jobId}": "runs-on: local" has been removed — every job runs in the gondolin sandbox. ` +
-        `Drop the line (gondolin is the default) or set "runs-on: gondolin".`,
-    );
+  if (runsOn === undefined) return;
+  try {
+    parseRunsOn(runsOn);
+  } catch (err) {
+    throw new WorkflowCompileError(`job "${jobId}": ${(err as Error).message}`);
   }
-  throw new WorkflowCompileError(
-    `job "${jobId}": unknown runs-on "${runsOn}" (the only supported target is "gondolin").`,
-  );
 }
 
 /**

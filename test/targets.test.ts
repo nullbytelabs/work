@@ -72,8 +72,13 @@ describe("makeTarget factory", () => {
     assert.equal(t.kind, "gondolin");
   });
 
+  it("returns a GondolinTarget for a work:<image> (without loading the SDK)", () => {
+    const t = makeTarget("work:base", { workdir: "/tmp/x" });
+    assert.equal(t.kind, "gondolin");
+  });
+
   it("rejects runs-on local (the host target was removed — no foot-gun)", () => {
-    assert.throws(() => makeTarget("local", { workdir: "/tmp/x" }), /only supported target is "gondolin"/);
+    assert.throws(() => makeTarget("local", { workdir: "/tmp/x" }), /has been removed/);
   });
 
   it("rejects an unknown runs-on", () => {

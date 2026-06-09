@@ -13,7 +13,7 @@
  * Construction is cheap and side-effect-free — GondolinTarget does not import or
  * boot anything until `provision()` is called.
  */
-import type { ResolvedMachine } from "../compiler/index.ts";
+import { parseRunsOn, type ResolvedMachine } from "../compiler/index.ts";
 import type { ExecutionTarget } from "./types.ts";
 import { GondolinTarget } from "./gondolin.ts";
 
@@ -28,6 +28,12 @@ export interface TargetContext {
   allowedHosts?: string[];
   /** Secrets injected into outbound headers host-side only; never seen in-guest. */
   secrets?: Record<string, { hosts: string[]; value: string }>;
+  /**
+   * Resolve the guest image for this job lazily (a `work:<image>` selector, or
+   * `undefined` for the stock guest). The runtime binds this to the job's
+   * `runs-on`; the target awaits it at provision time. Building happens here.
+   */
+  resolveImagePath?: () => Promise<string | undefined>;
 }
 
 /** Builds the ExecutionTarget for a job's `runs-on`. The runtime accepts an
@@ -35,16 +41,17 @@ export interface TargetContext {
 export type TargetFactory = (runsOn: string, ctx: TargetContext) => ExecutionTarget;
 
 export const makeTarget: TargetFactory = (runsOn, ctx) => {
-  switch (runsOn) {
-    case "gondolin":
-      return new GondolinTarget({
-        workdir: ctx.workdir,
-        ...(ctx.machine ? { machine: ctx.machine } : {}),
-        ...(ctx.env ? { env: ctx.env } : {}),
-        ...(ctx.allowedHosts ? { allowedHosts: ctx.allowedHosts } : {}),
-        ...(ctx.secrets ? { secrets: ctx.secrets } : {}),
-      });
-    default:
-      throw new Error(`unknown runs-on: "${runsOn}" (the only supported target is "gondolin")`);
-  }
+  // `gondolin` (stock) and `work:<image>` (custom) both run on the gondolin
+  // micro-VM — they differ only in the guest image, which the runtime resolves and
+  // passes via `resolveImagePath`. `parseRunsOn` rejects anything else (already
+  // validated at compile time; this is defense in depth).
+  parseRunsOn(runsOn);
+  return new GondolinTarget({
+    workdir: ctx.workdir,
+    ...(ctx.machine ? { machine: ctx.machine } : {}),
+    ...(ctx.env ? { env: ctx.env } : {}),
+    ...(ctx.allowedHosts ? { allowedHosts: ctx.allowedHosts } : {}),
+    ...(ctx.secrets ? { secrets: ctx.secrets } : {}),
+    ...(ctx.resolveImagePath ? { resolveImagePath: ctx.resolveImagePath } : {}),
+  });
 };
