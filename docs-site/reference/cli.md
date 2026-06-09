@@ -16,7 +16,14 @@ work create <name> [--template hello-world|agent-action] [--force] [--dry-run]
 work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--quiet]
 
 # run a project pipeline by name (resolves .workflows/*.yaml whose `name:` matches)
-work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--quiet]
+work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--resume <id>] [--quiet]
+
+# list run history (filter by status)
+work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
+
+# continue an interrupted run, or re-run a past one fresh (by id, from `work runs`)
+work [--workspace <dir>] resume <id>
+work [--workspace <dir>] rerun <id>
 
 # print the job DAG instead of running it
 work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
@@ -114,6 +121,48 @@ sets the project root (default: current directory).
 work --workspace my-project run report
 ```
 
+A project run is **durable**: it's recorded in run history and journaled as it
+goes, so a run that's interrupted — stopped mid-flight before it finishes — can be
+**resumed** rather than lost. (A standalone `work <file>` run, outside a
+`.workflows/` project, is ephemeral.) Pass `--resume <id>` to continue a prior run
+instead of starting a new one — `work resume <id>` below is the shorthand.
+
+### `work runs`
+
+```bash
+work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
+```
+
+Lists the workspace's run history, newest first — the durable record of every
+project run. The CLI and the web console write the **same** store, so this lists
+runs from either. `--status` filters; for example, the runs that didn't finish:
+
+```bash
+work runs
+work runs --status interrupted
+```
+
+Each row shows the run id, workflow, status, and when it started. A run shown as
+**interrupted** is resumable, and the listing prints the exact `resume` command.
+
+### `work resume` / `work rerun`
+
+```bash
+work [--workspace <dir>] resume <id>   # continue an interrupted run
+work [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs
+```
+
+Both recover a past run **by id** (copy it from `work runs`) — the workflow and
+inputs come from history, so you don't retype them:
+
+- **`resume`** continues the *same* run: jobs that already finished are reused,
+  not re-executed, and the run picks up from where it stopped. This is how an
+  interrupted run is driven to completion. Equivalent to `work run <name> --resume <id>`.
+- **`rerun`** starts a *fresh* run with the same inputs (a new run id), re-executing
+  everything — handy for a flaky job or re-triggering a report.
+
+`--inputs` overrides the stored inputs for either.
+
 ### `work graph`
 
 ```bash
@@ -198,10 +247,12 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 | `--workspace <dir>` | `run`, `graph`, `--web` | Project root for resolving a workflow by name / serving the web console (default: current directory). |
 | `--web` | (standalone) | Open the local web console over the workspace's `.workflows/` instead of running a workflow. |
 | `--port <n>` | `--web` | Port the web console binds (default `4280`; `1`–`65535`). |
-| `--inputs '<json>'` | run | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. |
+| `--inputs '<json>'` | run, `resume`, `rerun` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`, overrides the inputs stored in history. |
 | `--config <file>` | run | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
 | `--no-global` | run | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
 | `--workdir <dir>` | run | Where job workspaces are staged (default: a temp dir). |
+| `--resume <id>` | run | Continue an interrupted run instead of starting a new one (same run id; finished jobs are reused). Project workflows only. |
+| `--status <s>` | `runs` | Filter the run history by status (`queued`, `running`, `success`, `failure`, `interrupted`). |
 | `--quiet` | run | Suppress the live board / per-job output. |
 | `--format <fmt>` | `graph` | DAG output format: `mermaid`, `dot`, `json`, `ascii`. |
 | `--steps` | `graph` | Expand each job into its ordered steps. |
@@ -216,8 +267,9 @@ When running a workflow, the presenter adapts to the environment:
 - **A pipe or non-interactive runner** — buffered per-job output blocks.
 - **`--quiet`** — no board or per-job output.
 
-A run exits **`0`** on success and **non-zero** if any job fails — so it drops into
-a script or scheduler cleanly.
+A run exits **`0`** on success and **non-zero** if a job fails or the run is
+interrupted — so it drops into a script or scheduler cleanly. An interrupted
+project run prints the `--resume` command to continue it.
 
 ## Configuration discovery
 

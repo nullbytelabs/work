@@ -48,6 +48,10 @@ Every run is recorded durably (see [Where data lives](#where-data-lives)), so th
 full output again, or hit **Re-run** to launch a fresh run with the same workflow
 and inputs — handy for retrying a flaky job or re-triggering a report.
 
+If the server is stopped while a run is still in flight, that run isn't lost: when
+the server next starts it **resumes** the run automatically, picking up from where
+it left off — finished jobs are reused rather than redone.
+
 ## Webhook triggers
 
 The web server doubles as a **webhook receiver**: an external system can `POST` to

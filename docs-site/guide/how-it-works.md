@@ -13,7 +13,9 @@ A workflow compiles to a graph of **durable tasks**:
 Those checkpoints are journaled to an **in-process Postgres**
 ([PGLite](https://www.npmjs.com/package/@electric-sql/pglite)) — no external
 database, no services to run. Because every step is recorded, the engine always
-knows exactly what already executed.
+knows exactly what already executed — so a run that's interrupted mid-flight can
+be **resumed** from where it stopped, reusing finished work instead of redoing it
+(see [`work resume`](../reference/cli#work-resume-work-rerun)).
 
 ```
 workflow.yaml
