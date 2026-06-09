@@ -1,0 +1,83 @@
+# Custom images
+
+Every job runs in a Gondolin micro-VM. **`runs-on`** picks which guest image boots
+inside it — the stock guest, the bundled `work:base`, or a custom image you define.
+Reach for a richer image when your jobs need tools the stock guest doesn't ship.
+
+## Stock guest vs `work:base`
+
+- **`gondolin`** — the stock guest, and the default when you omit `runs-on`. It
+  ships `sh`/`bash`, `node`/`npm`, `python3`, `curl`, and `ca-certificates`, and
+  boots immediately (nothing to build) — so it's the right choice when those tools
+  are enough.
+- **`work:base`** — a bundled image that adds **git** and **jq** on top of the
+  stock guest. Reach for it when a step needs git (a checkout) or jq.
+
+```yaml
+jobs:
+  build:
+    runs-on: work:base
+    steps:
+      - run: git --version && npm test
+```
+
+## Defining your own image
+
+When you need more — a compiler, a CLI, a system library — define your own image:
+drop a Gondolin **build-config** at `.workflows/images/<name>/build-config.json`,
+then reference it as `runs-on: work:<name>`.
+
+```
+my-project/
+  .workflows/
+    images/
+      tools/
+        build-config.json     # → runs-on: work:tools
+```
+
+A build-config is Gondolin's own format. List the Alpine packages your jobs need
+under `rootfsPackages`; leave `arch` out so the engine builds for the host
+architecture:
+
+```json
+// .workflows/images/tools/build-config.json
+{
+  "distro": "alpine",
+  "alpine": {
+    "version": "3.23.0",
+    "kernelPackage": "linux-virt",
+    "kernelImage": "vmlinuz-virt",
+    "rootfsPackages": ["linux-virt", "rng-tools", "bash", "ca-certificates", "e2fsprogs", "git", "ripgrep", "go"],
+    "krunfwVersion": "v5.2.1"
+  },
+  "rootfs": { "label": "gondolin-root" }
+}
+```
+
+```yaml
+jobs:
+  build:
+    runs-on: work:tools
+    steps:
+      - run: rg --version && go version
+```
+
+A user image under `.workflows/images/<name>/` **overrides** a bundled one of the
+same name, so you can extend or replace `work:base` for your project. See Gondolin's
+[custom-images documentation](https://earendil-works.github.io/gondolin/custom-images/)
+for the full build-config field list.
+
+## Built on first use
+
+A `work:<image>` is **built the first time a job uses it** on a given machine, then
+reused — Gondolin builds the image and keeps it in its local image store. So:
+
+- The first run that needs the image takes a few minutes and needs **network** to
+  fetch its packages.
+- Every run after that boots the already-built image instantly.
+- Building is per-machine and per-architecture — CI builds its own copy on first use.
+
+::: tip Image and size are independent
+`runs-on` chooses the *image*; [`machine`](./writing-workflows#machine-sizing-the-vm)
+chooses the VM's CPU and memory. Any image runs on any machine size.
+:::

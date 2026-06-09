@@ -68,6 +68,7 @@ export default defineConfig({
             { text: "Writing a workflow", link: "/guide/writing-workflows" },
             { text: "Reusable workflows", link: "/guide/reusable-workflows" },
             { text: "Project layout", link: "/guide/project-layout" },
+            { text: "Custom images", link: "/guide/custom-images" },
             { text: "Agent steps (AI)", link: "/guide/agent-steps" },
             { text: "Actions", link: "/guide/actions" },
             { text: "Composite actions", link: "/guide/composite-actions" },

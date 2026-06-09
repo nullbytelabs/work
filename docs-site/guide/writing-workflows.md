@@ -77,54 +77,17 @@ jobs:
       - run: git --version && npm test
 ```
 
-A `work:<image>` is **built on first use** on each machine, then reused — so the
-first run that needs it takes a few minutes and needs network to fetch packages;
-later runs boot the already-built image instantly. (`gondolin` boots immediately,
-so prefer it for jobs that don't need the extra tools.)
+`work:base` (and any custom image) is **built on first use** on each machine, then
+reused — so the first run that needs it takes a few minutes; later runs boot
+instantly. `gondolin` boots immediately, so prefer it for jobs that don't need the
+extra tools. You can also define your own images with whatever toolchain your jobs
+need — see [Custom images](./custom-images).
 
 ::: info Per-job only
 `runs-on` belongs on an individual job, not at the workflow level. The engine
 warns if you omit it (and applies the default `gondolin`); it errors if you put it
 at the top level or directly under `jobs:`.
 :::
-
-### Custom images
-
-Beyond `work:base`, you can define your own image: drop a Gondolin build-config at
-`.workflows/images/<name>/build-config.json` and reference it as `runs-on:
-work:<name>`. The engine builds it the first time a job uses it, then boots it by
-name (a user image overrides a bundled one of the same name).
-
-A build-config is Gondolin's own format — list the Alpine packages your jobs need
-under `rootfsPackages`. Leave `arch` out: the engine builds for the host
-architecture.
-
-```json
-// .workflows/images/tools/build-config.json
-{
-  "distro": "alpine",
-  "alpine": {
-    "version": "3.23.0",
-    "kernelPackage": "linux-virt",
-    "kernelImage": "vmlinuz-virt",
-    "rootfsPackages": ["linux-virt", "rng-tools", "bash", "ca-certificates", "e2fsprogs", "git", "ripgrep", "go"],
-    "krunfwVersion": "v5.2.1"
-  },
-  "rootfs": { "label": "gondolin-root" }
-}
-```
-
-```yaml
-jobs:
-  build:
-    runs-on: work:tools
-    steps:
-      - run: rg --version && go version
-```
-
-See Gondolin's
-[custom-images documentation](https://earendil-works.github.io/gondolin/custom-images/)
-for the full build-config field list.
 
 ## `machine` — sizing the VM
 
