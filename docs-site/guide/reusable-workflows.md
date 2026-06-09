@@ -33,7 +33,7 @@ jobs:
 
   report:
     needs: [build]
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - run: echo "shipping version=${{ needs.build.outputs.version }}"
 ```
@@ -44,7 +44,7 @@ name: lint
 on: workflow_call                  # opt in to being called
 jobs:
   check:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - run: echo "lint: 0 problems"
 ```
@@ -58,7 +58,7 @@ on:
       version: ${{ jobs.compile.outputs.version }}   # the surface exposed to a caller
 jobs:
   compile:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - id: meta
         run: echo "version=1.0.0" >> "$WORK_OUTPUT"

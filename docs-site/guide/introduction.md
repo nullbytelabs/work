@@ -15,12 +15,12 @@ isolation, durability, and an agent strapped to any step that needs judgment.
 name: report
 jobs:
   collect:
-    runs-on: gondolin          # each job runs in its own micro-VM
+    runs-on: work:base         # a custom image with git + jq, in its own micro-VM
     steps:
       - run: node scripts/aggregate.js > data.json
   summarize:
     needs: [collect]
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - uses: work/agent       # an AI agent reads data.json and writes the summary
         with:

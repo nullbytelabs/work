@@ -66,7 +66,7 @@ appendFileSync(process.env.WORK_OUTPUT, `greeting=hello, ${name}\n`);
 ```yaml
 jobs:
   greet:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - id: g
         uses: action/greet

@@ -60,7 +60,7 @@ the prompt itself), and its **final message** becomes the step output `output`:
 ```yaml
 jobs:
   review:
-    runs-on: gondolin
+    runs-on: work:base
     outputs:
       review: ${{ steps.a.outputs.output }}
     steps:

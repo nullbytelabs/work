@@ -52,7 +52,7 @@ hermetic and independent.
 name: verify
 jobs:
   verify:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - run: npm install --no-audit --no-fund
       - run: npx tsc --noEmit main.ts

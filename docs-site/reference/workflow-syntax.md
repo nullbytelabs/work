@@ -66,7 +66,7 @@ webhook-triggered run reads the request body via the [`event` context](#expressi
 ```yaml
 jobs:
   build:
-    runs-on: gondolin
+    runs-on: work:base
     machine: large
     needs: []
     if: ${{ inputs.run_build }}
@@ -78,7 +78,7 @@ jobs:
 
 | Key | Type | Notes |
 |---|---|---|
-| `runs-on` | string | Where the job runs. Only `gondolin` is supported, and it's the default. Per-job only — not valid at the workflow level. `runsOn` is also accepted. |
+| `runs-on` | string | The guest image the job's micro-VM boots: `gondolin` (the stock guest, and the default) or a custom `work:<image>` such as `work:base` (built on first use). Per-job only — not valid at the workflow level. `runsOn` is also accepted. See [`runs-on`](../guide/writing-workflows#runs-on). |
 | `machine` | string \| map | Micro-VM sizing. A named type from the catalog, or an inline `{ cpus, memory }`. See [Machine types](#machine-types). Defaults to `medium`. |
 | `needs` | string \| string[] | Job ids that must succeed first. Independent jobs run in parallel. |
 | `if` / `when` | string | Conditional guard; a false result skips the job. Use one, not both. See [Conditionals](#conditionals). |

@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: gondolin            # where the job runs (default: gondolin)
+    runs-on: work:base            # where the job runs (default: gondolin)
     machine: large               # how big the VM is (default: medium)
     steps:
       - name: install
@@ -26,7 +26,7 @@ jobs:
 
   report:
     needs: [build]               # runs after build succeeds
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - name: show
         env:
@@ -49,7 +49,7 @@ A step takes a `run` **or** a `uses`, never both.
 ```yaml
 jobs:
   build:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - name: install        # optional human-readable label
         run: npm install
@@ -61,23 +61,70 @@ job-level `uses:` — see [Reusable workflows](./reusable-workflows).
 
 ## `runs-on`
 
-`runs-on` selects where a job executes. Today there's exactly one target —
-`gondolin`, a micro-VM — which is also the default. State it explicitly per job
-for clarity:
+Every job runs in a Gondolin micro-VM; `runs-on` selects which **guest image**
+boots inside it:
+
+- **`gondolin`** — the stock guest, and the default if you omit `runs-on`. It ships
+  `sh`/`bash`, `node`/`npm`, `python3`, `curl`, and `ca-certificates`.
+- **`work:base`** — a more capable base that adds **git** and **jq** on top of the
+  stock guest. Reach for it when a step needs git (a checkout) or jq.
 
 ```yaml
 jobs:
   build:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
-      - run: npm test
+      - run: git --version && npm test
 ```
+
+A `work:<image>` is **built on first use** on each machine, then reused — so the
+first run that needs it takes a few minutes and needs network to fetch packages;
+later runs boot the already-built image instantly. (`gondolin` boots immediately,
+so prefer it for jobs that don't need the extra tools.)
 
 ::: info Per-job only
 `runs-on` belongs on an individual job, not at the workflow level. The engine
-warns if you omit it (and applies `gondolin`); it errors if you put it at the
-top level or directly under `jobs:`.
+warns if you omit it (and applies the default `gondolin`); it errors if you put it
+at the top level or directly under `jobs:`.
 :::
+
+### Custom images
+
+Beyond `work:base`, you can define your own image: drop a Gondolin build-config at
+`.workflows/images/<name>/build-config.json` and reference it as `runs-on:
+work:<name>`. The engine builds it the first time a job uses it, then boots it by
+name (a user image overrides a bundled one of the same name).
+
+A build-config is Gondolin's own format — list the Alpine packages your jobs need
+under `rootfsPackages`. Leave `arch` out: the engine builds for the host
+architecture.
+
+```json
+// .workflows/images/tools/build-config.json
+{
+  "distro": "alpine",
+  "alpine": {
+    "version": "3.23.0",
+    "kernelPackage": "linux-virt",
+    "kernelImage": "vmlinuz-virt",
+    "rootfsPackages": ["linux-virt", "rng-tools", "bash", "ca-certificates", "e2fsprogs", "git", "ripgrep", "go"],
+    "krunfwVersion": "v5.2.1"
+  },
+  "rootfs": { "label": "gondolin-root" }
+}
+```
+
+```yaml
+jobs:
+  build:
+    runs-on: work:tools
+    steps:
+      - run: rg --version && go version
+```
+
+See Gondolin's
+[custom-images documentation](https://earendil-works.github.io/gondolin/custom-images/)
+for the full build-config field list.
 
 ## `machine` — sizing the VM
 
@@ -115,14 +162,14 @@ needs to succeed; independent jobs run **in parallel**.
 ```yaml
 jobs:
   lint:
-    runs-on: gondolin
+    runs-on: work:base
     steps: [{ run: npm run lint }]
   test:
-    runs-on: gondolin
+    runs-on: work:base
     steps: [{ run: npm test }]
   ship:
     needs: [lint, test]    # waits for both; lint and test run concurrently
-    runs-on: gondolin
+    runs-on: work:base
     steps: [{ run: echo "shipping" }]
 ```
 
@@ -138,7 +185,7 @@ env:
   STAGE: workflow           # all jobs/steps see STAGE=workflow
 jobs:
   build:
-    runs-on: gondolin
+    runs-on: work:base
     env:
       STAGE: job            # overrides the workflow value for this job
     steps:
@@ -165,7 +212,7 @@ inputs:
     default: false
 jobs:
   hello:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - run: echo "hello ${{ inputs.name }}"
 ```
@@ -192,7 +239,7 @@ read them through `needs`:
 ```yaml
 jobs:
   build:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - id: meta
         run: echo "version=1.4.2" >> "$WORK_OUTPUT"
@@ -200,7 +247,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
   report:
     needs: [build]
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - run: echo "built ${{ needs.build.outputs.version }}"
 ```
@@ -218,7 +265,7 @@ context. `include` appends or extends cells; `exclude` prunes them.
 ```yaml
 jobs:
   test:
-    runs-on: gondolin
+    runs-on: work:base
     strategy:
       matrix:
         node: [20, 22, 24]
@@ -244,7 +291,7 @@ them with `==`, `!=`, `&&`, `||`, `!`, and use the status functions `success()`,
 ```yaml
 jobs:
   deploy:
-    runs-on: gondolin
+    runs-on: work:base
     if: ${{ inputs.env == "prod" }}
     steps:
       - run: echo "deploying to prod"
