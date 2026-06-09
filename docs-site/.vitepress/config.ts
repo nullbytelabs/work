@@ -13,10 +13,11 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
   ignoreDeadLinks: false,
+  appearance: "dark", // dark by default for everyone; toggle still available
 
   head: [
     ["link", { rel: "icon", href: `${base}favicon.svg` }],
-    ["meta", { name: "theme-color", content: "#646cff" }],
+    ["meta", { name: "theme-color", content: "#c0421d" }],
     ["meta", { property: "og:type", content: "website" }],
     ["meta", { property: "og:title", content: "pi-workflows" }],
     [
@@ -30,7 +31,7 @@ export default defineConfig({
   ],
 
   themeConfig: {
-    logo: "/logo.svg",
+    logo: { light: "/logo.svg", dark: "/logo-dark.svg" },
 
     nav: [
       { text: "Guide", link: "/guide/introduction", activeMatch: "/guide/" },

@@ -1,0 +1,448 @@
+/*
+ * pi-workflows docs theme — "schematic / instrument panel"
+ *
+ * Point of view: a precise, terminal-native systems tool. Graphite ink on a cool
+ * drafting-paper canvas, one signal-vermilion accent spent only on links, actions,
+ * and the single "lit" node in the DAG mark. Mono carries the identity (wordmark,
+ * eyebrows, code); Inter carries the prose. Calm by default; the accent is the only
+ * loud thing, and it is rationed.
+ *
+ * No Vite purple, no gradients, no emoji, no raised cards.
+ */
+
+/* ───────────────────────── Type ───────────────────────── */
+:root {
+  --vp-font-family-mono: ui-monospace, "SF Mono", SFMono-Regular, "Menlo",
+    "Consolas", "Liberation Mono", monospace;
+
+  --vp-z-index-nav: 30;
+}
+
+/* ───────────────────────── Light ──────────────────────── */
+:root {
+  /* Cool drafting paper — deliberately not warm cream. */
+  --vp-c-bg: #fafafb;
+  --vp-c-bg-alt: #f3f4f6;
+  --vp-c-bg-soft: #f1f2f5;
+  --vp-c-bg-elv: #ffffff;
+  --vp-c-gutter: #e7e9ee;
+
+  /* Graphite ink. */
+  --vp-c-text-1: #161820;
+  --vp-c-text-2: #474c57;
+  --vp-c-text-3: #717786;
+
+  /* Hairlines. */
+  --vp-c-divider: #e5e7ec;
+  --vp-c-border: #d6dae2;
+  --vp-c-default-soft: #eceef2;
+
+  /* Signal vermilion — the only chromatic voice. brand-1 is link text and clears
+     4.5:1 on the paper bg; brand-3 is the solid-button fill (white text). */
+  --vp-c-brand-1: #c0421d;
+  --vp-c-brand-2: #d24a22;
+  --vp-c-brand-3: #bb3f1b;
+  --vp-c-brand-soft: rgba(204, 68, 30, 0.1);
+  --vp-c-brand-softer: rgba(204, 68, 30, 0.06);
+
+  /* Status semantics stay conventional — accent never poses as a status. */
+  --vp-c-tip-1: var(--vp-c-brand-1);
+  --vp-c-tip-2: var(--vp-c-brand-2);
+  --vp-c-tip-3: var(--vp-c-brand-3);
+  --vp-c-tip-soft: var(--vp-c-brand-soft);
+}
+
+/* ───────────────────────── Dark ──────────────────────── */
+.dark {
+  /* Deep slate, faintly cool — not pure black, not saturated navy. */
+  --vp-c-bg: #15171c;
+  --vp-c-bg-alt: #0f1115;
+  --vp-c-bg-soft: #1b1e24;
+  --vp-c-bg-elv: #1b1e24;
+  --vp-c-gutter: #0b0c0f;
+
+  --vp-c-text-1: #e9ebef;
+  --vp-c-text-2: #aeb3bd;
+  --vp-c-text-3: #767c88;
+
+  --vp-c-divider: #262a31;
+  --vp-c-border: #343943;
+  --vp-c-default-soft: #232730;
+
+  /* Brighter vermilion reads cleanly on slate. */
+  --vp-c-brand-1: #ff7d4f;
+  --vp-c-brand-2: #ff9069;
+  --vp-c-brand-3: #db4d27;
+  --vp-c-brand-soft: rgba(255, 125, 79, 0.13);
+  --vp-c-brand-softer: rgba(255, 125, 79, 0.07);
+}
+
+/* Legacy aliases a few default-theme rules still read. */
+:root {
+  --vp-c-brand: var(--vp-c-brand-1);
+  --vp-c-brand-light: var(--vp-c-brand-2);
+  --vp-c-brand-lighter: var(--vp-c-brand-2);
+  --vp-c-brand-dark: var(--vp-c-brand-3);
+  --vp-c-brand-dimm: var(--vp-c-brand-soft);
+}
+
+/* ───────────────────────── Buttons ───────────────────── */
+:root {
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-bg: var(--vp-c-brand-3);
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-hover-bg: var(--vp-c-brand-2);
+  --vp-button-brand-active-border: transparent;
+  --vp-button-brand-active-text: #ffffff;
+  --vp-button-brand-active-bg: var(--vp-c-brand-3);
+
+  --vp-button-alt-border: var(--vp-c-border);
+  --vp-button-alt-text: var(--vp-c-text-1);
+  --vp-button-alt-bg: transparent;
+  --vp-button-alt-hover-border: var(--vp-c-brand-1);
+  --vp-button-alt-hover-text: var(--vp-c-brand-1);
+  --vp-button-alt-hover-bg: var(--vp-c-brand-softer);
+}
+
+.VPButton {
+  border-radius: 7px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: background-color 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.VPButton.alt {
+  font-family: var(--vp-font-family-mono);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* ───────────────────── Code surfaces ─────────────────── */
+:root {
+  --vp-code-block-bg: #f4f5f8;
+  --vp-code-block-divider-color: var(--vp-c-divider);
+
+  --vp-code-color: var(--vp-c-brand-1);
+  --vp-code-bg: var(--vp-c-brand-softer);
+
+  --vp-code-line-number-color: var(--vp-c-text-3);
+  --vp-code-line-highlight-color: var(--vp-c-brand-softer);
+}
+.dark {
+  --vp-code-block-bg: #101216;
+}
+
+/* Inline code: mono, hairline-boxed, ink (not accent) so prose stays calm.
+   The accent is reserved for links. */
+:not(pre) > code {
+  font-size: 0.86em;
+  border-radius: 5px;
+  padding: 2px 5px;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
+}
+/* …but inside a link, inline code adopts the link voice. */
+a > code {
+  color: var(--vp-c-brand-1) !important;
+  border-color: transparent;
+  background: var(--vp-c-brand-softer);
+}
+
+/* Code blocks: defined panel, hairline, generous inset. */
+.vp-doc div[class*="language-"] {
+  border-radius: 10px;
+  border: 1px solid var(--vp-c-divider);
+}
+.vp-doc [class*="language-"] code {
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.vp-doc [class*="language-"] > span.lang {
+  font-family: var(--vp-font-family-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+}
+
+/* ───────────────────── Links in prose ────────────────── */
+.vp-doc a {
+  font-weight: 500;
+  text-decoration-color: var(--vp-c-brand-soft);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s ease, color 0.15s ease;
+}
+.vp-doc a:hover {
+  text-decoration-color: var(--vp-c-brand-1);
+}
+
+/* ─────────────────────── Nav bar ─────────────────────── */
+.VPNavBar {
+  border-bottom: 1px solid transparent;
+}
+.VPNavBar.has-sidebar .content,
+.VPNavBar:not(.home) {
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+/* The wordmark: mono, sized like a shell prompt. */
+.VPNavBarTitle .title {
+  font-family: var(--vp-font-family-mono);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  gap: 8px;
+}
+.VPNavBarMenuLink,
+.VPNavBarMenuGroup .text {
+  font-weight: 500;
+  font-size: 13.5px;
+}
+
+/* ─────────────────────── Sidebar ─────────────────────── */
+.VPSidebar {
+  border-right: 1px solid var(--vp-c-divider);
+}
+/* Section headers as mono eyebrows. */
+.VPSidebarItem.level-0 > .item > .text {
+  font-family: var(--vp-font-family-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-3);
+}
+.VPSidebarItem.level-0.is-active > .item .link > .text,
+.VPSidebarItem .item.is-active .link .text {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+}
+/* A thin active rail instead of a heavy highlight. */
+.VPSidebarItem.is-link > .item {
+  position: relative;
+}
+.VPSidebarItem.is-link.is-active > .item::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--vp-c-brand-1);
+}
+
+/* ─────────────────── Right "On this page" ────────────── */
+.VPDocAsideOutline .outline-title {
+  font-family: var(--vp-font-family-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--vp-c-text-3);
+}
+.VPDocAsideOutline .outline-marker {
+  background-color: var(--vp-c-brand-1) !important;
+}
+
+/* ─────────────────── Doc headings ────────────────────── */
+.vp-doc h1 {
+  letter-spacing: -0.025em;
+  font-weight: 680;
+  font-size: 2.1rem;
+}
+.vp-doc h2 {
+  letter-spacing: -0.02em;
+  border-top: 1px solid var(--vp-c-divider);
+  padding-top: 24px;
+  margin-top: 40px;
+}
+.vp-doc h3 {
+  letter-spacing: -0.015em;
+}
+/* Anchor "#" picks up the accent. */
+.vp-doc h1 .header-anchor,
+.vp-doc h2 .header-anchor,
+.vp-doc h3 .header-anchor {
+  color: var(--vp-c-brand-1);
+}
+
+/* ─────────────────── Custom blocks ───────────────────── */
+.vp-doc .custom-block {
+  border-radius: 9px;
+  border-width: 1px;
+  font-size: 14px;
+}
+.vp-doc .custom-block.tip {
+  border-color: var(--vp-c-brand-soft);
+  background: var(--vp-c-brand-softer);
+}
+.custom-block .custom-block-title {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ─────────────────────── Tables ──────────────────────── */
+.vp-doc th {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-2);
+  font-weight: 600;
+  background: var(--vp-c-bg-soft);
+}
+.vp-doc tr {
+  background: transparent;
+}
+.vp-doc td,
+.vp-doc th {
+  border-color: var(--vp-c-divider);
+}
+
+/* ════════════════════════ HOME ═══════════════════════════ */
+
+/* Wordmark in the hero becomes a quiet mono kicker; the statement leads. */
+:root {
+  --vp-home-hero-name-color: var(--vp-c-text-3);
+  --vp-home-hero-name-background: transparent;
+  --vp-home-hero-image-background-image: none;
+  --vp-home-hero-image-filter: none;
+}
+.VPHero .name {
+  font-family: var(--vp-font-family-mono);
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.VPHero .name .clip {
+  /* Override the gradient text-clip the default theme applies. */
+  -webkit-text-fill-color: var(--vp-c-text-3);
+  background: none;
+}
+.VPHero .name::before {
+  content: "// ";
+  color: var(--vp-c-brand-1);
+}
+.VPHero .text {
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  max-width: 22ch;
+  font-size: clamp(2.4rem, 5.4vw, 3.4rem);
+  line-height: 1.06;
+  text-wrap: balance;
+}
+.VPHero .tagline {
+  font-size: clamp(1rem, 1.4vw, 1.12rem);
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+  max-width: 60ch;
+  padding-top: 4px;
+}
+
+/* Schematic dotted "graph paper" behind the hero — ties to the DAG motif,
+   kept faint and masked so it never competes with the copy. */
+.VPHome .VPHero {
+  position: relative;
+  overflow: hidden;
+}
+.VPHome .VPHero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: radial-gradient(var(--vp-c-text-3) 1.1px, transparent 1.1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(
+    ellipse 70% 80% at 78% 28%,
+    rgba(0, 0, 0, 0.7),
+    transparent 70%
+  );
+  mask-image: radial-gradient(
+    ellipse 70% 80% at 78% 28%,
+    rgba(0, 0, 0, 0.7),
+    transparent 70%
+  );
+  opacity: 0.28;
+  pointer-events: none;
+}
+.VPHome .VPHero .container {
+  position: relative;
+  z-index: 1;
+}
+.VPHero .image-bg {
+  display: none; /* kill the default purple glow blob */
+}
+.VPHero .image-src {
+  filter: none;
+  max-width: 296px;
+  opacity: 1;
+}
+
+/* Feature cards: flat schematic tiles, hairline, no shadow, no rounding excess. */
+:root {
+  --vp-home-feature-icon-size: 26px;
+}
+.VPHome .VPFeatures {
+  padding-top: 8px;
+}
+.VPFeature {
+  border-radius: 10px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-elv);
+  box-shadow: none;
+  transition: border-color 0.18s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dark .VPFeature {
+  background: var(--vp-c-bg-soft);
+}
+.VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+.VPFeature .icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--vp-c-brand-softer);
+  border: 1px solid var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-size: 0;
+}
+.VPFeature .icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+}
+.VPFeature .title {
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+.VPFeature .details {
+  color: var(--vp-c-text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.VPFeature .link-text-value {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  color: var(--vp-c-brand-1);
+}
+
+/* ───────────────────── Reduced motion ────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .VPButton,
+  .VPFeature {
+    transition: none;
+  }
+  .VPFeature:hover {
+    transform: none;
+  }
+}
