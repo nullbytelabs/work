@@ -17,7 +17,7 @@ on:
 
 jobs:
   unit:
-    runs-on: gondolin
+    runs-on: work:base
     outputs:
       test: ${{ steps.run.outputs.test }}
     steps:

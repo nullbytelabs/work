@@ -21,7 +21,7 @@ on:
 
 jobs:
   static:
-    runs-on: gondolin
+    runs-on: work:base
     outputs:
       lint: ${{ steps.run.outputs.lint }}
       typecheck: ${{ steps.run.outputs.typecheck }}

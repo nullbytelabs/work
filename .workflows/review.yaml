@@ -20,7 +20,7 @@ on: workflow_call
 
 jobs:
   scan-compiler:
-    runs-on: gondolin
+    runs-on: work:base
     machine: small
     outputs:
       findings: ${{ steps.r.outputs.output }}
@@ -40,7 +40,7 @@ jobs:
             subsystems.
 
   scan-runtime:
-    runs-on: gondolin
+    runs-on: work:base
     machine: small
     outputs:
       findings: ${{ steps.r.outputs.output }}
@@ -59,7 +59,7 @@ jobs:
             concise. Ignore other subsystems.
 
   scan-web:
-    runs-on: gondolin
+    runs-on: work:base
     machine: small
     outputs:
       findings: ${{ steps.r.outputs.output }}
@@ -78,7 +78,7 @@ jobs:
             Ignore other subsystems.
 
   scan-agent-security:
-    runs-on: gondolin
+    runs-on: work:base
     machine: small
     outputs:
       findings: ${{ steps.r.outputs.output }}
@@ -103,7 +103,7 @@ jobs:
   # standalone (`work run review`) there is no ci, so these resolve to empty and
   # the agent just notes there was no tooling output. Agent-only → small.
   scan-checks:
-    runs-on: gondolin
+    runs-on: work:base
     machine: small
     outputs:
       findings: ${{ steps.r.outputs.output }}
@@ -138,7 +138,7 @@ jobs:
             ${{ needs.test.outputs.test }}
 
   collect:
-    runs-on: gondolin
+    runs-on: work:base
     machine: small
     needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security, scan-checks]
     steps:
