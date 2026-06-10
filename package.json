@@ -32,6 +32,7 @@
     "lint": "eslint .",
     "knip": "knip",
     "fan-in": "node scripts/fan-in.mjs",
+    "mutation": "node scripts/mutation-check.mjs",
     "check": "npm run lint && npm run typecheck && npm run knip && npm run fan-in",
     "build": "node scripts/build.mjs",
     "prepack": "npm run build"

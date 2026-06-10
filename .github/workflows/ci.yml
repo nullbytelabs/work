@@ -58,4 +58,14 @@ jobs:
           key: gondolin-images-${{ runner.os }}-${{ runner.arch }}
       - run: npm ci
       - name: Run full suite (gondolin VM tests included)
+        # WORK_TEST_NETWORK=1 un-gates the network examples (checkout, install-node)
+        # — the only e2e that reaches the real internet (github.com, nodejs.org), so
+        # they're opt-in for hermetic local runs but SHOULD run in CI: they're the
+        # integration proof that outbound egress works end-to-end. (The egress
+        # *security* contract — deny-by-default, key injection — is proven
+        # hermetically by test/egress-e2e.test.ts and needs no flag.) Image builds
+        # (WORK_TEST_IMAGES) stay opt-in: they fetch apk packages and are much
+        # slower; enable in a dedicated job if/when image regressions warrant it.
         run: npm test
+        env:
+          WORK_TEST_NETWORK: "1"

@@ -54,6 +54,13 @@ export interface GondolinTargetConfig {
   env?: Record<string, string>;
   /** Outbound HTTP allowlist (deny-by-default otherwise). */
   allowedHosts?: string[];
+  /**
+   * Hosts allowed to resolve to internal/private IP ranges (gondolin blocks
+   * those by default, even when allowlisted). Needed for on-box upstreams —
+   * today the egress e2e test's fake model host; a local datasource would use
+   * the same knob. Entries are implicitly part of the allowlist.
+   */
+  allowedInternalHosts?: string[];
   /** Secrets injected into outbound HTTP headers only; never visible in-guest. */
   secrets?: Record<string, { hosts: string[]; value: string }>;
   /**
@@ -124,13 +131,21 @@ export class GondolinTarget implements ExecutionTarget {
     const imagePath = await this.cfg.resolveImagePath?.();
     if (imagePath) createOpts["sandbox"] = { imagePath };
 
-    // Only mediate network when something is configured; otherwise the default
-    // deny-by-default posture applies (fine for steps that need no network).
+    // Install HTTP mediation ONLY when this job has something to mediate — a model
+    // host or datasource (an allowlist + host-side secret injection that keeps the
+    // real key out of the guest). A job with none of that gets NO hooks, and gets
+    // OPEN outbound network as a result: that's how a plain `run: npm install`
+    // reaches the registry. Mediation here scopes *injected secrets* to their host;
+    // it is NOT a sandbox over general egress for (trusted) workflow steps.
     let secretEnv: Record<string, string> = {};
-    const wantsNetwork = (this.cfg.allowedHosts?.length ?? 0) > 0 || this.cfg.secrets !== undefined;
+    const wantsNetwork =
+      (this.cfg.allowedHosts?.length ?? 0) > 0 ||
+      (this.cfg.allowedInternalHosts?.length ?? 0) > 0 ||
+      this.cfg.secrets !== undefined;
     if (wantsNetwork && createHttpHooks) {
       const { httpHooks, env } = createHttpHooks({
         allowedHosts: this.cfg.allowedHosts ?? [],
+        ...(this.cfg.allowedInternalHosts ? { allowedInternalHosts: this.cfg.allowedInternalHosts } : {}),
         secrets: this.cfg.secrets ?? {},
       });
       createOpts["httpHooks"] = httpHooks;
