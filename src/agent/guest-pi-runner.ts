@@ -38,7 +38,7 @@ export const GUEST_MODEL_KEY_ENV = "PI_WF_MODEL_KEY";
 const GUEST_CA_PATH = "/etc/gondolin/mitm/ca.crt";
 
 /** The Pi package (+ range) installed into the guest so the wrapper can load it. */
-const PI_PACKAGE = "@earendil-works/pi-coding-agent@^0.78.0";
+const PI_PACKAGE = "@earendil-works/pi-coding-agent@^0.79.1";
 
 /** The exec capability + workspace paths a sandboxed handler is handed. */
 export interface GuestPiRunnerDeps {
