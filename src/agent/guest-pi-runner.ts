@@ -24,6 +24,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { constants } from "node:fs";
 import { mkdir, readFile, writeFile, rm, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { UserFacingError } from "../errors.ts";
@@ -76,8 +77,13 @@ export class GuestPiRunner implements AgentRunner {
     const hostStage = join(hostDir, STAGE_DIR);
     await mkdir(hostStage, { recursive: true });
 
+    // Per-invocation, unpredictable name. The wrapper lands in the workspace mount
+    // the guest can also write to, so a deterministic path would let a malicious
+    // guest pre-plant a symlink there that the host's copy would follow (an
+    // arbitrary host-file overwrite). A random name the guest can't predict — plus
+    // COPYFILE_EXCL below — closes that.
     const wrapperSrc = fileURLToPath(new URL("./guest-runner-script.mjs", import.meta.url));
-    const hostWrapper = join(hostStage, "guest-runner.mjs");
+    const hostWrapper = join(hostStage, `guest-runner-${id}.mjs`);
     const hostReq = join(hostStage, `req-${id}.json`);
     const hostRes = join(hostStage, `res-${id}.json`);
 
@@ -99,13 +105,15 @@ export class GuestPiRunner implements AgentRunner {
       },
     };
 
-    await copyFile(wrapperSrc, hostWrapper);
+    // COPYFILE_EXCL: fail loudly if the destination already exists (e.g. a guest
+    // pre-planted symlink) instead of writing *through* it to a host file.
+    await copyFile(wrapperSrc, hostWrapper, constants.COPYFILE_EXCL);
     await writeFile(hostReq, JSON.stringify(request), "utf-8");
     await rm(hostRes, { force: true });
 
     // Guest-visible paths (same files via the shared mount).
     const gStage = `${guestDir}/${STAGE_DIR}`;
-    const gWrapper = `${gStage}/guest-runner.mjs`;
+    const gWrapper = `${gStage}/guest-runner-${id}.mjs`;
     const gReq = `${gStage}/req-${id}.json`;
     const gRes = `${gStage}/res-${id}.json`;
 
@@ -134,7 +142,8 @@ export class GuestPiRunner implements AgentRunner {
     } catch {
       /* no result file — fall through to the error below */
     }
-    // Best-effort cleanup of the per-invocation request/result.
+    // Best-effort cleanup of the per-invocation wrapper/request/result.
+    await rm(hostWrapper, { force: true });
     await rm(hostReq, { force: true });
     await rm(hostRes, { force: true });
 

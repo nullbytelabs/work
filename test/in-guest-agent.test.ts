@@ -76,7 +76,7 @@ describe("GuestPiRunner", () => {
     // Fake guest exec: record commands; npm install no-ops; the wrapper writes a result.
     const exec = async (command: string) => {
       commands.push(command);
-      const m = /guest-runner\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+      const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
       if (m) {
         const resHost = (m[2] as string).replace(`${dir}/`, `${dir}/`); // guestDir==hostDir==dir here
         const { writeFile } = await import("node:fs/promises");
@@ -96,13 +96,15 @@ describe("GuestPiRunner", () => {
     assert.equal(res.finishReason, "stop");
     // It installed the Pi package, then ran the wrapper.
     assert.ok(commands.some((c) => /npm install .*@earendil-works\/pi-coding-agent/.test(c)), "should npm install Pi");
-    assert.ok(commands.some((c) => /node .*guest-runner\.mjs/.test(c)), "should run the wrapper");
+    assert.ok(commands.some((c) => /node .*guest-runner-\w+\.mjs/.test(c)), "should run the wrapper");
 
-    // The staged request must NOT contain the API key (it crosses via header injection).
+    // The per-invocation wrapper uses an unpredictable name (so a malicious guest
+    // can't pre-plant a symlink at a known path) and is cleaned up after the run,
+    // along with the request/result files.
     const stage = join(dir, ".pi-agent");
     const files = await readdir(stage);
-    // request file was cleaned up after a successful run; the wrapper persists.
-    assert.ok(files.includes("guest-runner.mjs"));
+    assert.ok(!files.some((f) => /^guest-runner-\w+\.mjs$/.test(f)), "wrapper should be cleaned up");
+    assert.ok(!files.some((f) => /^req-/.test(f) || /^res-/.test(f)), "request/result should be cleaned up");
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -110,7 +112,7 @@ describe("GuestPiRunner", () => {
     const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
     let capturedReq = "";
     const exec = async (command: string) => {
-      const m = /guest-runner\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+      const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
       if (m) {
         capturedReq = await readFile(m[1] as string, "utf-8");
         const { writeFile } = await import("node:fs/promises");
