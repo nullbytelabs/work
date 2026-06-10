@@ -89,7 +89,7 @@ GitHub's `action.yml` `runs.using` selects the kind:
 | **JavaScript** | `node20` | `main: index.js` (+ `pre`/`post`) | `INPUT_<NAME>` env vars | `core.setOutput()` → appends to `$GITHUB_OUTPUT` |
 | Docker | `docker` | a container | env | file |
 
-Two facts make this a near-free fit for pi-workflows:
+Two facts make this a near-free fit for work:
 
 1. **The JS-action output ABI is literally our `$WORK_OUTPUT`.** `core.setOutput`
    just appends `key=value` to `$GITHUB_OUTPUT`. We already implement that exact

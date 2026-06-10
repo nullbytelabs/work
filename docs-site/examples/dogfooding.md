@@ -1,6 +1,6 @@
 # Dogfooding: the engine checks itself
 
-pi-workflows is built with pi-workflows. The repository ships a `.workflows/ci.yaml`
+work is built with work. The repository ships a `.workflows/ci.yaml`
 that runs the project's own checks, tests, and an agent code review — every job in
 its own micro-VM, on the same engine you run.
 
@@ -171,7 +171,7 @@ Every part of the pipeline maps to a feature you can use directly:
 ## Run it yourself
 
 The workflows live in
-[`.workflows/`](https://github.com/nullbytelabs/pi-workflows/tree/main/.workflows)
+[`.workflows/`](https://github.com/nullbytelabs/work/tree/main/.workflows)
 (`ci.yaml`, `checks.yaml`, `test.yaml`, `review.yaml`). The review jobs need a model
 configured in `work.json`; everything else runs without one.
 

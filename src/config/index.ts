@@ -1,5 +1,5 @@
 /**
- * pi-workflows config — provider/model setup for agent (`uses: work/agent`) steps.
+ * work config — provider/model setup for agent (`uses: work/agent`) steps.
  *
  * A JSON file (default `./work.json`, or `--config`, or `WORK_CONFIG`) declares
  * OpenAI-compatible providers and named models.

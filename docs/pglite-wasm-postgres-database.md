@@ -1,4 +1,4 @@
-# PGLite (WASM Postgres) — Reference & pi-workflows Provider Fit
+# PGLite (WASM Postgres) — Reference & work Provider Fit
 
 > PGLite is Postgres compiled to WASM — a real PostgreSQL engine running in-process (browser/Node/Bun/Deno), no server. **Part A** is a verified general reference. **Part B** is its fit as the Postgres provider behind Absurd + PGMQ — which is the crux, because PGLite's single-process model collides with the competing-consumers pattern those layers assume. Items not confirmed from docs/source are flagged **UNVERIFIED**; items empirically tested against `@electric-sql/pglite@0.4.6` (Node/Linux) are marked **[VERIFIED-LOCALLY]**.
 
@@ -113,7 +113,7 @@ const db = drizzle(new PGlite('./datadir'))
 
 ---
 
-# Part B — PGLite as the pi-workflows Postgres provider
+# Part B — PGLite as the work Postgres provider
 
 ## The one-paragraph verdict
 

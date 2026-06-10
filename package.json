@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "work": "./bin/pi-workflows.mjs"
+    "work": "./bin/work.mjs"
   },
   "files": [
     "bin",
@@ -21,7 +21,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nullbytelabs/pi-workflows.git"
+    "url": "git+https://github.com/nullbytelabs/work.git"
   },
   "scripts": {
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts",

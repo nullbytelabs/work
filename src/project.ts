@@ -44,7 +44,7 @@ export function resolveWorkflowLayout(file: string): WorkflowLayout {
 
 /**
  * Resolve a workflow by its `name:` within a project's `.workflows/` directory.
- * Powers `pi-workflows [--workspace <dir>] run <name>`: a project keeps its
+ * Powers `work [--workspace <dir>] run <name>`: a project keeps its
  * pipelines in `<workspace>/.workflows/*.yaml`, and you invoke one by the name
  * declared inside it (e.g. `run ci` finds the file whose `name: ci`). The
  * matched file flows through `resolveWorkflowLayout`, so the checkout is the

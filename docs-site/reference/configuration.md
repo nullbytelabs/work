@@ -185,6 +185,6 @@ written into the guest, so it isn't visible to anything running inside the micro
 ## Example
 
 A complete example ships in the repo as
-[`work.example.json`](https://github.com/nullbytelabs/pi-workflows/blob/main/work.example.json).
+[`work.example.json`](https://github.com/nullbytelabs/work/blob/main/work.example.json).
 Any OpenAI-compatible provider works — point `baseUrl` at your endpoint and set the
 matching key.

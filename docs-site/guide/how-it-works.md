@@ -1,6 +1,6 @@
 # How it works
 
-You don't need any of this to use pi-workflows — but if you're curious what
+You don't need any of this to use work — but if you're curious what
 happens between `work run <name>` and a finished run, here's the shape of it.
 
 ## From YAML to a durable graph
@@ -74,7 +74,7 @@ way — staged into the guest and run there, never on the host. See
 | [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | The coding agent behind `uses: work/agent` steps. |
 
 ::: tip Deeper dives
-The repository's [`docs/`](https://github.com/nullbytelabs/pi-workflows/tree/main/docs)
+The repository's [`docs/`](https://github.com/nullbytelabs/work/tree/main/docs)
 folder holds internal design and research notes on these subsystems — the durable
 execution model, the sandbox, the agent interface, and more.
 :::

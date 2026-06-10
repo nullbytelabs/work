@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: "pi-workflows"
+  name: "work"
   text: "Sandboxed workflows with agents built in"
   tagline: Define a workflow in YAML and run it on your own machine — every job isolated in a secure micro-VM, execution durable and crash-resumable, and any step able to hand off to a real AI agent working inside the sandbox.
   image:
@@ -18,7 +18,7 @@ hero:
       link: /guide/quickstart
     - theme: alt
       text: View on GitHub
-      link: https://github.com/nullbytelabs/pi-workflows
+      link: https://github.com/nullbytelabs/work
 
 features:
   - icon:

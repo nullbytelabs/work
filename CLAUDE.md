@@ -23,7 +23,7 @@ npm run build            # esbuild → dist/ (publish-only; see below)
 
 # run the CLI in dev — invoke the bin shim directly (it runs src/cli.ts when
 # there's no dist/, so no build step). This IS the `work` command.
-./bin/pi-workflows.mjs <args>
+./bin/work.mjs <args>
 npm start -- <args>      # same thing via the start script
 ```
 
@@ -46,11 +46,11 @@ memory, verify agent/runtime changes against `demo.sh` and a real run — not ju
 Dev never touches `dist/`. A *published* package lives under `node_modules`, where Node refuses
 to strip types, so `prepack` runs `scripts/build.mjs`: esbuild bundles `src/cli.ts` → `dist/cli.js`
 (deps kept external) and copies two runtime assets loaded via `import.meta.url` —
-`schema.sql` and `guest-runner-script.mjs` — flat next to it. `bin/pi-workflows.mjs` prefers
+`schema.sql` and `guest-runner-script.mjs` — flat next to it. `bin/work.mjs` prefers
 `dist/cli.js` if present, else falls back to `src/cli.ts`. Publishing needs npm 2FA (`--otp`).
 
 > **Footgun:** because the shim prefers `dist/`, running `npm run build` locally (e.g. to
-> verify packaging) leaves a `dist/` that **shadows your `src/` edits** for `./bin/pi-workflows.mjs`
+> verify packaging) leaves a `dist/` that **shadows your `src/` edits** for `./bin/work.mjs`
 > until you `rm -rf dist`. During development keep `dist/` absent so the shim runs `src/` live.
 
 ## Architecture

@@ -1,5 +1,5 @@
 /**
- * `pi-workflows graph` — render the compiled `needs` DAG for inspection, separate
+ * `work graph` — render the compiled `needs` DAG for inspection, separate
  * from a run. The graph matters most *before* execution (does the shape match
  * intent?), and a static export sidesteps the live-terminal reflow problems that
  * keep the run view a status list rather than a drawn graph (see

@@ -5,7 +5,7 @@
 #              workflow.yaml are available to the steps.
 # note: invoked as `sh script.sh` (no exec bit needed). THRESHOLD (workflow env)
 #       is in the step environment, which the script reads.
-# usage: ./pi-workflows ./test/e2e/run-script/workflow.yaml
+# usage: ./work ./test/e2e/run-script/workflow.yaml
 ---
 name: run-script
 

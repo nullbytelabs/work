@@ -1,7 +1,7 @@
 # CLI reference
 
 The package installs three equivalent commands — `work`, `workflow`, and
-`pi-workflows` — all pointing at the same engine. These docs use `work`.
+`work` — all pointing at the same engine. These docs use `work`.
 
 ## Synopsis
 
@@ -195,7 +195,7 @@ running a single workflow, and keeps the process alive until you stop it
 
 ```bash
 work --workspace . --web
-# pi-workflows web UI: http://127.0.0.1:4280/
+# work web UI: http://127.0.0.1:4280/
 ```
 
 From the browser you can run workflows from an auto-generated input form, watch

@@ -1,13 +1,13 @@
 import { defineConfig } from "vitepress";
 
-// Served from GitHub Pages at https://nullbytelabs.github.io/pi-workflows/,
+// Served from GitHub Pages at https://nullbytelabs.github.io/work/
 // so every absolute asset/link is prefixed with the repo name.
-const base = "/pi-workflows/";
+const base = "/work/";
 
 export default defineConfig({
   base,
   lang: "en-US",
-  title: "pi-workflows",
+  title: "work",
   description:
     "Run durable, sandboxed workflows on your own machine — each job isolated in a secure micro-VM, with AI agents as first-class steps.",
   cleanUrls: true,
@@ -19,7 +19,7 @@ export default defineConfig({
     ["link", { rel: "icon", href: `${base}favicon.svg` }],
     ["meta", { name: "theme-color", content: "#c0421d" }],
     ["meta", { property: "og:type", content: "website" }],
-    ["meta", { property: "og:title", content: "pi-workflows" }],
+    ["meta", { property: "og:title", content: "work" }],
     [
       "meta",
       {
@@ -42,7 +42,7 @@ export default defineConfig({
         items: [
           {
             text: "Changelog",
-            link: "https://github.com/nullbytelabs/pi-workflows/releases",
+            link: "https://github.com/nullbytelabs/work/releases",
           },
           {
             text: "npm",
@@ -103,13 +103,13 @@ export default defineConfig({
     socialLinks: [
       {
         icon: "github",
-        link: "https://github.com/nullbytelabs/pi-workflows",
+        link: "https://github.com/nullbytelabs/work",
       },
     ],
 
     editLink: {
       pattern:
-        "https://github.com/nullbytelabs/pi-workflows/edit/main/docs-site/:path",
+        "https://github.com/nullbytelabs/work/edit/main/docs-site/:path",
       text: "Edit this page on GitHub",
     },
 

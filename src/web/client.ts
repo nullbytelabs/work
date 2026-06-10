@@ -31,7 +31,7 @@ export function renderShell(token: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="work-token" content="${esc(token)}" />
 <meta name="theme-color" content="#16243a" />
-<title>pi-workflows — local console</title>
+<title>work — local console</title>
 <style>
 /* ========================================================================
    DESIGN TOKENS
@@ -641,7 +641,7 @@ pre .stderr { color: #ff8d8d; }
 <a class="skip" href="#app">Skip to main content</a>
 <header class="app">
   <div class="bar">
-    <a class="brand" id="nav-home" href="#" aria-label="pi-workflows home">
+    <a class="brand" id="nav-home" href="#" aria-label="work home">
       <!-- Inline brand mark — the DAG-of-four-nodes logo, one solid accent, no fetch -->
       <svg class="mark" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <line x1="30" y1="60" x2="60" y2="30" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
@@ -653,7 +653,7 @@ pre .stderr { color: #ff8d8d; }
         <circle cx="60" cy="90" r="13" fill="currentColor"/>
         <circle cx="90" cy="60" r="13" fill="currentColor"/>
       </svg>
-      <span class="name"><b>pi-workflows</b><small>local console</small></span>
+      <span class="name"><b>work</b><small>local console</small></span>
     </a>
     <nav class="app" aria-label="Primary">
       <a id="nav-workflows" href="#">Workflows</a>

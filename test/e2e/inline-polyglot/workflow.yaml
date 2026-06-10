@@ -5,7 +5,7 @@
 #              Python independently re-sums and asserts the two agree.
 # note: runs on `gondolin` — the guest ships bash, node, and python3, so all
 #       three step languages run inside the sandbox (no host toolchain needed).
-# usage: ./pi-workflows ./test/e2e/inline-polyglot/workflow.yaml
+# usage: ./work ./test/e2e/inline-polyglot/workflow.yaml
 ---
 name: inline-polyglot
 

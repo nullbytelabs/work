@@ -266,6 +266,6 @@ Use `if` or `when`, but not both on the same step/job.
 
 ::: tip Worked examples
 Every block above has a runnable example under
-[`test/e2e/`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e) —
+[`test/e2e/`](https://github.com/nullbytelabs/work/tree/main/test/e2e) —
 matrix builds, fan-out/fan-in, conditional steps, typed inputs, and more.
 :::

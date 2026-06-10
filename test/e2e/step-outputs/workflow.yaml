@@ -5,7 +5,7 @@
 #              a multi-line heredoc value, a same-job read via steps.<id>.outputs,
 #              and a cross-job read via needs.<job>.outputs. Each consumer asserts
 #              the value it got, so a regression in output capture fails the run.
-# usage: ./pi-workflows ./test/e2e/step-outputs/workflow.yaml
+# usage: ./work ./test/e2e/step-outputs/workflow.yaml
 ---
 name: step-outputs
 

@@ -69,8 +69,8 @@ GitHub composite actions support. Inner `run:` steps capture `$WORK_OUTPUT`; inn
 `uses:` step, the job gets mediated egress.
 
 ::: tip Runnable example
-[`test/e2e/composite-action`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/composite-action)
+[`test/e2e/composite-action`](https://github.com/nullbytelabs/work/tree/main/test/e2e/composite-action)
 is a composite action that shapes an input in a `run:` step and then calls
-`work/agent`. [`test/e2e/agent-project`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/agent-project)
+`work/agent`. [`test/e2e/agent-project`](https://github.com/nullbytelabs/work/tree/main/test/e2e/agent-project)
 packages its review agent as the composite `summarize` action above.
 :::

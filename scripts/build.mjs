@@ -2,7 +2,7 @@
 // but a *published* package lives under `node_modules`, where Node refuses to
 // strip types (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). So `npm pack` /
 // `npm publish` (via the `prepack` hook) bundle the CLI to plain JS here. Dev is
-// unaffected — `./pi-workflows` and the npm scripts still run `src/` build-free.
+// unaffected — `./work` and the npm scripts still run `src/` build-free.
 import { build } from "esbuild";
 import { copyFile, cp, mkdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";

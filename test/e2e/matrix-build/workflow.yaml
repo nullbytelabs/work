@@ -6,7 +6,7 @@
 #              `needs` (a dependency on a matrix job waits for every leg).
 # note: each leg is its own durable Absurd task with a deterministic id
 #       (`test::node-22_os-linux`); legs run in parallel via worker concurrency.
-# usage: ./pi-workflows ./test/e2e/matrix-build/workflow.yaml
+# usage: ./work ./test/e2e/matrix-build/workflow.yaml
 ---
 name: matrix-build
 

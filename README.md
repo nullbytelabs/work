@@ -1,8 +1,8 @@
-# pi-workflows
+# work
 
-[![CI](https://github.com/nullbytelabs/pi-workflows/actions/workflows/ci.yml/badge.svg)](https://github.com/nullbytelabs/pi-workflows/actions/workflows/ci.yml)
+[![CI](https://github.com/nullbytelabs/work/actions/workflows/ci.yml/badge.svg)](https://github.com/nullbytelabs/work/actions/workflows/ci.yml)
 
-📖 **[Read the documentation →](https://nullbytelabs.github.io/pi-workflows/)**
+📖 **[Read the documentation →](https://nullbytelabs.github.io/work/)**
 
 Run **any workflow on your own machine**, with each job isolated in a secure micro-VM and durable, crash-resumable execution. Steps are shell commands — or **AI agent steps** that strap a real agent to the work, running inside the sandbox.
 
@@ -58,10 +58,10 @@ This gives you `work` (and the alias `workflow`). Both still need **Node ≥ 23.
 <summary>From source (development)</summary>
 
 ```bash
-git clone https://github.com/nullbytelabs/pi-workflows
-cd pi-workflows
+git clone https://github.com/nullbytelabs/work
+cd work
 npm install
-./bin/pi-workflows.mjs --help   # runs src/cli.ts directly (no dist/), no build step
+./bin/work.mjs --help   # runs src/cli.ts directly (no dist/), no build step
 ```
 
 </details>
@@ -205,7 +205,7 @@ jobs:
       - run: echo "review -> ${{ steps.summary.outputs.output }}"
 ```
 
-The prompt can also be file-backed (`promptFile:`); there's no separate system-prompt input. **To package a named, reusable agent**, wrap `work/agent` in a composite action under `.workflows/actions/<name>/` (`uses: action/<name>`) — see the [actions guide](https://nullbytelabs.github.io/pi-workflows/guide/actions). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a verification workflow and a `review.yaml` where a composite action reviews the source.
+The prompt can also be file-backed (`promptFile:`); there's no separate system-prompt input. **To package a named, reusable agent**, wrap `work/agent` in a composite action under `.workflows/actions/<name>/` (`uses: action/<name>`) — see the [actions guide](https://nullbytelabs.github.io/work/guide/actions). [`test/e2e/agent-project/`](test/e2e/agent-project/) is a complete, runnable example — a verification workflow and a `review.yaml` where a composite action reviews the source.
 
 ---
 

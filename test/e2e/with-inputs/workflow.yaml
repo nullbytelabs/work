@@ -2,7 +2,7 @@
 # description: declares typed inputs (a string and a number), maps them into step
 #              env vars via ${{ inputs.* }}, and echoes them. Both have defaults,
 #              so it runs without --inputs too.
-# usage: ./pi-workflows ./test/e2e/with-inputs/workflow.yaml --inputs '{"name": "josh", "age": 36}'
+# usage: ./work ./test/e2e/with-inputs/workflow.yaml --inputs '{"name": "josh", "age": 36}'
 ---
 name: with-inputs
 

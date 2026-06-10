@@ -1,6 +1,6 @@
-# PGMQ (Postgres Message Queue) — Reference & pi-workflows Context
+# PGMQ (Postgres Message Queue) — Reference & work Context
 
-> **⚠️ OUT OF SCOPE — not used by pi-workflows.** PGMQ's one unique value here was
+> **⚠️ OUT OF SCOPE — not used by work.** PGMQ's one unique value here was
 > coordinating a **fleet of separate runner machines** (work-stealing dispatch for
 > `runs-on`). The engine targets a **single host**, so that need doesn't exist, and
 > everything else PGMQ was considered for is covered by Absurd natively (events for
@@ -244,7 +244,7 @@ async function consumeLongPoll() {
 
 ---
 
-# Part B — PGMQ in the pi-workflows / Absurd context
+# Part B — PGMQ in the work / Absurd context
 
 ## The boundary: no overlap, clean complement
 

@@ -4,7 +4,7 @@
 > as a unit (`staging.yaml` orchestrating `lint.yaml` + `build.yaml` +
 > `deploy.yaml`), passing parameters via `with:` and consuming the callee's
 > outputs. The GitHub-Actions prior art is verified against their docs; the
-> mapping onto pi-workflows' **flat, runtime-agnostic `ExecutionPlan`** is the
+> mapping onto work' **flat, runtime-agnostic `ExecutionPlan`** is the
 > design work here. Companion seams: [`phase-1.md`](phase-1.md) (durability
 > caveat), [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (the
 > *step*-level `uses:` surface this deliberately does **not** touch). Date: 2026-06-06.
@@ -42,7 +42,7 @@ workflows, hands each one inputs, and wires their outputs together — the same 
 
 People conflate these. They are distinct, and the distinction is the whole design:
 
-| Mechanism | `uses:` sits on a… | Pulls in… | pi-workflows analog |
+| Mechanism | `uses:` sits on a… | Pulls in… | work analog |
 |---|---|---|---|
 | **Composite action** | **step** | a bundle of *steps* | `uses: agent/<name>` (already shipped) |
 | **Reusable workflow** | **job** | an entire *workflow* (its jobs) | **this doc** — `uses: workflow/<name>` |
@@ -75,7 +75,7 @@ is now capped at **10 levels** (the older "4" survives only on GitHub Enterprise
 Server), and a single file may reference at most **50** reusable workflows. We set
 our own caps in §10 — the GHA numbers are reference points, not a contract we owe.
 
-**The pi-workflows decision falls out cleanly:** keep the two levels separate.
+**The work decision falls out cleanly:** keep the two levels separate.
 Step-level `uses:` stays the agent surface; **job-level `uses:` becomes the
 reusable-workflow surface.** That is *clearer* than GitHub's single overloaded
 keyword, because the level tells you which kind you're looking at.
@@ -353,7 +353,7 @@ runtime) goes through `needs`. v1 documents this split explicitly.
 
 ## 9. Secrets / egress
 
-GitHub passes `secrets:` (or `secrets: inherit`). pi-workflows doesn't carry
+GitHub passes `secrets:` (or `secrets: inherit`). work doesn't carry
 secrets in YAML at all — egress is **mediated**, keys injected host-side, never
 in-guest (`makeAgentEgressResolver` + the datasource resolver, composed in
 `startRun`). Those resolvers are **run-level**, derived from config.

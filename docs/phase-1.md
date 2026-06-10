@@ -35,9 +35,9 @@ dependencies, so the same `node_modules` works across platforms.
 
 ```bash
 npm install
-./pi-workflows ./test/e2e/hello-world-gondolin/workflow.yaml          # ad-hoc: a file anywhere
-./pi-workflows --workspace ./test/e2e/agent-project run ci         # by name (the workflow whose name: is ci)
-./pi-workflows --workspace ./test/e2e/agent-project graph ci --steps  # inspect the DAG (no run)
+./work ./test/e2e/hello-world-gondolin/workflow.yaml          # ad-hoc: a file anywhere
+./work --workspace ./test/e2e/agent-project run ci         # by name (the workflow whose name: is ci)
+./work --workspace ./test/e2e/agent-project graph ci --steps  # inspect the DAG (no run)
 npm test        # unit + integration suite (Node's built-in test runner)
 npm run typecheck
 ```
@@ -45,7 +45,7 @@ npm run typecheck
 Two launch styles: a bare `<workflow.yaml>` path (ad-hoc — run a file wherever it
 lives), or `[--workspace <dir>] run <name>`, which resolves the `.workflows/*.yaml`
 whose `name:` field matches (workspace defaults to the current directory, so from
-inside a project it's just `pi-workflows run ci`). Both converge on the same
+inside a project it's just `work run ci`). Both converge on the same
 `{ workflowDir, workspaceSource }` layout (see "Project layout" below).
 
 A run prints live: on an interactive terminal, a **DAG-aware status board** (jobs
@@ -124,7 +124,7 @@ it unless a workflow uses `runs-on: gondolin`. It requires:
   `npm install` pulls it; if it can't install on a platform, the rest still works.
 
 ```bash
-./pi-workflows ./test/e2e/hello-world-gondolin/workflow.yaml
+./work ./test/e2e/hello-world-gondolin/workflow.yaml
 ```
 
 If the package isn't available, the engine fails fast with an actionable message

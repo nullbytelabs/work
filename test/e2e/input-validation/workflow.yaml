@@ -3,7 +3,7 @@
 #              pattern (a UUID is just a pattern — no built-in format registry).
 #              Values outside the options / not matching the pattern are rejected
 #              at compile time.
-# usage: ./pi-workflows ./test/e2e/input-validation/workflow.yaml \
+# usage: ./work ./test/e2e/input-validation/workflow.yaml \
 #          --inputs '{"release":"staging","id":"3cd7a864-f023-5a35-9db1-39a1be5bdcca"}'
 ---
 name: input-validation

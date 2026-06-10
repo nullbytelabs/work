@@ -1,10 +1,10 @@
 /**
- * pi-workflows CLI. Two ways to launch a workflow:
+ * work CLI. Two ways to launch a workflow:
  *
- *   pi-workflows <workflow.yaml>            # ad-hoc: run a file wherever it is
- *   pi-workflows [--workspace <dir>] run <name>
- *                                           # by name: the `.workflows/*.yaml`
- *                                           #   whose `name:` is <name>
+ *   work <workflow.yaml>            # ad-hoc: run a file wherever it is
+ *   work [--workspace <dir>] run <name>
+ *                                   # by name: the `.workflows/*.yaml`
+ *                                   #   whose `name:` is <name>
  *
  * Pipeline: resolve -> read -> parseWorkflow -> compile -> AbsurdRuntime.run.
  * Streams step output live and exits non-zero if any job fails.
@@ -203,7 +203,7 @@ function parseArgs(argv: string[]): CliArgs {
 // `rerun` starts fresh with the same inputs. Both resolve to the normal run path.
 function resolveRecover(s: FlagState, common: CommonArgs, mode: "resume" | "rerun"): CliArgs {
   const id = s.positionals[1];
-  if (!id) fail(`${mode} requires a run id, e.g. \`pi-workflows ${mode} <id>\` (see \`pi-workflows runs\`)`);
+  if (!id) fail(`${mode} requires a run id, e.g. \`${mode} <id>\` (see \`work runs\`)`);
   if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
   if (s.resume) fail(`--resume can't be combined with the \`${mode}\` verb`);
   if (s.format || s.steps) fail("--format / --steps only apply to `graph`");
@@ -235,7 +235,7 @@ function resolveWeb(s: FlagState, common: CommonArgs): CliArgs {
 // `--workspace` is given (like `run`), else treat the target as a file path.
 function resolveGraph(s: FlagState, common: CommonArgs): CliArgs {
   const target = s.positionals[1];
-  if (!target) fail("graph requires a workflow file or name, e.g. `pi-workflows graph ci.yaml`");
+  if (!target) fail("graph requires a workflow file or name, e.g. `work graph ci.yaml`");
   if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
   if (s.resume) fail("--resume only applies to `run`, not `graph`");
   const fmt = s.format ?? "mermaid";
@@ -247,7 +247,7 @@ function resolveGraph(s: FlagState, common: CommonArgs): CliArgs {
 // `run <name>` — by-name workflow.
 function resolveRun(s: FlagState, common: CommonArgs): CliArgs {
   const name = s.positionals[1];
-  if (!name) fail("run requires a workflow name, e.g. `pi-workflows run ci`");
+  if (!name) fail("run requires a workflow name, e.g. `work run ci`");
   if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
   return { name, ...common, ...(s.resume ? { resume: s.resume } : {}) };
 }
@@ -267,8 +267,8 @@ function resolveFile(s: FlagState, common: CommonArgs): CliArgs {
 
 function printUsage(): void {
   // The bin shim sets PI_WF_PROG to however the command was invoked (`work`,
-  // `workflow`, `pi-workflows`); fall back to the dev launcher's name.
-  const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
+  // `workflow`); fall back to the dev launcher's name.
+  const prog = process.env["PI_WF_PROG"] ?? "work";
   process.stderr.write(
     "Usage:\n" +
       `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
@@ -286,7 +286,7 @@ function printUsage(): void {
 }
 
 function fail(msg: string): never {
-  process.stderr.write(`pi-workflows: ${msg}\n`);
+  process.stderr.write(`work: ${msg}\n`);
   process.exit(2);
 }
 
@@ -313,7 +313,7 @@ async function runWebServer(args: CliArgs): Promise<void> {
     dataDir,
     ...(args.port !== undefined ? { port: args.port } : {}),
   });
-  process.stdout.write(`pi-workflows web UI: ${server.url}\n`);
+  process.stdout.write(`work web UI: ${server.url}\n`);
   process.stdout.write(`  workspace: ${workspace}\n`);
   process.stdout.write(`  history:   ${dataDir}\n`);
   process.stdout.write(`  auth token: ${server.token}\n`);
@@ -354,7 +354,7 @@ function printRuns(rows: RunRow[], filter: string | undefined): void {
   // Resumable runs (didn't finish) are the actionable ones — show how to continue.
   const resumable = rows.filter((r) => r.status === "interrupted" || r.status === "running" || r.status === "queued");
   if (resumable.length > 0) {
-    const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
+    const prog = process.env["PI_WF_PROG"] ?? "work";
     const ex = resumable[0]!;
     process.stdout.write(`\n${resumable.length} unfinished — resume one with: ${prog} run ${ex.name} --resume ${ex.id}\n`);
   }
@@ -404,7 +404,7 @@ async function applyRecover(args: CliArgs): Promise<void> {
   if (!args.recover) return;
   const stored = await lookupRun(args.workspace ?? process.cwd(), args.recover.id);
   if (!stored) {
-    const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
+    const prog = process.env["PI_WF_PROG"] ?? "work";
     fail(`no run "${args.recover.id}" found in history (see \`${prog} runs\`)`);
   }
   args.name = stored.name;
@@ -487,7 +487,7 @@ async function main(): Promise<void> {
 
   // Surface non-fatal authoring warnings (e.g. deprecated/implicit runs-on) on
   // stderr; the run still proceeds.
-  for (const w of plan.warnings ?? []) process.stderr.write(`pi-workflows: warning: ${w}\n`);
+  for (const w of plan.warnings ?? []) process.stderr.write(`work: warning: ${w}\n`);
 
   // `graph` is inspection-only: emit the compiled DAG and exit before any
   // runtime/config/work-dir setup.
@@ -541,7 +541,7 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
     isCI: detectCI(),
   });
   presenter.start(plan);
-  if (!args.quiet && persistent) process.stderr.write(`pi-workflows: run ${runId}\n`);
+  if (!args.quiet && persistent) process.stderr.write(`work: run ${runId}\n`);
 
   // The actual dispatch (config + work-root + agent-composed runtime + persistent
   // store + run + close) lives in `startRun`, shared with the web UI so both call
@@ -563,18 +563,18 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
   // `--resume`. A genuine `failure` ran to a verdict; the presenter already showed
   // it, and re-running is the user's call (a `retry` verb is coming).
   if (persistent && result.status === "interrupted") {
-    const prog = process.env["PI_WF_PROG"] ?? "pi-workflows";
+    const prog = process.env["PI_WF_PROG"] ?? "work";
     const how = args.name !== undefined ? `run ${args.name}` : args.file!;
-    process.stderr.write(`pi-workflows: run ${runId} was interrupted — resume with: ${prog} ${how} --resume ${runId}\n`);
+    process.stderr.write(`work: run ${runId} was interrupted — resume with: ${prog} ${how} --resume ${runId}\n`);
   }
   process.exit(1);
 }
 
 main().catch((err) => {
   if (err instanceof UserFacingError) {
-    process.stderr.write(`pi-workflows: ${err.message}\n`);
+    process.stderr.write(`work: ${err.message}\n`);
   } else {
-    process.stderr.write(`pi-workflows: unexpected error: ${(err as Error).stack ?? err}\n`);
+    process.stderr.write(`work: unexpected error: ${(err as Error).stack ?? err}\n`);
   }
   process.exit(1);
 });

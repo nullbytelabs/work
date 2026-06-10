@@ -21,7 +21,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const PI_PACKAGE = "@earendil-works/pi-coding-agent";
-const PROVIDER_NAME = "pi-workflows-custom";
+const PROVIDER_NAME = "work-custom";
 
 async function loadPi() {
   // Resolve the package from the install dir next to this script (GuestPiRunner

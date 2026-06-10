@@ -82,11 +82,11 @@ export interface StartRunOptions {
 export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
   // A caller-provided `workdir` is theirs to keep; a temp one we mint is ours to
   // remove in `finally` (otherwise every run — especially on the long-lived web
-  // server — leaks a `pi-workflows-*` dir full of job workspaces under tmp).
+  // server — leaks a `work-*` dir full of job workspaces under tmp).
   const ownsWorkRoot = opts.workdir === undefined;
   const workRoot = opts.workdir
     ? resolve(opts.workdir)
-    : await mkdtemp(join(tmpdir(), "pi-workflows-"));
+    : await mkdtemp(join(tmpdir(), "work-"));
 
   // Compose the `uses:` handlers into the (agent-agnostic) runtime. A composite
   // action's inner `uses:` sub-steps route through a late-bound dispatcher that

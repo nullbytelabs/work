@@ -1,8 +1,8 @@
 {
-  "name": "pi-workflows-docs",
+  "name": "work-docs",
   "private": true,
   "type": "module",
-  "description": "Documentation site for pi-workflows (built with VitePress). Isolated from the engine's dependency tree.",
+  "description": "Documentation site for work (built with VitePress). Isolated from the engine's dependency tree.",
   "scripts": {
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",

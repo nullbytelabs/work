@@ -115,7 +115,7 @@ so the lanes tell the truth. The mechanism, for reference:
 
 The one nuance to keep in the legend rather than hide: this is **cooperative I/O
 concurrency on one process + one connection**, not CPU parallelism — exactly the
-right fit for pi-workflows' I/O-bound shell and agent jobs (two CPU-bound jobs
+right fit for work' I/O-bound shell and agent jobs (two CPU-bound jobs
 wouldn't speed up). The lanes show "in flight," which is accurate.
 
 ### Per-job richness the current CLI drops
@@ -159,7 +159,7 @@ tasks/runs.
 This unlocks a mode the ephemeral tools can't offer:
 
 ```
-pi-workflows watch <run-id>     # attach the same TUI to an in-progress or resumed run
+work watch <run-id>     # attach the same TUI to an in-progress or resumed run
 ```
 
 The presenter reconstructs current state by reading checkpoints/runs rather than
@@ -194,7 +194,7 @@ step-level progress.
 ## Library choice — decided: zero-dependency, hand-rolled
 
 **Shipped with no new dependency: pure TypeScript + ANSI.** The deciding
-constraint, found when building, overrode the iteration-1 shortlist: pi-workflows
+constraint, found when building, overrode the iteration-1 shortlist: work
 runs on **Node's native type-stripping** (`erasableSyntaxOnly`, no build step,
 no JSX transform). That rules **Ink** out — it's React/JSX and needs a compile
 step the project deliberately doesn't have — and makes pulling **listr2** (or any
@@ -332,7 +332,7 @@ alternate state source.
 
 ### Step 5 — `graph` command (BUILT)
 
-`pi-workflows graph <file|name> [--format mermaid|dot|json|ascii] [--steps]`
+`work graph <file|name> [--format mermaid|dot|json|ascii] [--steps]`
 (`src/graph/`) emits the compiled `needs` DAG for pre-run inspection — the home
 for the real box-and-edge DAG, separate from the live view, sharing `levelize()`.
 Resolution mirrors `run` (ad-hoc path, or `--workspace … graph <name>`); it

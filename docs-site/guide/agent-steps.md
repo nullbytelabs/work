@@ -93,7 +93,7 @@ endpoint, allowlists it through the sandbox's egress, and injects the API key �
 which is why the key reaches the model without ever being visible inside the guest.
 
 ::: tip Complete example
-[`test/e2e/agent-project/`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/agent-project)
+[`test/e2e/agent-project/`](https://github.com/nullbytelabs/work/tree/main/test/e2e/agent-project)
 is a full, runnable example — a verification workflow (install → typecheck → smoke
 test) and a separate `review.yaml` where a composite `review` action wraps
 `work/agent` to review the source.

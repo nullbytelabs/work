@@ -1,6 +1,6 @@
 # Installation
 
-pi-workflows ships as the npm package [`@nullbytelabs/work`](https://www.npmjs.com/package/@nullbytelabs/work).
+work ships as the npm package [`@nullbytelabs/work`](https://www.npmjs.com/package/@nullbytelabs/work).
 There's no clone and no build step.
 
 ::: warning Before you start
@@ -34,10 +34,10 @@ To hack on the engine itself, clone the repo and use the dev launcher, which run
 the TypeScript directly — no build:
 
 ```bash
-git clone https://github.com/nullbytelabs/pi-workflows
-cd pi-workflows
+git clone https://github.com/nullbytelabs/work
+cd work
 npm install
-./pi-workflows --help
+./work --help
 ```
 
 ## Verify your setup

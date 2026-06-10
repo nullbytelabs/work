@@ -2,7 +2,7 @@
 # description: one job, several sequential steps that pass data through the shared
 #              per-job workspace — a file written by one step is read by the next.
 #              also shows step-level env overriding workflow-level env.
-# usage: ./pi-workflows ./test/e2e/pipeline-steps/workflow.yaml
+# usage: ./work ./test/e2e/pipeline-steps/workflow.yaml
 ---
 name: pipeline-steps
 

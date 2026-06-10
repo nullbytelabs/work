@@ -1,7 +1,7 @@
 # Secrets Management & Injection: Research + Design
 
 > Research for brokering secrets from external stores (Doppler, HashiCorp
-> Vault/OpenBao, Infisical, cloud KMS, SOPS, …) into pi-workflows
+> Vault/OpenBao, Infisical, cloud KMS, SOPS, …) into work
 > (npm `@nullbytelabs/work`) jobs — "GitHub-Actions-style secrets," fetched at run
 > time via a service account / OIDC and injected securely into sandboxed jobs. The
 > spark was **Doppler**; since it's paid SaaS, this covers the OSS/self-hostable
@@ -61,7 +61,7 @@ the gold standard *because a trusted third party already attests the workload*.
 
 **The hard truth for a local CLI (VERIFIED mechanics, INFERRED applicability):**
 workload-OIDC needs an issuer that attests *the workload*. **A developer's laptop has
-no such issuer** — nothing can sign "this is pi-workflows on Josh's laptop" in a way a
+no such issuer** — nothing can sign "this is work on Josh's laptop" in a way a
 backend would trust. So workload-OIDC federation **does not fit a local CLI**. What
 *does* fit:
 - **Interactive OIDC login** (auth-code + PKCE, or device grant) — opens a browser,
@@ -75,7 +75,7 @@ backend would trust. So workload-OIDC federation **does not fit a local CLI**. W
 
 | Tier | Mechanism | Where backends sit |
 |---|---|---|
-| 1 | Static long-lived API keys in env/files | cloud SA JSON keys; raw provider keys; **pi-workflows today** |
+| 1 | Static long-lived API keys in env/files | cloud SA JSON keys; raw provider keys; **work today** |
 | 2 | Scoped service-account / machine-identity tokens (TTL, usage caps, revocable) | Infisical MI, Doppler SA, 1Password SA, Vault AppRole |
 | 3 | Short-TTL federated **OIDC** tokens (no stored credential, ~1h, audience-bound) | GitHub Actions → AWS/GCP/Vault/Infisical/Doppler-Identity |
 | 4 | **Dynamic** per-use secrets (minted on demand, auto-revoked) | Vault/OpenBao dynamic engines |
@@ -84,7 +84,7 @@ backend would trust. So workload-OIDC federation **does not fit a local CLI**. W
 fetch the rest. Mitigations: eliminate it with OIDC where an issuer exists; Vault
 **AppRole response-wrapping** (single-use, tamper-evident `secret_id` delivery);
 short-TTL/usage-capped bootstrap tokens; **OS-keychain** storage; hardware-backed
-keys. pi-workflows' current model (parent shell → `$ENV`) is "env-injection from an
+keys. work' current model (parent shell → `$ENV`) is "env-injection from an
 orchestrator" — fine in CI, weak on a laptop.
 
 **Per-deployment-shape posture (PROPOSED):**

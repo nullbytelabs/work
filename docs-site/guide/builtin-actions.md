@@ -69,7 +69,7 @@ pick a v24+ version.
 :::
 
 ::: tip Runnable examples
-[`test/e2e/checkout`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/checkout)
+[`test/e2e/checkout`](https://github.com/nullbytelabs/work/tree/main/test/e2e/checkout)
 and
-[`test/e2e/install-node`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/install-node).
+[`test/e2e/install-node`](https://github.com/nullbytelabs/work/tree/main/test/e2e/install-node).
 :::

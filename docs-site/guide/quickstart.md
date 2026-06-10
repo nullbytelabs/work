@@ -107,7 +107,7 @@ history, and receive webhook triggers — all loopback-only. See the
 
 ## Explore the examples
 
-The repo's [`test/e2e/`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e)
+The repo's [`test/e2e/`](https://github.com/nullbytelabs/work/tree/main/test/e2e)
 folder is a gallery of runnable examples — matrix builds, fan-out/fan-in,
 conditionals, typed inputs, an agent project, and more. Clone the repo to run them
 directly.

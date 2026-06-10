@@ -6,7 +6,7 @@ manage webhook triggers. It's the same engine as the CLI, with a front end.
 
 ```bash
 work --workspace . --web
-# pi-workflows web UI: http://127.0.0.1:4280/
+# work web UI: http://127.0.0.1:4280/
 ```
 
 Open the printed URL. The console serves the workflows in that workspace's

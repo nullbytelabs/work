@@ -15,13 +15,13 @@ The pleasant surprise: the hard primitives are in the tree, just not exposed as 
 
 | Seam | Where | Reused by |
 |---|---|---|
-| Node ≥ 23.6 preflight | `bin/pi-workflows.mjs:14-21`, `package.json:18-20` | `doctor` (report it instead of crashing) |
+| Node ≥ 23.6 preflight | `bin/work.mjs:14-21`, `package.json:18-20` | `doctor` (report it instead of crashing) |
 | gondolin import + QEMU probe + actionable error | `src/targets/gondolin.ts:64-77`, `:121-127` | `doctor` (reuse the *same* probe, don't duplicate) |
 | Pure, fs-free validators | `parseWorkflow` (`src/spec/parse.ts:269`), `compile` (`src/compiler/compile.ts:206`), `parseConfig` (`src/config/index.ts:54`) | `create`/`init` (validate generated files for free) |
 | `.workflows/` layout + by-name resolution | `src/project.ts` (`WORKFLOWS_DIR`, `findWorkflowByName`) | the `create` → `run <name>` payoff |
 | TTY/CI detection | `src/tui/presenter.ts:35-52`, `detectCI` | gating prompts + color |
 | `UserFacingError` → clean `exit 1` | `src/errors.ts`, caught at `src/cli.ts:249` | state-conflict errors ("already exists, pass --force") |
-| `PI_WF_PROG` (invoked-name plumbing) | `bin/pi-workflows.mjs:34`, used in `printUsage` `src/cli.ts:135` | next-steps epilogues, error prefixes |
+| `PI_WF_PROG` (invoked-name plumbing) | `bin/work.mjs:34`, used in `printUsage` `src/cli.ts:135` | next-steps epilogues, error prefixes |
 | `mkdtemp`/`rm` temp-dir test harness | `test/project.test.ts:30-43` | integration tests for `init` |
 | `HostTarget` double (no-QEMU runtime) | `test/_support.ts:84-115` | fast-tier tests |
 
@@ -340,7 +340,7 @@ classic pipeline-hang trap). No new dependency.
   writes a matching `name:` into `.workflows/`.
 
 ### Two small fixes worth doing while in here (VERIFIED)
-- `fail()` hardcodes the literal `pi-workflows:` prefix (`src/cli.ts:155`) even when invoked as
+- `fail()` hardcodes the literal `work:` prefix (`src/cli.ts:155`) even when invoked as
   `work` — unlike `printUsage()`, which uses `PI_WF_PROG` (`:135`). One-line fix.
 - `NO_COLOR`/`FORCE_COLOR` are handled **nowhere** (grep: zero refs) — worth adding centrally
   when the palette is promoted out of `render.ts`.

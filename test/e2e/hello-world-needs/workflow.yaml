@@ -1,6 +1,6 @@
 # hello world
 # description: sequential jobs where `hello-name` depends on `hello-world` before it executes
-# usage: ./pi-workflows ./test/e2e/hello-world-needs/workflow.yaml
+# usage: ./work ./test/e2e/hello-world-needs/workflow.yaml
 ---
 name: hello-world
 

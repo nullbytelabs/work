@@ -48,7 +48,7 @@ is strictly the interactive-terminal enhancement layered on top.
 | terminal-kit | 3.1.2 | capable but CJS, external `@types`, heavy, no auto non-TTY degrade | Overkill/awkward here |
 | @clack/prompts | 1.5.0 | interactive prompts, not a concurrent status board | Wrong category |
 
-## Direction for pi-workflows (when we get to it)
+## Direction for work (when we get to it)
 
 1. **Default (TTY):** a **sticky status block** — one row per job with a spinner,
    elapsed time, and state — rendered over native scrollback so finished step
@@ -57,7 +57,7 @@ is strictly the interactive-terminal enhancement layered on top.
    back to today's **buffer-and-flush-per-job** output (optionally wrapped in
    `::group::` markers so GitHub/Buildkite viewers collapse them). We already do
    the core of this.
-3. **Inspection, separate from the run:** a `pi-workflows graph <workflow.yaml>`
+3. **Inspection, separate from the run:** a `work graph <workflow.yaml>`
    command that emits the `needs` DAG as **Mermaid and/or Graphviz DOT** (and
    JSON). Cheap, and the graph is most useful pre-run. Inline ASCII (via
    mermaid-ascii/Graph-Easy) is best-effort only.

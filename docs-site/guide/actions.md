@@ -107,5 +107,5 @@ today actions resolve by the `action/<name>` scheme from `.workflows/actions/`.
 ::: tip Next
 - Bundle steps (and wrap `work/agent`) with [Composite actions](./composite-actions).
 - Use the shipped [Built-in actions](./builtin-actions) (`work/checkout`, `work/install-node`).
-- Runnable example: [`test/e2e/js-action`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/js-action) (the `greet` action above).
+- Runnable example: [`test/e2e/js-action`](https://github.com/nullbytelabs/work/tree/main/test/e2e/js-action) (the `greet` action above).
 :::

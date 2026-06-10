@@ -24,7 +24,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dist = resolve(here, "..", "dist", "cli.js");
 const cli = existsSync(dist) ? dist : resolve(here, "..", "src", "cli.ts");
 
-// Surface the invoked command name (`work` / `workflow` / `pi-workflows`) to the
+// Surface the invoked command name (`work` / `workflow`) to the
 // CLI so its usage text matches how the user called it.
 const prog = basename(process.argv[1] ?? "work").replace(/\.mjs$/, "");
 

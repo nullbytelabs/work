@@ -4,7 +4,7 @@
 #              cpu/memory inline. each asserts the sizing it was given actually
 #              took effect inside the gondolin micro-VM (read from /proc), proving
 #              cpus/memory are wired through to QEMU.
-# usage: ./pi-workflows ./test/e2e/machine-types/workflow.yaml
+# usage: ./work ./test/e2e/machine-types/workflow.yaml
 ---
 name: machine-types
 

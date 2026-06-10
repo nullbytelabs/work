@@ -1,6 +1,6 @@
 # Introduction
 
-**pi-workflows** runs YAML-defined workflows on your own machine. Each job is
+**work** runs YAML-defined workflows on your own machine. Each job is
 isolated in a secure micro-VM, execution is durable and crash-resumable, and any
 step can be a plain shell command — or an **AI agent step** that hands work to a
 real agent running inside the sandbox.
@@ -31,12 +31,12 @@ jobs:
 work --workspace . run report
 ```
 
-## Why pi-workflows?
+## Why work?
 
 Plenty of work is worth automating right on your own machine — multi-step jobs
 you'd otherwise wire together by hand. But running arbitrary steps locally usually
 means either trusting them against your host or standing up heavy infrastructure.
-pi-workflows takes a different stance:
+work takes a different stance:
 
 - **Local-first.** No control plane, no external services, no account. The engine
   is a single CLI; durable state lives in an in-process Postgres.

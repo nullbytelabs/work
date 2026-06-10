@@ -1,6 +1,6 @@
 # Requirements
 
-pi-workflows runs every job inside a [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin)
+work runs every job inside a [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin)
 micro-VM — there is no host-execution mode — so it needs a modern Node and QEMU.
 
 ## Prerequisites

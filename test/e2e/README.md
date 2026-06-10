@@ -7,9 +7,9 @@ the fuller **project shape** — `.workflows/*.yaml` pipelines (like
 end-to-end fixtures the test suite runs. Run any of them with:
 
 ```bash
-./pi-workflows ./test/e2e/<name>/workflow.yaml
-./pi-workflows --workspace ./test/e2e/agent-project run ci       # project-shaped: by name
-./pi-workflows --workspace ./test/e2e/agent-project run review   # its second pipeline
+./work ./test/e2e/<name>/workflow.yaml
+./work --workspace ./test/e2e/agent-project run ci       # project-shaped: by name
+./work --workspace ./test/e2e/agent-project run review   # its second pipeline
 ```
 
 When a workflow runs, **its checkout is staged into each job's workspace**

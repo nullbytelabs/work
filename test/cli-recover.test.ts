@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { createAbsurdEngine } from "../src/runtime/index.ts";
 import { RunRepository } from "../src/persistence/runs.ts";
 
-const BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "pi-workflows.mjs");
+const BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "work.mjs");
 
 function cli(ws: string, ...args: string[]) {
   return spawnSync(BIN, ["--workspace", ws, ...args], { encoding: "utf8" });

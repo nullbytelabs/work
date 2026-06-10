@@ -2,7 +2,7 @@
 
 > Design note for moving agentic `uses: agent/<name>` execution off the host and
 > **into the `runs-on` sandbox**. The **problem framing and proposed design are
-> pi-workflows decisions**; every claim about what Pi or Gondolin can do
+> work decisions**; every claim about what Pi or Gondolin can do
 > underneath is grounded in the repo's existing research docs
 > ([`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md),
 > [`gondolin-secure-execution.md`](gondolin-secure-execution.md),
@@ -27,7 +27,7 @@
 
 ## 1. The problem (now solved — see the Status banner above)
 
-pi-workflows' entire isolation thesis is that **`runs-on: gondolin` is the
+work' entire isolation thesis is that **`runs-on: gondolin` is the
 default and secure target** — a step's work executes inside a hardware-virtualized
 micro-VM whose network and filesystem I/O is mediated by host code. Shell (`run`)
 steps honor this. **Agent (`uses:`) steps originally did not** — they executed on
@@ -163,7 +163,7 @@ the live Gondolin docs:
 
 The pieces line up: a shared `/workspace`, an allowlistable HTTPS egress for the
 model API, header-only secret injection for the key, and a CLI/SDK that runs as a
-subprocess. The missing wiring is on the pi-workflows side.
+subprocess. The missing wiring is on the work side.
 
 ---
 

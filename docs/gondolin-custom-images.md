@@ -77,7 +77,7 @@ CLI equivalent for selection: `GONDOLIN_GUEST_DIR=./out gondolin bash`. Output d
 
 ---
 
-## 3. Design for pi-workflows
+## 3. Design for work
 
 ### Two namespaces: `gondolin` (stock) vs `work:*` (ours)
 
@@ -215,7 +215,7 @@ Per project memory, verify against a **real run**, not just the suite.
 2. **Unit:** `parseRunsOn`; `validateRunsOn` accepts `work:<variant>` / rejects junk;
    `runsOnWarning` silent for `work:`; registry resolution (user overrides bundled, unknown
    → list); `ensureImageBuilt` reuse-if-present with a faked spawn (no real build in unit).
-3. **Real:** `./bin/pi-workflows.mjs image build base` runs `gondolin build` and produces
+3. **Real:** `./bin/work.mjs image build base` runs `gondolin build` and produces
    the asset dir; `image ls` shows it built. Then a real run of `test/e2e/work-base-image`
    boots `work:base` in-VM and `git --version` / `jq -V` pass.
 4. **Regression:** an existing `runs-on: gondolin` e2e still runs unchanged.

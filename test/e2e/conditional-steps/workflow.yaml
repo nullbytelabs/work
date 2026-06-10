@@ -7,7 +7,7 @@
 #       success()/failure()/always()/cancelled(). With default inputs (mode=ci)
 #       the release-only step and the `notify` job are skipped — skipped work is
 #       not a failure, so the workflow still succeeds.
-# usage: ./pi-workflows ./test/e2e/conditional-steps/workflow.yaml --inputs '{"mode":"release"}'
+# usage: ./work ./test/e2e/conditional-steps/workflow.yaml --inputs '{"mode":"release"}'
 ---
 name: conditional-steps
 

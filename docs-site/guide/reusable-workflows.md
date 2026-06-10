@@ -159,7 +159,7 @@ pass **config** (which env, which target — known up front) through `with:`; pa
 ::: tip Same idea as GitHub Actions
 This mirrors GitHub's reusable workflows, with one deliberate difference: GitHub
 evaluates a caller's `with:` at run time (so it allows `needs.*`), whereas
-pi-workflows binds inputs at compile time. Hence the rule above. Everything else —
+work binds inputs at compile time. Hence the rule above. Everything else —
 the caller-job shape, `on: workflow_call`, explicit outputs — lines up.
 :::
 
@@ -186,6 +186,6 @@ Cross-repo references (a remote `workflow@repo`) are reserved but not implemente
 :::
 
 ::: tip Runnable example
-See [`test/e2e/reusable-basic`](https://github.com/nullbytelabs/pi-workflows/tree/main/test/e2e/reusable-basic)
+See [`test/e2e/reusable-basic`](https://github.com/nullbytelabs/work/tree/main/test/e2e/reusable-basic)
 for the full `staging` / `lint` / `build` trio used above.
 :::

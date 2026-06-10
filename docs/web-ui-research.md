@@ -71,7 +71,7 @@ and the hook stream — not new engine machinery.
 ## 2. The key alignment: `workflow_dispatch` *is* our only trigger
 
 In GitHub Actions, `workflow_dispatch` is one of many `on:` events, and the input
-form only appears if the author opts into it. In pi-workflows, **`on:` is parsed
+form only appears if the author opts into it. In work, **`on:` is parsed
 but never acted on** (`src/spec/types.ts:103`, `src/spec/parse.ts:318`) — there is
 no event / cron / PR-trigger machinery at all. So *every* workflow is effectively
 dispatch-only, and **the "Run workflow" button is the complete trigger story.**
