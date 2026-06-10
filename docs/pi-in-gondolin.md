@@ -3,9 +3,9 @@
 > Design note for moving agentic `uses: agent/<name>` execution off the host and
 > **into the `runs-on` sandbox**. The **problem framing and proposed design are
 > work decisions**; every claim about what Pi or Gondolin can do
-> underneath is grounded in the repo's existing research docs
-> ([`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md),
-> [`gondolin-secure-execution.md`](gondolin-secure-execution.md),
+> underneath is grounded in the Pi SDK docs (https://pi.dev/docs) and the
+> repo's existing research docs
+> ([`gondolin-secure-execution.md`](gondolin-secure-execution.md),
 > [`gondolin-custom-images.md`](gondolin-custom-images.md)) and the live Pi/Gondolin
 > sources, and flagged **UNVERIFIED — needs confirmation** where the sources don't
 > settle it. Builds on the code-path trace recorded below. Date: 2026-05-31.
@@ -106,8 +106,7 @@ the API key never present in the guest. (There is no host-execution mode —
 
 ## 2. What Pi gives us to work with
 
-Pi can be driven three ways (verified — see
-[`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md) §1, §10, and the live RPC
+Pi can be driven three ways (verified against the Pi SDK docs and the live RPC
 docs):
 
 | Mode | How | Where it can run | Fit for in-guest |
@@ -118,12 +117,11 @@ docs):
 
 The CLI and SDK ship in the **same npm package** (`@earendil-works/pi-coding-agent`),
 so installing the package in a guest image gives both the `pi` binary and the SDK.
-[`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md) §1/§10 already states the
-conclusion we build on: *"RPC mode is the right surface if you want process
+Our earlier Pi SDK research (note since removed; in git history) already stated
+the conclusion we build on: *"RPC mode is the right surface if you want process
 isolation / language independence … which is also the natural fit when steps run
 inside a Gondolin sandbox."* Relevant hermetic knobs: `PI_OFFLINE=1` / `--offline`
-disables startup network ops; `PI_SKIP_VERSION_CHECK=1` skips the update probe
-([`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md) §11).
+disables startup network ops; `PI_SKIP_VERSION_CHECK=1` skips the update probe.
 
 The original `PiAgentRunner` already spoke Pi via the SDK; the work was about
 **where that process lives**, not re-integrating Pi.
@@ -226,9 +224,8 @@ host: read result back from /workspace (shared mount)
 - **Whole agent in-guest.** Model loop *and* tools execute inside the VM; the host
   only stages inputs and reads outputs.
 - **Maps onto the agent step's existing durability.** An agent step is already the
-  memoized `taskCtx.step` unit (there is **no mid-LLM-turn resume** —
-  [`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md) §8), so one-shot-per-step
-  loses nothing the engine relied on.
+  memoized `taskCtx.step` unit (Pi has **no mid-LLM-turn resume**), so
+  one-shot-per-step loses nothing the engine relied on.
 - **Cons:** one prompt per step (no in-step multi-turn steering); requires a
   Pi-equipped guest image (§3); Pi's stdout must be parsed for the final
   message/outputs (use `--mode json`, or the wrapper writes a JSON file). Abort =
@@ -428,7 +425,7 @@ export class GuestPiRunner implements AgentRunner {
     // 2. Run Pi in-guest; the key is injected by Gondolin into the model call,
     //    so the guest command references only a placeholder env var.
     const r = await this.deps.exec(
-      `node /opt/pi-workflows/run-agent.mjs /workspace/.pi/req.json /workspace/.pi/res.json`,
+      `node /opt/work/run-agent.mjs /workspace/.pi/req.json /workspace/.pi/res.json`,
       { env: { NODE_EXTRA_CA_CERTS: "/etc/gondolin/mitm/ca.crt", PI_OFFLINE: "0" } },
     );
     if (!r.ok) throw new UserFacingError(`in-guest agent failed: ${r.stderr.slice(0, 300)}`);
@@ -499,8 +496,8 @@ step, or pass agent network needs into `makeTarget` from the compiled plan.
 
 ## Sources
 
-- **Internal (this repo):** [`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md)
-  (Pi modes/SDK/RPC, durability, auth), [`gondolin-secure-execution.md`](gondolin-secure-execution.md)
+- **Pi SDK reference:** https://pi.dev/docs (Pi modes/SDK/RPC, durability, auth)
+- **Internal (this repo):** [`gondolin-secure-execution.md`](gondolin-secure-execution.md)
   (exec, fs/mounts, networking, secrets, MITM CA, the `pi-gondolin.ts` example),
   [`gondolin-custom-images.md`](gondolin-custom-images.md) (Node/Pi guest image),
   [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (the

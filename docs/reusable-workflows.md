@@ -5,8 +5,8 @@
 > `deploy.yaml`), passing parameters via `with:` and consuming the callee's
 > outputs. The GitHub-Actions prior art is verified against their docs; the
 > mapping onto work' **flat, runtime-agnostic `ExecutionPlan`** is the
-> design work here. Companion seams: [`phase-1.md`](phase-1.md) (durability
-> caveat), [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (the
+> design work here. Companion seams: [`durable-orchestrator.md`](durable-orchestrator.md)
+> (durability model), [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (the
 > *step*-level `uses:` surface this deliberately does **not** touch). Date: 2026-06-06.
 >
 > **Status: implemented (v1).** The core vertical shipped — spec (`uses:`/`with:`
@@ -218,9 +218,10 @@ collecting its outputs.
 - **Pro:** `with:` can carry **runtime** values (`needs.build.outputs.version`),
   because the sub-run is compiled *after* upstream jobs finish. Clean
   encapsulation — the callee never sees caller-side job names.
-- **Con:** nests the runtime. Whole-workflow crash-resume is *already* incomplete
-  (cross-job orchestration lives in JS, not a durable task — see
-  [`phase-1.md`](phase-1.md)); nesting runs compounds that. `work graph` can't
+- **Con:** nests the runtime. At the time of writing, whole-workflow crash-resume
+  was incomplete (it has since shipped — see
+  [`durable-orchestrator.md`](durable-orchestrator.md)); nesting runs would
+  compound resume complexity either way. `work graph` can't
   show the inner DAG without resolving + compiling the callee. Parallelism is
   coarser (the sub-run is one scheduling unit).
 
@@ -554,7 +555,7 @@ too. Exact numeric limit (jobs-per-plan) is a tuning knob, not a design fork.
 - GitHub Actions — Contexts reference (the §8 divergence: `jobs.<id>.with.<input>`
   allows `github, needs, strategy, matrix, inputs, vars` — i.e. runtime `needs`):
   https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
-- Internal seams: [`phase-1.md`](phase-1.md) (durability/orchestration caveat),
+- Internal seams: [`durable-orchestrator.md`](durable-orchestrator.md) (durability/orchestration),
   [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (step-level `uses:`),
   `src/compiler/compile.ts` (`expandJob` matrix-flatten precedent, `topoSort`),
   `src/compiler/inputs.ts` (`resolveInputs`, reused for `with:`),

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 WS="./test/e2e/agent-project"
-WORK="./bin/pi-workflows.mjs"
+WORK="./bin/work.mjs"
 
 echo "Basic Graph Rendering"
 echo "---------------------"

@@ -122,23 +122,16 @@ built through the same `gondolin build` path a user image is.
   build our own caching/registry layer on top — if Gondolin's output is present we reuse
   it, otherwise we ask Gondolin to build it.
 
-### Engine integration points (verified against current code)
+### Engine integration points (as shipped)
 
-`runs-on` is an opaque exact-match string today, so two call-sites **reject**
-`work:<variant>` and a third should treat it as explicit. The runtime threads `job.runsOn`
-verbatim and already supports a `makeTarget` override + a `resolveJobNetwork` forward.
-
-| Where | Today | Needs |
-|---|---|---|
-| `src/compiler/compile.ts` — `validateRunsOn()` | throws for anything but `gondolin` | also accept `work:<variant>` (shape only; keep the `local`-removed message) |
-| `src/compiler/compile.ts` — `runsOnWarning()` | only an *omitted* `runs-on` warns | treat explicit `work:<variant>` as explicit (no nag) |
-| `src/targets/factory.ts` — `makeTarget()` | throwing exact-match `switch` | parse `namespace[:variant]`; `gondolin` → stock; `work:<variant>` → resolve+build → `imagePath` |
-| `src/targets/gondolin.ts` — `GondolinTargetConfig` + `provision()` | flat `createOpts`, no image hook | add `resolveImagePath?`; when set, `await` it → add `sandbox: { imagePath }` to `createOpts` |
-| `src/runtime/absurd/runtime.ts` (~`:297`) | forwards `runsOn` + network to `makeTarget` | add an optional `resolveImagePath` forward (mirrors `resolveJobNetwork`) |
-
-`run.ts` composes the resolver (workspace → resolve build-config → `gondolin build` →
-`imagePath`) and passes it as `resolveImagePath`, the same place it composes the egress
-resolvers. Tests keep injecting a `makeTarget` double, so they never build images.
+The `work:*` grammar lives in `src/compiler/runs-on.ts` (shared by compiler and
+factory); `makeTarget` (`src/targets/factory.ts`) maps `work:<variant>` to a
+resolved+built image selector; `GondolinTarget` gains a `resolveImagePath` hook
+that adds `sandbox: { imagePath }` at provision time; the runtime forwards it the
+same way it forwards `resolveJobNetwork`. `run.ts` composes the resolver
+(workspace → resolve build-config → `gondolin build` → selector) in the same
+place it composes the egress resolvers. Tests inject a `makeTarget` double, so
+they never build images.
 
 ### CLI, doctor, packaging
 
@@ -156,69 +149,6 @@ resolvers. Tests keep injecting a `makeTarget` double, so they never build image
   `gondolin build`).
 - Flipping `DEFAULT_RUNS_ON` to `work:base` (revisit once the build path is proven).
 
----
-
-## 4. Implementation steps (unstarted)
-
-Ordered; each part is independently testable. File refs are the §3 table.
-
-**A. `work:*` grammar (compiler, no I/O).**
-- `src/targets/runs-on.ts` (new) — `parseRunsOn(value): { namespace: "gondolin" | "work";
-  variant?: string }` (kebab variant); shared by compiler + factory.
-- `src/compiler/compile.ts` — `validateRunsOn` accepts `gondolin` and `work:<variant>`
-  (shape only; existence/build is a runtime concern); keep the `local`-removed message.
-  `runsOnWarning` treats an explicit `work:<variant>` as explicit (no nag).
-
-**B. `src/images/` subsystem (mirror `src/actions/`).**
-- `registry.ts` — `resolveImageConfig(variant, workspaceSource)`: find the build-config,
-  **user-space** (`<workspaceSource>/.workflows/images/<variant>/build-config.json`) first,
-  then **bundled** (`new URL("./builtin", import.meta.url)/<variant>/`); `UserFacingError`
-  + available-list on miss. `listImages(workspaceSource)` for the CLI.
-- `build.ts` — `ensureImageBuilt(buildConfigPath, arch): Promise<string>`: the output dir
-  is a per-variant/per-arch dir the engine owns; reuse it if it has `manifest.json`, else
-  **spawn `gondolin build --config <buildConfigPath> --output <dir> --arch <arch>`** (resolve
-  the bin from the installed `@earendil-works/gondolin`; stream output). An in-process
-  promise map prevents concurrent jobs double-building. `UserFacingError` if the bin is
-  absent. No content-hash/cache abstraction — reuse-if-present, else ask Gondolin.
-  (`process.arch`: `arm64→aarch64`, `x64→x86_64`.)
-- `builtin/base/build-config.json` — **`work:base`**, package-only (`rootfsPackages`: stock
-  defaults + `git`, `jq`, `curl`, `bash`, `ca-certificates`). `index.ts` — barrel.
-
-**C. Boot from the image (target + runtime forward).**
-- `src/targets/gondolin.ts` — `GondolinTargetConfig.resolveImagePath?: () => Promise<string
-  | undefined>`; `provision()` awaits it and adds `sandbox: { imagePath }` to `createOpts`
-  when set (absent → stock).
-- `src/targets/factory.ts` — `makeTarget` parses `runs-on`; `work:<variant>` wires
-  `resolveImagePath` from a new `TargetContext.resolveImagePath`.
-- `src/runtime/absurd/runtime.ts` — add an optional `resolveImagePath` forward into the
-  `TargetContext` (mirrors `resolveJobNetwork`).
-- `src/run.ts` — compose the resolver (`opts.workspaceSource` + host arch →
-  `resolveImageConfig` → `ensureImageBuilt`) and pass it as `resolveImagePath`. Tests keep
-  their `makeTarget` double, so they never build.
-
-**D. CLI + packaging.**
-- `src/cli.ts` dispatch `work image build [<name>]` / `work image ls` (`src/images/cli.ts`,
-  thin wrappers over B). `scripts/build.mjs` — `cp(src/images/builtin → dist/images/builtin)`.
-  No doctor build-tool probing — defer to Gondolin.
-
-**E. Dogfood + docs.**
-- `test/e2e/work-base-image/` — `runs-on: work:base`, a `run:` step asserting
-  `git --version && jq --version`; gate the real build behind `WORK_TEST_IMAGES=1` (network
-  + time), like the network-gated examples. Flip this doc's status to "implemented" for
-  what ships.
-
-## 5. Verification
-
-Per project memory, verify against a **real run**, not just the suite.
-
-1. `npm run typecheck`, `lint`, `knip` clean.
-2. **Unit:** `parseRunsOn`; `validateRunsOn` accepts `work:<variant>` / rejects junk;
-   `runsOnWarning` silent for `work:`; registry resolution (user overrides bundled, unknown
-   → list); `ensureImageBuilt` reuse-if-present with a faked spawn (no real build in unit).
-3. **Real:** `./bin/work.mjs image build base` runs `gondolin build` and produces
-   the asset dir; `image ls` shows it built. Then a real run of `test/e2e/work-base-image`
-   boots `work:base` in-VM and `git --version` / `jq -V` pass.
-4. **Regression:** an existing `runs-on: gondolin` e2e still runs unchanged.
-5. **Packaging:** `npm run build` → `dist/images/builtin/base/build-config.json` present;
-   then `rm -rf dist` (dist shadows src for the shim).
-6. Full `npm test` (Node 25 via fnm + QEMU).
+The implementation lives in `src/images/` (registry + lazy tag build, mirroring
+`src/actions/`), with the e2e proof in `test/e2e/work-base-image/`
+(gated behind `WORK_TEST_IMAGES=1` — real build, network + time).

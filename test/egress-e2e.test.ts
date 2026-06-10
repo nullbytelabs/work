@@ -23,7 +23,7 @@
  * `allowedInternalHosts` is required because gondolin blocks private ranges by
  * default even when allowlisted. No external network is touched.
  *
- * Docs: docs/gondolin-secure-execution.md, docs/quality-gates-research.md §5.1.
+ * Docs: docs/gondolin-secure-execution.md.
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";

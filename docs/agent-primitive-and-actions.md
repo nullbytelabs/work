@@ -447,7 +447,7 @@ because it reinvents a worse, *agent-only* version of the general action mechani
 Pi's entire resource surface forever. Its genuinely useful part — the verified
 mapping of agent concepts onto Pi primitives (`DefaultResourceLoader`,
 `createAgentSession`, the system-prompt-vs-task-prompt split) — lives on in
-[`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md) and in §5/§8/§8a here. Recorded
+§5/§8/§8a here (and in the Pi SDK docs, https://pi.dev/docs). Recorded
 so it isn't relitigated.
 
 **What happens to today's `agent/<name>`.** This doc argues the richness belongs in
@@ -529,7 +529,7 @@ Each phase is independently shippable and independently useful.
   `src/agent/uses-handler.ts` (the handler `work/agent` slims down from),
   `src/compiler/inputs.ts` (`resolveInputs`, reused for action inputs).
 - Companions: [`reusable-workflows.md`](reusable-workflows.md) (the job-level
-  sibling), [`pi-coding-agent-sdk.md`](pi-coding-agent-sdk.md) (the Pi resource/
+  sibling), the Pi SDK docs (https://pi.dev/docs — the Pi resource/
   session surface `work/agent` lowers onto), [`pi-in-gondolin.md`](pi-in-gondolin.md)
   (in-guest Pi execution).
 </content>

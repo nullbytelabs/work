@@ -235,6 +235,6 @@ Use PGLite as the **embedded/dev/test/single-tenant tier** of the engine — it 
 - Repo / Postgres fork: https://github.com/electric-sql/pglite , https://github.com/electric-sql/postgres-pglite
 - Concurrency issue (global lock / undefined behavior): https://github.com/electric-sql/pglite/issues/324
 - plpgsql availability: https://github.com/electric-sql/pglite/issues/36
-- Engine context: [`absurd-durable-workflows.md`](absurd-durable-workflows.md), [`pgmq-message-queues.md`](pgmq-message-queues.md), [`gondolin-secure-execution.md`](gondolin-secure-execution.md), [`../README.md`](../README.md)
+- Engine context: [`absurd-durable-workflows.md`](absurd-durable-workflows.md), [`gondolin-secure-execution.md`](gondolin-secure-execution.md), [`../README.md`](../README.md)
 
 **UNVERIFIED:** exact current patch version over time; full unsupported-feature list; DB size limits; webpack/Rollup/Bun-bundler specifics; Kysely support; any first-hand report of PGMQ/pg-boss/graphile-worker running on PGLite (none found).

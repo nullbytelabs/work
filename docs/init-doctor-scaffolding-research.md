@@ -1,11 +1,14 @@
 # `work init` / `work create` / `work doctor` — research & design
 
-Status tags used below: **VERIFIED** (confirmed against the current tree, file:line),
-**PROPOSED** (a design recommendation), **NEEDS-BUILDING** (nothing in the codebase
-does this yet). The headline: *all three commands are greenfield.* `parseArgs` only
-dispatches `run`, `graph`, and a bare `<file.yaml>` path (`src/cli.ts:104-129`); there
-is no `init`/`create`/`doctor`, no global config, no scaffolder. But the engine already
-ships most of the *seams* these commands need — the work is wiring, not invention.
+> **Status: implemented.** All three commands shipped — `doctor` (`src/doctor/`),
+> `create` (`src/scaffold/`), `init` (`src/init/`), dispatched command-first in
+> `src/cli.ts` — along with the config layering this doc designs
+> (`parsePartialConfig`/`mergeConfig`/`resolveConfigLayers` in `src/config/index.ts`,
+> validation post-merge). The body below is the design record as researched:
+> **VERIFIED**/**PROPOSED**/**NEEDS-BUILDING** tags and file:line refs reflect the
+> tree *at research time*; read it for the rationale (why XDG-first, why doctor is
+> read-only with no `--fix`, why templates are embedded strings, the merge-model
+> trap), not as a map of current code.
 
 ---
 
@@ -413,30 +416,11 @@ require npm's `-- --flag` separator (we're our own launcher — pass flags direc
 
 ---
 
-## 7. Recommended v1 slice (smallest useful, in dependency order)
+## 7. As shipped
 
-1. **`work doctor`** (read-only) — highest leverage, no new product surface, pure-ish with a
-   probe seam. Reuses the gondolin import probe + Node floor; turns today's late/vague VM
-   failure into an up-front checklist. Ship `--json`, exit 0/1, **no `--fix`**.
-2. **`work create <name>`** — templates-as-embedded-TS for YAML, validated through
-   `parseWorkflow` before write, shared `slug()`, next-steps epilogue. Composes with the
-   existing by-name runner for free. Start with `hello-world` + `agent-action`.
-3. **`work init --project`** — `.workflows/` + hello-world + starter `config.json`. Builds on
-   the `create` generators.
-4. **Config layering + `work init --global`** — the biggest change (move validation post-merge;
-   `loadConfig(paths[])`; `resolveConfigLayers`). Do this *last* and deliberately, because the
-   `parseConfig` validation-order trap (§2) is easy to get subtly wrong.
-
-Cross-cutting prerequisite for all four: the **dispatch-first `main()`** + `parseFlags` helper
-(§4), and promoting the color palette out of `render.ts`.
-
-### Honest "needs-building" ledger
-Nothing here exists yet: no `init`/`create`/`doctor` command, no global config, no merge, no
-scaffolder, no probe injection, no `parseFlags`, no exported palette, no `NO_COLOR` handling,
-no e2e skip gate. What *does* exist — and carries most of the weight — is the list in §0.
-`--global` needs the artifact §2 defines. Note the two distinct "skills": the engine's own
-workflow-agent `skills/` subdir is reserved/unwired in `loadAgent` (a fact about the
-`agent-action` template), whereas `--include-skill` writes a developer Claude Code / Amp skill
-— files on disk, fully buildable today, unrelated to the engine (§3).
-Verify any of this against `demo.sh`, not just the suite, before trusting gondolin-dependent
-behavior.
+The v1 slice landed in the dependency order designed here: `doctor` first
+(read-only, probe-injected, `--json`, exit 0/1, no `--fix`), then `create`
+(embedded-string templates validated through `parseWorkflow` before write,
+shared `slug()`, next-steps epilogue), then `init`, then the config layering
+(validation moved post-merge; `loadConfig` over `resolveConfigLayers`). See
+`src/doctor/`, `src/scaffold/`, `src/init/`, `src/config/index.ts`.

@@ -10,16 +10,16 @@
 > **Builds on** [`web-ui-research.md`](web-ui-research.md) — the webhook receiver is
 > an *extension of the same long-lived `node:http` server* (RunManager, the
 > `parse→compile→Runtime.run` dispatch path, the loopback posture), not a new
-> stack. **No code written yet.** Consolidates six parallel investigations
-> (trigger/spec/context, security, Alertmanager/Grafana specifics, exposure +
-> async receiver, the incident pipeline, config/secrets/ops). Date: 2026-06-01.
+> stack. Written pre-implementation (2026-06-01); consolidates six parallel
+> investigations (trigger/spec/context, security, Alertmanager/Grafana specifics,
+> exposure + async receiver, the incident pipeline, config/secrets/ops).
 >
 > Tags used throughout: **VALIDATED** (grounded in our code, file:line) /
 > **VERIFIED** (cited external standard/vendor doc) / **PROPOSED** (a design choice)
 > / **NEEDS-BUILDING** (net-new engine work).
 >
-> **Implementation status (2026-06-03): trigger spine + Phase-0 receiver SHIPPED**
-> (zero new deps; `node:http` + `node:crypto`):
+> **Status: shipped** — trigger spine + receiver (zero new deps; `node:http` +
+> `node:crypto`):
 > - **`event` context (§3):** `${{ event.* }}` with nested paths + array indexing
 >   (`event.alerts[0].labels.severity`) in BOTH the interpolation engine
 >   (compile-time bake) and the `if:`/`when:` condition engine (runtime, threaded
@@ -324,8 +324,8 @@ operator may forget the edge, or switch tunnels). Note Alertmanager can't do SSO
 for the CF-Access path it needs a **service token**; otherwise lean on our bearer
 check.
 
-> **Updates from [`embedded-tunneling-research.md`](embedded-tunneling-research.md)
-> (programmatic/embedded tunnels):** two refinements to the above. (1) ngrok's edge
+> **Updates from a follow-up look at programmatic/embedded tunnels
+> (research note since removed; in git history):** two refinements to the above. (1) ngrok's edge
 > `verify-webhook` is **named-provider-only with no generic-HMAC mode**, and **neither
 > Alertmanager nor Grafana is on the list** — so for *our* senders the edge can't
 > verify signatures; our own `node:crypto` HMAC/bearer is the boundary (ngrok's edge

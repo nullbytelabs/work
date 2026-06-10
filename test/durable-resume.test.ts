@@ -1,13 +1,11 @@
 /**
- * Durable whole-workflow crash-resume — the intended behavior, pinned as a test.
+ * Durable whole-workflow crash-resume, pinned as a test.
  *
  * Absurd's whole point is durable execution: a run interrupted partway should be
- * resumable, and work that already finished should not be redone. Today the
- * cross-job orchestration lives in plain JS over `AbsurdRuntime.run`, so stopping
- * the platform mid-run leaves the in-flight job logged as a failure that a restart
- * can't pick back up (see the runtime header note + docs/phase-1.md "Known
- * limitations"). This test encodes the behavior we WANT and is expected to fail
- * until the runtime uses Absurd's resume more fully.
+ * resumable, and work that already finished should not be redone. The cross-job
+ * orchestration runs inside a durable orchestrator task (see the runtime header
+ * note + docs/durable-orchestrator.md), so a restart picks an interrupted run
+ * back up. This test pins that behavior.
  *
  * It models a platform stop deterministically — no racing on worker leases:
  *   Phase 1 ("running")  — a 2-job workflow (`first` → `second`) runs against an

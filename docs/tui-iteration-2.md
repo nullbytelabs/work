@@ -1,7 +1,9 @@
 # TUI Iteration 2 — richer run view + DAG-aware layout
 
-A follow-on to [`tui-research.md`](./tui-research.md). That note surveyed the
-mature tools, concluded a live box-and-edge DAG is overkill, and landed on a
+A follow-on to an iteration-1 research note (since removed; in git history).
+That note surveyed the mature tools (Turborepo, Nx, Dagger, Bazel) and the
+library landscape (Ink, listr2, log-update),
+concluded a live box-and-edge DAG is overkill, and landed on a
 flat **status list keyed by job** with the real graph pushed to a separate
 inspection command. This iteration revisits that conclusion with a sharper goal:
 **carry more of the run's structure and state into the live view** — the
@@ -177,8 +179,8 @@ re-derives it from Postgres.
    reader can therefore faithfully reconstruct **each job's** progress from
    Postgres, but "is the whole workflow still advancing?" depends on the JS
    orchestrator still being alive. Full attach-to-a-resumed-*workflow* waits on
-   the planned refactor that makes the whole run a durable parent task (tracked
-   in `docs/phase-1.md`). Until then, `watch` is best framed as **read-only
+   the refactor that makes the whole run a durable parent task (since shipped —
+   see `docs/durable-orchestrator.md`). Until then, `watch` is best framed as **read-only
    observation of a run owned by a live host process**, not takeover of an
    orphaned one.
 2. **`runId` isn't surfaced.** The runtime mints `runId = randomUUID()` per run
@@ -388,7 +390,6 @@ match.
 
 ## Sources
 
-- Iteration 1 research + library landscape: [`docs/tui-research.md`](./tui-research.md)
 - Event stream / hooks: [`src/runtime/types.ts`](../src/runtime/types.ts)
 - DAG + plan: [`src/compiler/plan.ts`](../src/compiler/plan.ts)
 - Live TUI (as built): [`src/tui/`](../src/tui/) — `presenter.ts`, `levels.ts`, `store.ts`, `render.ts`; wired in [`src/cli.ts`](../src/cli.ts)

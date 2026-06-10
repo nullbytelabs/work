@@ -22,8 +22,8 @@
  * task) via `retryTask`, fast-forwarding the `ctx.step` checkpoints it already
  * completed. A job that ran and *failed cleanly* (a step exited non-zero) is a
  * real terminal outcome and is never silently retried. The cross-job walk itself
- * is still plain JS (not yet a durable task) and there's no user-facing `--resume`
- * entrypoint or persistent-by-default storage — see docs/phase-1.md.
+ * runs inside a durable orchestrator task (see docs/durable-orchestrator.md), so
+ * an interrupted run resumes end-to-end via `work resume <id>`.
  */
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";

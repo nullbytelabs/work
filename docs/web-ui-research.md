@@ -3,24 +3,21 @@
 > Research note for a `--web` flag that boots a small local website giving a
 > tightened, lightweight **GitHub-Actions-like** experience: `workflow_dispatch`-style
 > triggering, auto-generated input forms, a live job DAG, streaming logs, and run
-> history. **No code has been written yet** — this consolidates five parallel
+> history. Written pre-implementation (2026-06-01); it consolidates five parallel
 > investigations into the engine's integration seams, persistence, the local
-> server, the frontend, and the GHA feature mapping. Date: 2026-06-01.
+> server, the frontend, and the GHA feature mapping.
 >
 > **Verdict:** highly feasible, and mostly an *assembly* job over capabilities the
 > engine already exposes. An MVP ships with **zero engine changes and zero new
 > dependencies**. The only genuine gaps are persistence-shaped (a queryable run
 > record + durable logs) and are cleanly deferrable to a later phase.
 >
-> **Implementation status (2026-06-03): Phase 0 SHIPPED + Phase 1 run history.**
-> Built with zero new dependencies: `src/web/{server,run-manager,web-presenter,
-> client,index}.ts`, the `listWorkflows` + `startRun` refactors, a caller-supplied
-> `runId` on `RunContext`, and `work --web [--workspace <dir>] [--port 4280]`.
-> Server is loopback-only with Host-header + `X-Work-Token` CSRF guards; routes
-> match §3; live updates over SSE. Covered by `test/web.test.ts`. The
-> hand-drawn-SVG frontend is the documented MVP (not pixel-polished).
->
-> **Phase 1–3 SHIPPED.** An engine `query` seam (`AbsurdEngine.query`) backs two
+> **Status: shipped through Phase 3,** zero new dependencies:
+> `src/web/{server,run-manager,web-presenter,client,index}.ts`, the
+> `listWorkflows` + `startRun` refactors, a caller-supplied `runId` on
+> `RunContext`, and `work --web [--workspace <dir>] [--port 4280]`. Server is
+> loopback-only with Host-header + `X-Work-Token` CSRF guards; routes match §3;
+> live updates over SSE (`test/web.test.ts`). An engine `query` seam (`AbsurdEngine.query`) backs two
 > engine-owned tables (`src/persistence/`): `work.runs` (option B — run metadata,
 > recorded at dispatch + finish) and `work.run_events` (every SSE frame, persisted
 > per-run with a synchronous seq). `work --web` defaults a persistent `dataDir`

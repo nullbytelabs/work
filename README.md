@@ -237,7 +237,7 @@ work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
 
 Under the hood, a workflow compiles to a graph of durable tasks: each **job** is an [Absurd](https://www.npmjs.com/package/absurd-sdk) task and each **step** is a checkpoint, journaled to an in-process Postgres ([PGLite](https://www.npmjs.com/package/@electric-sql/pglite)) — no external services. The `needs` DAG drives parallel scheduling; every job runs in a [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin) micro-VM, and agent steps invoke Pi inside that sandbox.
 
-The deep dives live in [`docs/`](docs/): [`phase-1.md`](docs/phase-1.md) (what's built + internals), [`absurd-durable-workflows.md`](docs/absurd-durable-workflows.md), [`gondolin-secure-execution.md`](docs/gondolin-secure-execution.md), [`pi-in-gondolin.md`](docs/pi-in-gondolin.md), and [`agent-primitive-and-actions.md`](docs/agent-primitive-and-actions.md).
+The deep dives live in [`docs/`](docs/): [`absurd-durable-workflows.md`](docs/absurd-durable-workflows.md) (durability model), [`gondolin-secure-execution.md`](docs/gondolin-secure-execution.md), [`pi-in-gondolin.md`](docs/pi-in-gondolin.md), and [`agent-primitive-and-actions.md`](docs/agent-primitive-and-actions.md).
 
 ## Development
 

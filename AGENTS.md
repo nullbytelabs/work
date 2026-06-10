@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Pi (and compatible agents) when working with code in this repository.
 
 ## What this is
 
@@ -76,8 +76,8 @@ targets/   where a job's steps actually run (gondolin micro-VM)
   `ctx.step()` checkpoint, journaled to an in-process Postgres ([PGLite](https://www.npmjs.com/package/@electric-sql/pglite),
   schema in `absurd/schema.sql`) — no external services. It walks the `needs` DAG (independent jobs
   run in parallel up to a concurrency cap), threads each job's `outputs` to its dependents, and
-  resolves runtime expressions. **Caveat:** cross-job orchestration lives in JS, not a durable task,
-  so whole-workflow crash-resume is not yet covered (see `docs/phase-1.md`).
+  resolves runtime expressions. The cross-job walk itself runs inside a durable orchestrator task,
+  so an interrupted run can be resumed (`work resume <id>`) — see `docs/durable-orchestrator.md`.
 - **`src/targets/`** — `ExecutionTarget` abstraction. `GondolinTarget` is the real one (a micro-VM
   per job). `makeTarget` (`factory.ts`) maps `runs-on` → target; **tests inject a `HostTarget`
   double** via `makeTarget` rather than booting VMs. Per project memory: `runs-on: local` was removed
@@ -163,6 +163,6 @@ live browser iteration) and should drive UI changes rather than ad-hoc edits.
   adding a workflow feature.
 - Keep status comments truthful (project memory): scrub stale "not-yet/phase-N/no-tools" comments
   when you ship the thing they describe.
-- Deep-dive design docs live in `docs/` (e.g. `phase-1.md`, `gondolin-secure-execution.md`,
+- Deep-dive design docs live in `docs/` (e.g. `gondolin-secure-execution.md`,
   `pi-in-gondolin.md`, `absurd-durable-workflows.md`, `agent-primitive-and-actions.md`,
-  `reusable-workflows.md`).
+  `reusable-workflows.md`) — see `docs/README.md` for the index.

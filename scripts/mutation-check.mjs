@@ -9,8 +9,8 @@
 //
 // This is the CURATED counterpart to a tool like StrykerJS: instead of thousands
 // of generated mutants, a hand-picked table of bugs that would actually matter
-// (gating inversions, auth bypasses, secret-injection drops). Seeded from the
-// experiment in docs/quality-gates-research.md §2/§5.2.
+// (gating inversions, auth bypasses, secret-injection drops). Seeded from a
+// mutation-testing experiment against the full suite; survivors became tests.
 //
 // Dependency-free: node builtins + git only, in the fan-in.mjs spirit.
 //
