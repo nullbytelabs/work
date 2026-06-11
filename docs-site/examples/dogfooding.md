@@ -7,7 +7,9 @@ its own micro-VM, on the same engine you run.
 It is a useful example precisely because it is real. Nothing here is a toy: the
 pipeline exercises the features you'd reach for in your own workflows — reusable
 workflows, a `needs` DAG that threads outputs between jobs, parallel fan-out, and
-AI agent steps running inside the sandbox.
+AI agent steps running inside the sandbox. The `test` job goes one step further and
+runs the engine's **own e2e suite in nested micro-VMs** — so `work` tests its VM
+layer with `work`, on one machine, no external CI (see [test](#test-the-suite-runs-itself-nested)).
 
 ```bash
 work run ci          # the whole pipeline, headless
@@ -42,18 +44,18 @@ work run ci
 checks  ──▶  test  ──▶  review
   │            │          │
   │            │          ├─ scan-compiler ───────┐
-  capture      capture    ├─ scan-runtime ────────┤
-  lint /       test:unit  ├─ scan-web ────────────┼──▶  collect
-  typecheck /  output     ├─ scan-agent-security ─┤     dedupe · rank ·
-  knip /       as an      └─ scan-checks ─────────┘     cap → final review
-  fan-in       output         (reads checks + test
+  capture      runs the   ├─ scan-runtime ────────┤
+  lint /       FULL suite ├─ scan-web ────────────┼──▶  collect
+  typecheck /  in NESTED  ├─ scan-agent-security ─┤     dedupe · rank ·
+  knip /       VMs (TCG)  └─ scan-checks ─────────┘     cap → final review
+  fan-in                      (reads checks + test
   as outputs                   output via needs)
 ```
 
-## checks & test: run the tools, keep the output
+## checks: run the tools, keep the output
 
-`checks` and `test` run the project's own tooling — `lint`, `typecheck`, `knip`,
-`fan-in`, and the non-VM `test:unit` tier. Each tool is its own step marked
+`checks` runs the project's own static tooling — `lint`, `typecheck`, `knip`, and
+`fan-in`. Each tool is its own step marked
 [`continue-on-error`](../reference/workflow-syntax#steps): a failing tool doesn't
 fail the job, so its output becomes data the rest of the pipeline can read (pass
 or fail) while the run carries on. The step's real outcome still shows in the run.
@@ -86,14 +88,52 @@ jobs:
       # …typecheck / knip / fan-in are identical, one step each
 ```
 
-`test` follows the same shape for `test:unit`, exposing one `test` output.
-
 ::: info The build gate lives elsewhere
 Because the dogfood tool steps are `continue-on-error`, `work run ci` does not
 fail on a lint or test error — the signal is carried into the review. The
 repository's actual gate is GitHub Actions (`.github/workflows/ci.yml`), which
 runs the same tools directly and fails the build. The dogfood pipeline is a
 demonstration, not the gate.
+:::
+
+## test: the suite runs itself, nested
+
+`test` is the most pointed piece of dogfooding: it runs the **entire** test suite —
+including the real-VM e2e tier — **self-hosted**. The job runs on `work:nested` (a
+custom image that is just `work:base` plus `qemu-system-aarch64` and `qemu-img`), and
+its `npm test` step boots the e2e examples in **nested gondolin micro-VMs**.
+
+No special engine support is needed for the nesting. Inside a guest there is no
+`/dev/kvm`, so gondolin's accelerator selection falls back to **TCG** (software
+emulation) on its own. The inner VMs fetch their guest image once over the job's
+egress and reuse it for the whole run. So `work` exercises its own VM layer
+end-to-end — compile → boot → run a job in a VM — on one machine, no external CI:
+
+```yaml
+# .workflows/test.yaml
+jobs:
+  unit:
+    runs-on: work:nested
+    machine: { cpus: 8, memory: "64G" }   # the outer VM hosts the nested e2e VMs
+    outputs:
+      test: ${{ steps.test.logs }}
+    steps:
+      - run: npm ci
+      - id: test
+        continue-on-error: true            # keep the job green so review still sees it
+        env: { WORK_SKIP_VM: "", WORK_NESTED: "1" }
+        run: npm test
+```
+
+::: info Two honest caveats
+- **It needs a roomy host.** The outer VM is sized to hold several 8 GB inner VMs
+  at once (≈ 64 GB). Shrink the outer `machine:` and override the inner examples to
+  smaller sizes to run on leaner hardware (at the cost of inner parallelism).
+- **Two egress assertions skip when nested** (`WORK_NESTED=1`). The inner and outer
+  VMs share gondolin's `192.168.127.0/24` guest subnet, so the egress test's on-box
+  "model host" address collides between the layers. The secret-isolation contract
+  is still verified on bare metal (host + GitHub Actions), and the core half — *the
+  real key never enters the guest* — still runs nested.
 :::
 
 ## review: five agents fan out, one fans them in
@@ -137,7 +177,7 @@ jobs:
             Review this project's tooling output and report what matters.
             === lint ===      ${{ inputs.lint }}
             === typecheck === ${{ inputs.typecheck }}
-            === test:unit === ${{ inputs.test }}
+            === test ===      ${{ inputs.test }}
 
   collect:
     needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security, scan-checks]
@@ -178,6 +218,7 @@ Every part of the pipeline maps to a feature you can use directly:
 | In the pipeline | Engine feature it leans on |
 |---|---|
 | `ci` calls `checks` / `test` / `review` with `uses: workflow/<name>` | [Reusable workflows](../guide/reusable-workflows) — a job calls a whole workflow |
+| `test` runs the full suite in nested gondolin VMs | [Custom images](../guide/custom-images) (`work:nested` bundles QEMU) + nested execution — TCG fallback, no `/dev/kvm` needed |
 | `checks` / `test` expose tool output as `workflow_call` outputs | Job and workflow outputs threaded across the `needs` DAG |
 | `ci` passes `checks`/`test` outputs into `review` via `with:` | Runtime-valued reusable-workflow inputs — a `needs.*` value resolves at run inside the callee's `inputs.*` |
 | Five `uses: work/agent` reviewers running real Pi | [Agent steps](../guide/agent-steps) — a model works inside the job's sandbox |

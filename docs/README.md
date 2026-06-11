@@ -47,6 +47,9 @@ the rationale is the point.
   deployment tiers).
 - [`gondolin-custom-images.md`](gondolin-custom-images.md) — the `work:*`
   image namespace: lazy builds through Gondolin's own builder, tagged store.
+- [`nested-self-hosting.md`](nested-self-hosting.md) — running the full test
+  suite (incl. the real-VM e2e tier) self-hosted in nested gondolin VMs: the
+  TCG fallback, the `work:nested` image, and the trade-offs.
 
 ## Interfaces
 

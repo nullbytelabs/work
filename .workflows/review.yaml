@@ -137,7 +137,7 @@ jobs:
             === fan-in ===
             ${{ inputs.fanin }}
 
-            === test:unit ===
+            === test (full suite) ===
             ${{ inputs.test }}
 
   collect:
@@ -192,7 +192,7 @@ jobs:
             === agent + egress + config ===
             ${{ needs.scan-agent-security.outputs.findings }}
 
-            === tooling (lint / typecheck / knip / fan-in / test:unit) ===
+            === tooling (lint / typecheck / knip / fan-in / test) ===
             ${{ needs.scan-checks.outputs.findings }}
       - name: show review
         env:

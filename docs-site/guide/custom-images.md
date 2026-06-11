@@ -67,6 +67,30 @@ same name, so you can extend or replace `work:base` for your project. See Gondol
 [custom-images documentation](https://earendil-works.github.io/gondolin/custom-images/)
 for the full build-config field list.
 
+### Example: a runner that boots nested VMs
+
+The project dogfoods this feature to run its **own e2e suite self-hosted**:
+`work:nested` is just `work:base` plus QEMU, so a job on it can boot *nested*
+gondolin micro-VMs (no `/dev/kvm` inside a guest, so they run under TCG software
+emulation automatically). The whole image is two extra packages:
+
+```json
+// .workflows/images/nested/build-config.json
+{
+  "distro": "alpine",
+  "alpine": {
+    "version": "3.23.0",
+    "kernelPackage": "linux-virt",
+    "kernelImage": "vmlinuz-virt",
+    "rootfsPackages": ["…the work:base packages…", "qemu-system-aarch64", "qemu-img"]
+  },
+  "rootfs": { "label": "gondolin-root" }
+}
+```
+
+See [Dogfooding → test](../examples/dogfooding#test-the-suite-runs-itself-nested)
+for how it runs the full test suite inside nested VMs.
+
 ## Built on first use
 
 A `work:<image>` is **built the first time a job uses it** on a given machine, then

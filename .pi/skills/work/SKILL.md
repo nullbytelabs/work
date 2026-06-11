@@ -61,7 +61,7 @@ automatically, and the gallery doubles as documentation.
 |---|---|
 | `work run ci` | composes the other three via job-level `uses: workflow/<name>` — checks → test → review, fail-fast ordering |
 | `work run checks` | one VM, `npm ci`, then lint/typecheck/knip/fan-in each as its own `continue-on-error` step (a failing tool doesn't gate the job; its output is captured for `review`) |
-| `work run test` | one VM, the `test:unit` tier as a single `continue-on-error` step |
+| `work run test` | **self-hosts the FULL suite (incl. the real-VM e2e tier) in NESTED gondolin VMs** — runs on `work:nested` (= `work:base` + qemu-system-aarch64 + qemu-img), `npm test` with `WORK_SKIP_VM=""` + `WORK_NESTED=1`. Inner VMs have no `/dev/kvm` so gondolin auto-selects TCG. Needs a roomy host (outer `machine: 64G` hosts ~5 concurrent 8G inner VMs). |
 | `work run review` | **five parallel work/agent reviewers** (one per subsystem via `promptFile` from `.workflows/prompts/`, + one reviewing the tooling output passed in as `inputs.*`), then a `collect` editor that **verifies candidates against the checkout**, suppresses `.review/accepted.md` entries, and emits sentinel-wrapped JSON |
 
 Notes for using them:
@@ -69,9 +69,14 @@ Notes for using them:
 - `review` (and `ci`) need a model in `work.json` (gitignored — copy
   `work.example.json`; `apiKey` takes `$VAR` expansion). The key is injected
   host-side via mediated egress; it never enters the guest.
-- The tool steps are `continue-on-error`, so `checks`/`test` **don't fail the
+- The tool/test steps are `continue-on-error`, so `checks`/`test` **don't fail the
   run** on a red tool — the failure is captured and the review agent interprets
-  it. The hard gate is GitHub Actions.
+  it. The hard gate is GitHub Actions (`.github/workflows/ci.yml`, which runs
+  `npm test` directly — unaffected by the nested dogfood path).
+- `work:nested` is built lazily on first use (stock apk packages, fully portable —
+  nothing machine-specific baked in). The 2 mediated-egress assertions in
+  `egress-e2e` skip when nested (`WORK_NESTED`): inner/outer VMs share gondolin's
+  guest subnet so the on-box model host collides — verified on bare metal instead.
 - Reviewers are `machine: small`; five in parallel ≈ 10G peak RAM.
 - Run history persists in `.workflows/db` (PGLite, gitignored):
   `work runs`, `work resume <id>` (reuse finished jobs), `work rerun <id>`,
