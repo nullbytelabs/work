@@ -12,10 +12,10 @@ work init [--project | --global] [--include-skill] [--from-template hello-world|
 work create <name> [--template hello-world|agent-action] [--force] [--dry-run]
 
 # run a workflow file directly
-work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--quiet]
+work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--no-global] [--workdir <dir>] [--quiet]
 
 # run a project pipeline by name (resolves .workflows/*.yaml whose `name:` matches)
-work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--resume <id>] [--quiet]
+work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--no-global] [--workdir <dir>] [--resume <id>] [--quiet]
 
 # list run history (filter by status)
 work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
@@ -248,6 +248,7 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 | `--port <n>` | `--web` | Port the web console binds (default `4280`; `1`–`65535`). |
 | `--inputs '<json>'` | `run`, file, `resume`, `rerun` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`, overrides the inputs stored in history. |
 | `--config <file>` | `run`, file | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
+| `--datasources <a,b>` | `run`, file | [Datasources](./configuration#datasources) this run's jobs may reach (comma-separated; the CLI counterpart of a webhook's `datasources` scope). Deny-by-default when omitted. |
 | `--no-global` | `run`, file | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
 | `--workdir <dir>` | `run`, file | Where job workspaces are staged (default: a temp dir). |
 | `--resume <id>` | `run` | Continue an interrupted run instead of starting a new one (same run id; finished jobs are reused). Project workflows only. |

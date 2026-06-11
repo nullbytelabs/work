@@ -94,6 +94,18 @@ function toConditionBags(
 export interface JobNetwork {
   /** Outbound HTTP hosts the guest may reach (deny-by-default otherwise). */
   allowedHosts?: string[];
+  /**
+   * Hosts allowed to resolve to internal/private IP ranges (blocked by default,
+   * even when allowlisted) — an on-box upstream like a local cluster API server.
+   * Entries are implicitly part of the allowlist.
+   */
+  allowedInternalHosts?: string[];
+  /**
+   * Host-side dial pins (hostname → IP literal), like curl `--resolve`: the
+   * sandbox rewrites the URL host before policy checks, secret injection, and
+   * the upstream dial — for an upstream public DNS can't name.
+   */
+  hostResolves?: Record<string, string>;
   /** Secrets injected into outbound headers host-side only; never seen in-guest. */
   secrets?: Record<string, { hosts: string[]; value: string }>;
 }

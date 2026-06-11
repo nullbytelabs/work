@@ -8,6 +8,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { UserFacingError } from "../errors.ts";
@@ -50,6 +51,15 @@ export interface DatasourceConfig {
    * placeholder. Defaults (per the resolver) to `<NAME>_TOKEN` from the datasource key.
    */
   tokenEnv?: string;
+  /**
+   * Pin the address the engine dials for this datasource, like curl's
+   * `--resolve` — an IP literal the `baseUrl` hostname maps to host-side. For an
+   * upstream public DNS can't name: a service on the engine host's loopback
+   * (e.g. a local kind cluster at 127.0.0.1), a docker-published port, an SSH
+   * tunnel. Pinning is an explicit operator grant, so it also lifts the
+   * sandbox's private-address block for the pinned IP.
+   */
+  resolve?: string;
 }
 
 /**
@@ -212,6 +222,12 @@ function parseDatasources(raw: Record<string, unknown>): Record<string, Datasour
     if (tokenHeader !== undefined) dc.tokenHeader = tokenHeader;
     const tokenEnv = optStr(d.tokenEnv, `${label}.tokenEnv`);
     if (tokenEnv !== undefined) dc.tokenEnv = tokenEnv;
+    if (d.resolve !== undefined) {
+      if (typeof d.resolve !== "string" || isIP(d.resolve) === 0) {
+        throw new UserFacingError(`${label}.resolve must be an IP address literal (like curl --resolve)`);
+      }
+      dc.resolve = d.resolve;
+    }
     datasources[name] = dc;
   }
   return datasources;

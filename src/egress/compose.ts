@@ -23,6 +23,8 @@ import type { PlannedJob } from "../compiler/index.ts";
 /** Structural `JobNetwork` (kept local to avoid an egress→runtime import cycle). */
 export interface ComposedJobNetwork {
   allowedHosts?: string[];
+  allowedInternalHosts?: string[];
+  hostResolves?: Record<string, string>;
   secrets?: Record<string, { hosts: string[]; value: string }>;
 }
 
@@ -34,13 +36,23 @@ export function composeResolvers(...resolvers: Resolver[]): (job: PlannedJob) =>
     if (parts.length === 0) return undefined;
 
     const hostSet = new Set<string>();
+    // No wildcard for internal hosts — reaching private ranges stays an explicit,
+    // per-host grant even when a sibling resolver opens general egress.
+    const internalSet = new Set<string>();
     let wildcard = false;
+    const resolves: Record<string, string> = {};
     const secrets: Record<string, { hosts: string[]; value: string }> = {};
 
     for (const part of parts) {
       for (const h of part.allowedHosts ?? []) {
         if (h === "*") wildcard = true;
         else hostSet.add(h);
+      }
+      for (const h of part.allowedInternalHosts ?? []) internalSet.add(h);
+      for (const [host, ip] of Object.entries(part.hostResolves ?? {})) {
+        // First writer wins, same as secrets — two resolvers pinning one
+        // hostname differently would be a config error, not a routine merge.
+        if (!(host in resolves)) resolves[host] = ip;
       }
       for (const [env, secret] of Object.entries(part.secrets ?? {})) {
         // First writer wins — resolver order is the precedence. The agent and
@@ -53,6 +65,8 @@ export function composeResolvers(...resolvers: Resolver[]): (job: PlannedJob) =>
     const out: ComposedJobNetwork = {};
     const hosts = wildcard ? ["*"] : [...hostSet];
     if (hosts.length > 0) out.allowedHosts = hosts;
+    if (internalSet.size > 0) out.allowedInternalHosts = [...internalSet];
+    if (Object.keys(resolves).length > 0) out.hostResolves = resolves;
     if (Object.keys(secrets).length > 0) out.secrets = secrets;
     // Every part was defined, so at least one of hosts/secrets is non-empty.
     return out;

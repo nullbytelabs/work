@@ -1,0 +1,159 @@
+# k8s-triage — repeatable Kubernetes issue triage.
+#
+# Two plain `run:` jobs gather facts with kubectl in parallel (each in its own
+# micro-VM), then an agent job fans the evidence in and names the root cause.
+# The agent never touches the cluster — it only sees what the deterministic
+# jobs collected, so every run triages from the same kind of evidence.
+#
+# Cluster access is a `datasource` (work.json), not a kubeconfig secret in the
+# workflow: the guest only ever sees a placeholder token env ($K8S_TOKEN); the
+# engine swaps the real ServiceAccount token into the Authorization header
+# host-side, scoped to the API server's host. The hostname is just a label —
+# `resolve` pins where the engine actually dials (like curl --resolve), so a
+# kind cluster on the engine host's loopback needs no public DNS name:
+#
+#   "datasources": {
+#     "k8s": { "baseUrl": "https://work-triage.internal:7443",
+#              "resolve": "127.0.0.1", "token": "$K8S_TRIAGE_TOKEN" }
+#   }
+#
+# Run from examples/k8s-triage/:
+#
+#   NODE_EXTRA_CA_CERTS=kind-ca.crt \
+#     work run triage \
+#     --config ../../work.json --datasources k8s \
+#     --inputs '{"server":"https://work-triage.internal:7443"}'
+#
+# `runs-on: work:k8s` is a workspace-local image (.workflows/images/k8s) — the
+# base toolchain plus kubectl baked in, so jobs don't download it every run.
+#
+# TLS is two hops. In-guest, kubectl verifies against the sandbox's egress CA
+# (exported as $NODE_EXTRA_CA_CERTS in the guest) — the sandbox terminates TLS
+# to mediate egress. Host-side, the engine verifies the real kind CA — handed
+# to the `work` process via NODE_EXTRA_CA_CERTS above — against the pinned
+# address 127.0.0.1, which kind's default API server cert already names.
+---
+name: triage
+
+inputs:
+  server:
+    type: string
+    required: true
+    description: API server URL of the cluster to triage (must match the k8s datasource baseUrl)
+
+env:
+  KUBECONFIG: /workspace/kubeconfig
+
+jobs:
+  # Fact-finding 1: what is running? Namespaces, nodes, workloads, pods.
+  observe:
+    runs-on: work:k8s
+    outputs:
+      namespaces: ${{ steps.namespaces.logs }}
+      workloads: ${{ steps.workloads.logs }}
+      pods: ${{ steps.pods.logs }}
+    steps:
+      - name: point kubectl at the cluster
+        env:
+          SERVER: ${{ inputs.server }}
+        run: |
+          kubectl config set-cluster triage --server="$SERVER" --certificate-authority="$NODE_EXTRA_CA_CERTS"
+          kubectl config set-credentials triage-bot --token="$K8S_TOKEN"
+          kubectl config set-context triage --cluster=triage --user=triage-bot
+          kubectl config use-context triage
+      - id: namespaces
+        name: list namespaces
+        run: kubectl get namespaces
+      - id: workloads
+        name: list workloads
+        run: kubectl get deployments,statefulsets,daemonsets -A
+      - id: pods
+        name: list pods
+        run: kubectl get pods -A -o wide
+
+  # Fact-finding 2: anything unhealthy? Pick it apart — describe, logs, events,
+  # and the config the pod spec references.
+  hunt:
+    runs-on: work:k8s
+    outputs:
+      unhealthy: ${{ steps.unhealthy.logs }}
+      evidence: ${{ steps.evidence.logs }}
+    steps:
+      - name: point kubectl at the cluster
+        env:
+          SERVER: ${{ inputs.server }}
+        run: |
+          kubectl config set-cluster triage --server="$SERVER" --certificate-authority="$NODE_EXTRA_CA_CERTS"
+          kubectl config set-credentials triage-bot --token="$K8S_TOKEN"
+          kubectl config set-context triage --cluster=triage --user=triage-bot
+          kubectl config use-context triage
+      - id: unhealthy
+        name: find unhealthy pods
+        run: |
+          kubectl get pods -A --no-headers | grep -Ev 'Running|Completed' > /workspace/unhealthy.txt || true
+          if [ -s /workspace/unhealthy.txt ]; then
+            cat /workspace/unhealthy.txt
+          else
+            echo "all pods healthy"
+          fi
+      - id: evidence
+        name: collect evidence for the first unhealthy pod
+        run: |
+          if [ ! -s /workspace/unhealthy.txt ]; then echo "nothing to collect"; exit 0; fi
+          ns=$(awk 'NR==1 {print $1}' /workspace/unhealthy.txt)
+          pod=$(awk 'NR==1 {print $2}' /workspace/unhealthy.txt)
+          echo "=== describe pod $ns/$pod ==="
+          kubectl describe pod -n "$ns" "$pod"
+          echo "=== logs (previous run) ==="
+          kubectl logs -n "$ns" "$pod" --previous 2>/dev/null || kubectl logs -n "$ns" "$pod"
+          echo "=== events in $ns ==="
+          kubectl get events -n "$ns" --sort-by=.lastTimestamp
+          echo "=== configmaps in $ns ==="
+          kubectl get configmaps -n "$ns" -o yaml
+
+  # Fan-in: the agent reads the collected facts and writes the incident report.
+  # It has no cluster credentials and no cluster egress — analysis only.
+  diagnose:
+    runs-on: work:base
+    machine: small
+    needs: [observe, hunt]
+    outputs:
+      report: ${{ steps.sre.outputs.output }}
+    steps:
+      - id: sre
+        name: identify the root cause
+        uses: work/agent
+        with:
+          prompt: |
+            You are an SRE triaging a Kubernetes cluster. Below is evidence two
+            fact-finding jobs collected with kubectl. Identify what is broken and
+            why. Be specific: name the workload, the failure mode, the root cause
+            (quote the evidence lines that prove it), and the smallest fix.
+            If nothing is broken, say so. Do not speculate beyond the evidence.
+
+            Output a short incident report in this exact shape:
+            WORKLOAD: <namespace>/<name>
+            FAILURE: <observed failure mode>
+            ROOT CAUSE: <why, with the proving evidence quoted>
+            FIX: <smallest concrete change>
+
+            === cluster: namespaces ===
+            ${{ needs.observe.outputs.namespaces }}
+
+            === cluster: workloads ===
+            ${{ needs.observe.outputs.workloads }}
+
+            === cluster: pods ===
+            ${{ needs.observe.outputs.pods }}
+
+            === unhealthy pods ===
+            ${{ needs.hunt.outputs.unhealthy }}
+
+            === evidence ===
+            ${{ needs.hunt.outputs.evidence }}
+      - name: show report
+        env:
+          REPORT: ${{ steps.sre.outputs.output }}
+        run: |
+          printf '%s\n' "===== INCIDENT REPORT ====="
+          printf '%s\n' "$REPORT"

@@ -27,9 +27,11 @@ export interface AgentJobNetwork {
   secrets?: Record<string, { hosts: string[]; value: string }>;
 }
 
+// The sandbox scopes secrets by the request's *hostname* (port stripped), so a
+// model on a nonstandard port must contribute `hostname`, not `host`.
 function hostOf(baseUrl: string): string | undefined {
   try {
-    return new URL(baseUrl).host;
+    return new URL(baseUrl).hostname;
   } catch {
     return undefined;
   }

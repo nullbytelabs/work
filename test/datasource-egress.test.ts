@@ -179,6 +179,48 @@ describe("makeDatasourceEgressResolver", () => {
     const net = makeDatasourceEgressResolver(c, { datasources: ["open"] })(job());
     assert.deepEqual(net, { allowedHosts: ["open.api"] });
   });
+
+  it("a resolve pin emits the rewrite, lifts the internal block for the IP, and scopes the secret to both forms", () => {
+    process.env["K8S_TOKEN_T"] = "sa-tok";
+    try {
+      const c = parseConfig({
+        providers: {},
+        models: {},
+        datasources: {
+          k8s: { baseUrl: "https://work-triage.internal:7443", token: "$K8S_TOKEN_T", resolve: "127.0.0.1" },
+        },
+      });
+      const net = makeDatasourceEgressResolver(c, { datasources: ["k8s"] })(job());
+      assert.deepEqual(net, {
+        allowedHosts: ["work-triage.internal"],
+        allowedInternalHosts: ["127.0.0.1"],
+        hostResolves: { "work-triage.internal": "127.0.0.1" },
+        // The sandbox rewrites the URL host to the pin BEFORE injecting the
+        // secret, so the scope must cover the pinned IP, not just the name.
+        secrets: { K8S_TOKEN: { hosts: ["work-triage.internal", "127.0.0.1"], value: "sa-tok" } },
+      });
+    } finally {
+      delete process.env["K8S_TOKEN_T"];
+    }
+  });
+
+  it("an IPv6 resolve pin uses the bracketed URL-hostname form", () => {
+    const c = parseConfig({
+      providers: {},
+      models: {},
+      datasources: { v6: { baseUrl: "https://v6.internal", resolve: "::1" } },
+    });
+    const net = makeDatasourceEgressResolver(c, { datasources: ["v6"] })(job());
+    assert.deepEqual(net!.hostResolves, { "v6.internal": "[::1]" });
+    assert.deepEqual(net!.allowedInternalHosts, ["[::1]"]);
+  });
+
+  it("rejects a resolve that is not an IP literal", () => {
+    assert.throws(
+      () => parseConfig({ providers: {}, models: {}, datasources: { x: { baseUrl: "https://x", resolve: "evil.com" } } }),
+      (e) => e instanceof UserFacingError && /resolve must be an IP address literal/.test(e.message),
+    );
+  });
 });
 
 describe("composeResolvers", () => {
@@ -199,6 +241,14 @@ describe("composeResolvers", () => {
     )(job());
     assert.deepEqual(net!.allowedHosts!.sort(), ["a.com", "grafana.internal"]);
     assert.deepEqual(net!.secrets, { GRAFANA_TOKEN: { hosts: ["grafana.internal"], value: "tok" } });
+  });
+
+  it("merges hostResolves across resolvers, first writer wins", () => {
+    const net = composeResolvers(
+      (_j) => ({ allowedHosts: ["a.internal"], hostResolves: { "a.internal": "127.0.0.1" } }),
+      (_j) => ({ allowedHosts: ["b.internal"], hostResolves: { "b.internal": "10.0.0.5", "a.internal": "10.9.9.9" } }),
+    )(job());
+    assert.deepEqual(net!.hostResolves, { "a.internal": "127.0.0.1", "b.internal": "10.0.0.5" });
   });
 
   it("absorbs a wildcard: any ['*'] makes the union ['*']", () => {

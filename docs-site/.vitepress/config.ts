@@ -88,7 +88,10 @@ export default withMermaid(defineConfig({
       "/examples/": [
         {
           text: "Real-world examples",
-          items: [{ text: "Dogfooding: the engine checks itself", link: "/examples/dogfooding" }],
+          items: [
+            { text: "Dogfooding: the engine checks itself", link: "/examples/dogfooding" },
+            { text: "Kubernetes triage: agents on evidence", link: "/examples/kubernetes-triage" },
+          ],
         },
       ],
       "/reference/": [

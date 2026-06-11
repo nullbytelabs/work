@@ -41,6 +41,11 @@ interface CliArgs {
   config?: string;
   /** Skip the global config layer for a hermetic run. */
   noGlobal?: boolean;
+  /**
+   * Datasource keys this run's jobs may reach (`--datasources a,b`) — the CLI
+   * counterpart of a webhook's `datasources` scope. Deny-by-default when omitted.
+   */
+  datasources?: string[];
   /** `graph` subcommand: emit the DAG instead of running. */
   graph?: boolean;
   /** Graph output format (defaults to mermaid). */
@@ -70,6 +75,7 @@ interface FlagState {
   inputs: Record<string, unknown>;
   config?: string;
   noGlobal: boolean;
+  datasources?: string[];
   format?: GraphFormat;
   steps: boolean;
   web: boolean;
@@ -131,6 +137,13 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
     return i;
   },
   "--inputs": (argv, i, s) => parseInputsFlag(argv, i, s),
+  "--datasources": (argv, i, s) => {
+    const raw = argv[++i];
+    if (!raw) fail("--datasources requires a comma-separated list of datasource names");
+    s.datasources = raw.split(",").map((x) => x.trim()).filter((x) => x.length > 0);
+    if (s.datasources.length === 0) fail("--datasources requires at least one datasource name");
+    return i;
+  },
   "--quiet": (_argv, i, s) => {
     s.quiet = true;
     return i;
@@ -180,7 +193,7 @@ function parseFlags(argv: string[]): FlagState {
 
 /** The flags shared by every command form. */
 function buildCommon(s: FlagState) {
-  return { workdir: s.workdir, quiet: s.quiet, inputs: s.inputs, noGlobal: s.noGlobal, ...(s.workspace ? { workspace: s.workspace } : {}), ...(s.config ? { config: s.config } : {}) };
+  return { workdir: s.workdir, quiet: s.quiet, inputs: s.inputs, noGlobal: s.noGlobal, ...(s.workspace ? { workspace: s.workspace } : {}), ...(s.config ? { config: s.config } : {}), ...(s.datasources ? { datasources: s.datasources } : {}) };
 }
 type CommonArgs = ReturnType<typeof buildCommon>;
 
@@ -271,8 +284,8 @@ function printUsage(): void {
   const prog = process.env["PI_WF_PROG"] ?? "work";
   process.stderr.write(
     "Usage:\n" +
-      `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
-      `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
+      `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
+      `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] resume <id>   # continue an interrupted run (reuse finished jobs)\n` +
@@ -553,6 +566,7 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
     ...(presenter.hooks ? { hooks: presenter.hooks } : {}),
     config,
     runId,
+    ...(args.datasources ? { datasources: args.datasources } : {}),
     ...(dataDir ? { dataDir } : {}),
     ...(args.workdir ? { workdir: args.workdir } : {}),
   });

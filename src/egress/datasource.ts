@@ -26,15 +26,28 @@ import { expandEnvStrict, type DatasourceConfig, type PiWorkflowsConfig } from "
 /** Structural `JobNetwork` (kept local to avoid an egress→runtime import cycle). */
 export interface DatasourceJobNetwork {
   allowedHosts?: string[];
+  allowedInternalHosts?: string[];
+  /** Host-side dial pins (hostname → IP literal), like curl `--resolve`. */
+  hostResolves?: Record<string, string>;
   secrets?: Record<string, { hosts: string[]; value: string }>;
 }
 
+// The sandbox matches allowlist entries and secret scopes against the request's
+// *hostname* (port stripped, lowercased) — so a baseUrl on a nonstandard port
+// must contribute `hostname`, not `host` (which keeps the port and never matches).
 function hostOf(baseUrl: string): string | undefined {
   try {
-    return new URL(baseUrl).host;
+    return new URL(baseUrl).hostname;
   } catch {
     return undefined;
   }
+}
+
+// URL-hostname form of a pinned IP — what the sandbox sees after the rewrite
+// (IPv6 literals are bracketed in URL hostnames), so allowlist/secret entries
+// and the rewrite target must all use this form.
+function urlHostForm(ip: string): string {
+  return ip.includes(":") ? `[${ip}]` : ip;
 }
 
 /**
@@ -68,6 +81,8 @@ export function makeDatasourceEgressResolver(
     if (scoped.length === 0) return undefined; // deny-by-default
 
     const hosts = new Set<string>();
+    const internalHosts = new Set<string>();
+    const resolves: Record<string, string> = {};
     const secrets: Record<string, { hosts: string[]; value: string }> = {};
 
     for (const name of scoped) {
@@ -76,15 +91,29 @@ export function makeDatasourceEgressResolver(
       const host = hostOf(ds.baseUrl);
       if (!host) continue;
       hosts.add(host);
+      // A pinned datasource (curl --resolve style): the sandbox rewrites the URL
+      // host to the pinned IP before policy/secrets/dial, so the *IP* is what
+      // every downstream check sees. Allowlist it, and lift the private-range
+      // block for it — pinning an address is an explicit operator grant (for a
+      // public pinned IP the internal entry is a no-op beyond allowlisting).
+      const secretHosts = [host];
+      if (ds.resolve) {
+        const pinned = urlHostForm(ds.resolve);
+        resolves[host] = pinned;
+        internalHosts.add(pinned);
+        secretHosts.push(pinned);
+      }
       // Only datasources with a token contribute a secret; a token-less datasource
       // still gets host allowlisted (a public read endpoint, say).
       if (ds.token !== undefined) {
-        secrets[tokenEnvFor(name, ds)] = { hosts: [host], value: expandEnvStrict(ds.token, `datasource "${name}" token`) };
+        secrets[tokenEnvFor(name, ds)] = { hosts: secretHosts, value: expandEnvStrict(ds.token, `datasource "${name}" token`) };
       }
     }
 
     if (hosts.size === 0) return undefined;
     const net: DatasourceJobNetwork = { allowedHosts: [...hosts] };
+    if (internalHosts.size > 0) net.allowedInternalHosts = [...internalHosts];
+    if (Object.keys(resolves).length > 0) net.hostResolves = resolves;
     if (Object.keys(secrets).length > 0) net.secrets = secrets;
     return net;
   };

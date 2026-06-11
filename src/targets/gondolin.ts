@@ -61,6 +61,14 @@ export interface GondolinTargetConfig {
    * the same knob. Entries are implicitly part of the allowlist.
    */
   allowedInternalHosts?: string[];
+  /**
+   * Host-side dial pins (hostname → IP literal in URL-hostname form), like curl
+   * `--resolve`. Applied as an `onRequest` rewrite before gondolin's policy
+   * checks, secret injection, and the upstream dial — so the pinned IP is what
+   * the allowlists, secret scopes, and TLS verification all see. For an
+   * upstream public DNS can't name (the engine host's loopback, a tunnel).
+   */
+  hostResolves?: Record<string, string>;
   /** Secrets injected into outbound HTTP headers only; never visible in-guest. */
   secrets?: Record<string, { hosts: string[]; value: string }>;
   /**
@@ -81,6 +89,29 @@ export interface GondolinTargetConfig {
  */
 export function buildExecArgs(command: string): string[] {
   return ["/bin/sh", "-lc", command];
+}
+
+/**
+ * Build the `onRequest` rewrite hook for host pins. Returning a new Request
+ * mirrors gondolin's own request cloning: bodies ride along only for methods
+ * that may carry one. Gondolin runs this BEFORE secret injection and policy
+ * checks, so everything downstream sees the pinned IP. Exported for tests.
+ */
+export function makeResolveHook(resolves: Record<string, string>): (request: Request) => Request | undefined {
+  const map = new Map(Object.entries(resolves).map(([h, ip]) => [h.toLowerCase(), ip]));
+  return (request) => {
+    const url = new URL(request.url);
+    const pinned = map.get(url.hostname.toLowerCase());
+    if (!pinned) return undefined; // not ours — leave the request untouched
+    url.hostname = pinned;
+    const canHaveBody = request.method !== "GET" && request.method !== "HEAD";
+    return new Request(url, {
+      method: request.method,
+      headers: request.headers,
+      body: canHaveBody ? request.body : undefined,
+      ...(canHaveBody && request.body ? { duplex: "half" } : {}),
+    } as RequestInit);
+  };
 }
 
 /** Lazily import the optional Gondolin SDK with an actionable error if absent. */
@@ -143,9 +174,11 @@ export class GondolinTarget implements ExecutionTarget {
       (this.cfg.allowedInternalHosts?.length ?? 0) > 0 ||
       this.cfg.secrets !== undefined;
     if (wantsNetwork && createHttpHooks) {
+      const resolves = this.cfg.hostResolves;
       const { httpHooks, env } = createHttpHooks({
         allowedHosts: this.cfg.allowedHosts ?? [],
         ...(this.cfg.allowedInternalHosts ? { allowedInternalHosts: this.cfg.allowedInternalHosts } : {}),
+        ...(resolves && Object.keys(resolves).length > 0 ? { onRequest: makeResolveHook(resolves) } : {}),
         secrets: this.cfg.secrets ?? {},
       });
       createOpts["httpHooks"] = httpHooks;

@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GondolinTarget, buildExecArgs } from "../src/targets/index.ts";
+import { GondolinTarget, buildExecArgs, makeResolveHook } from "../src/targets/index.ts";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { AbsurdRuntime } from "../src/runtime/index.ts";
@@ -25,6 +25,30 @@ describe("GondolinTarget — unit (no VM)", () => {
   it("run() before provision() throws a clear error", async () => {
     const t = new GondolinTarget({ workdir: "/tmp/x" });
     await assert.rejects(() => t.run("echo hi"), /before provision/);
+  });
+});
+
+describe("makeResolveHook — host pin rewrite (no VM)", () => {
+  const hook = makeResolveHook({ "work-triage.internal": "127.0.0.1" });
+
+  it("rewrites a pinned hostname to the IP, keeping port/path/method/headers", async () => {
+    const req = new Request("https://Work-Triage.INTERNAL:7443/api/v1/pods?limit=1", {
+      headers: { authorization: "Bearer placeholder" },
+    });
+    const out = (await hook(req)) as Request;
+    assert.equal(out.url, "https://127.0.0.1:7443/api/v1/pods?limit=1");
+    assert.equal(out.method, "GET");
+    assert.equal(out.headers.get("authorization"), "Bearer placeholder");
+  });
+
+  it("carries the body through for methods that may have one", async () => {
+    const req = new Request("https://work-triage.internal:7443/api", { method: "POST", body: "spec" });
+    const out = (await hook(req)) as Request;
+    assert.equal(await out.text(), "spec");
+  });
+
+  it("leaves non-pinned hosts untouched", async () => {
+    assert.equal(hook(new Request("https://api.fireworks.ai/v1")), undefined);
   });
 });
 

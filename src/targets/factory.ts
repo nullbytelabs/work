@@ -26,6 +26,10 @@ export interface TargetContext {
   env?: Record<string, string>;
   /** Outbound HTTP allowlist for sandbox targets (deny-by-default otherwise). */
   allowedHosts?: string[];
+  /** Hosts exempt from the sandbox's private/internal IP-range block (implicitly allowlisted). */
+  allowedInternalHosts?: string[];
+  /** Host-side dial pins (hostname → IP literal), like curl `--resolve`. */
+  hostResolves?: Record<string, string>;
   /** Secrets injected into outbound headers host-side only; never seen in-guest. */
   secrets?: Record<string, { hosts: string[]; value: string }>;
   /**
@@ -51,6 +55,8 @@ export const makeTarget: TargetFactory = (runsOn, ctx) => {
     ...(ctx.machine ? { machine: ctx.machine } : {}),
     ...(ctx.env ? { env: ctx.env } : {}),
     ...(ctx.allowedHosts ? { allowedHosts: ctx.allowedHosts } : {}),
+    ...(ctx.allowedInternalHosts ? { allowedInternalHosts: ctx.allowedInternalHosts } : {}),
+    ...(ctx.hostResolves ? { hostResolves: ctx.hostResolves } : {}),
     ...(ctx.secrets ? { secrets: ctx.secrets } : {}),
     ...(ctx.resolveImagePath ? { resolveImagePath: ctx.resolveImagePath } : {}),
   });
