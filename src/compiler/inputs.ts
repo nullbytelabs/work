@@ -13,12 +13,21 @@ export type ResolvedInputs = Record<string, string | number | boolean>;
 /**
  * Validate the provided inputs against the declared spec and produce concrete
  * values (applying defaults, enforcing required, coercing to declared types).
+ *
+ * `deferred` names inputs whose provided value is a runtime expression (a
+ * `${{ needs.* }}` reference a reusable caller passed through `with:`). Their
+ * value isn't known at compile time, so it can't be type- or constraint-checked
+ * here — it's passed through verbatim as a string for substitution into the
+ * callee, where `${{ inputs.<name> }}` expands to that expression and resolves at
+ * runtime like any other `needs.*`.
  */
 export function resolveInputs(
   declared: Record<string, InputSpec> | undefined,
   provided: Record<string, unknown>,
+  deferred?: Set<string>,
 ): ResolvedInputs {
   const decl = declared ?? {};
+  const deferredKeys = deferred ?? new Set<string>();
 
   for (const key of Object.keys(provided)) {
     if (!(key in decl)) {
@@ -29,6 +38,11 @@ export function resolveInputs(
   const out: ResolvedInputs = {};
   for (const [name, spec] of Object.entries(decl)) {
     const type = spec.type ?? "string";
+    // Runtime-deferred input: keep the `${{ needs.* }}` expression as-is.
+    if (deferredKeys.has(name) && Object.prototype.hasOwnProperty.call(provided, name)) {
+      out[name] = String(provided[name]);
+      continue;
+    }
     let value: unknown;
     let present = true;
     if (Object.prototype.hasOwnProperty.call(provided, name)) {

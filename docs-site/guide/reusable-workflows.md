@@ -131,36 +131,43 @@ report:
     - run: echo "${{ needs.build.outputs.version }}"
 ```
 
-## `with:` is compile-time only
+## Passing inputs, including runtime values
 
-The one rule that trips people up: a caller's `with:` may reference only
-**compile-time** contexts — `inputs`, `matrix`, and `event`. It **cannot**
-reference `needs.*` or `steps.*` (a value that only exists once a run is underway):
+A caller's `with:` fills the callee's declared `inputs:`. The value can be a
+compile-time one (`inputs`, `matrix`, `event`) **or** a runtime one — a
+producer job's output via `needs.*`:
 
 ```yaml
 deploy:
   needs: [build]
   uses: workflow/deploy
   with:
-    env: ${{ inputs.target }}                       # ✅ compile-time input
-    # version: ${{ needs.build.outputs.version }}   # ❌ runtime value — rejected at compile
+    env: ${{ inputs.target }}                     # compile-time input
+    version: ${{ needs.build.outputs.version }}   # runtime value — resolves at run
 ```
 
-Inputs are bound when the workflow compiles (it's how they drive matrix fan-out,
-`if:`, and interpolation), so a runtime value can't fill one. The compiler rejects
-it with a clear error rather than silently miscompiling.
+The callee declares both inputs and references only <code v-pre>${{ inputs.env }}</code> /
+<code v-pre>${{ inputs.version }}</code> — it never reaches into a caller's jobs, so it reads
+cleanly and runs standalone (an unprovided input falls back to its default).
 
-Runtime **data** still flows — through `needs`, not `with:`. Because a callee's
-entry jobs inherit the caller job's `needs:`, they can read
-<code v-pre>${{ needs.build.outputs.version }}</code> at run time like any other job. The split:
-pass **config** (which env, which target — known up front) through `with:`; pass
-**data** (a built version — produced during the run) through `needs`.
+Under the hood a runtime value is **deferred**: the compiler leaves the
+<code v-pre>${{ needs.* }}</code> expression intact, substitutes it into the callee's
+<code v-pre>${{ inputs.version }}</code>, and it resolves at run time through the inherited
+need — so the callee must be able to see that need.
 
-::: tip Same idea as GitHub Actions
-This mirrors GitHub's reusable workflows, with one deliberate difference: GitHub
-evaluates a caller's `with:` at run time (so it allows `needs.*`), whereas
-work binds inputs at compile time. Hence the rule above. Everything else —
-the caller-job shape, `on: workflow_call`, explicit outputs — lines up.
+Two rules keep it honest:
+
+- a `needs.<job>` you reference in `with:` must be in that call's own `needs:`
+  (otherwise the value can't resolve when the call runs);
+- `steps.*` isn't allowed in `with:` — a reusable call has no steps of its own.
+
+The one thing that still *must* be compile-time is a value that drives the
+**callee's own** `matrix` or `if:` (the callee is compiled before any job runs).
+
+::: tip Same as GitHub Actions
+This matches GitHub's reusable workflows: a caller's `with:` may reference
+`needs.*`, and the value resolves at run time. The caller-job shape,
+`on: workflow_call`, and explicit outputs line up too.
 :::
 
 ## How it runs

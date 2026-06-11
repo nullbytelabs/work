@@ -30,6 +30,8 @@ export interface PlannedStep {
   with?: Record<string, unknown>;
   /** Raw conditional guard, evaluated at runtime; a false result skips the step. */
   if?: string;
+  /** When true, a non-zero exit doesn't fail the job (GitHub Actions `continue-on-error`). */
+  continueOnError?: boolean;
   /** Resolved env (workflow <- job <- step); may carry deferred needs/steps expressions. */
   env: Record<string, string>;
 }

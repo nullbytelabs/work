@@ -151,6 +151,7 @@ steps:
 | `uses` | string | A step reference: `work/agent`, `action/<name>`, or a built-in `work/*` action. Mutually exclusive with `run`. See [Step `uses:` forms](#step-uses-forms). |
 | `with` | map | Inputs for a `uses` step. Meaning depends on the form — see [Step `uses:` forms](#step-uses-forms). |
 | `if` / `when` | string | Conditional guard; a false result skips the step. Use one, not both. |
+| `continue-on-error` | boolean | When `true`, a non-zero exit doesn't fail the job — the run continues and the job can still succeed. The step's real outcome is still recorded (`steps.<id>.result` is `failure`). GitHub Actions semantics. |
 | `env` | `map<string,string>` | Step-level env, layered over job and workflow env. |
 
 ### Step outputs
@@ -166,6 +167,10 @@ A `run` step writes outputs by appending `key=value` lines to the file at the
 Read them inside an expression — `steps.meta.outputs.version` (same job) or, after
 the job re-exposes them via `outputs:`, `needs.<job>.outputs.version` (downstream
 jobs).
+
+Outputs are captured even when the step exits non-zero (like GitHub's
+`$GITHUB_OUTPUT`), so a `continue-on-error` step that runs a tool and records its
+output still exposes that output to a consumer.
 
 A `uses:` step also produces outputs (an agent's final message, an action's
 declared outputs); read them the same way. See below.
@@ -231,12 +236,12 @@ Allowed keys on a `uses:` job: `uses` (required), `with`, `needs`, `if`/`when`,
 `runs-on`/`machine`, `env`, `outputs` — sizing belongs to the callee's jobs, env
 is per-workflow, and outputs come from the callee.
 
-::: warning `with:` is compile-time only
-A caller's `with:` may reference only **compile-time** contexts — `inputs`,
-`matrix`, `event`. Referencing `needs.*` or `steps.*` (a runtime value) is a
-compile error. Pass runtime **data** through `needs` instead: a callee's entry
-jobs inherit the caller job's `needs:`, so they read `needs.<job>.outputs.*` at
-run time like any job.
+::: tip `with:` accepts runtime values
+A caller's `with:` may reference compile-time contexts (`inputs`, `matrix`,
+`event`) **and** runtime ones — a `needs.<job>.outputs.*` value, which is
+deferred and resolves when the call runs. The referenced job must be in the
+call's own `needs:`; `steps.*` isn't allowed (a call has no steps). Only a value
+that drives the **callee's own** `matrix`/`if:` must be compile-time.
 :::
 
 ### Callee opt-in (`on: workflow_call`)

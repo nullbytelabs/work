@@ -60,18 +60,18 @@ automatically, and the gallery doubles as documentation.
 | Pipeline | What it does |
 |---|---|
 | `work run ci` | composes the other three via job-level `uses: workflow/<name>` — checks → test → review, fail-fast ordering |
-| `work run checks` | one VM, `npm ci`, then lint/typecheck/knip/fan-in in **capture mode** (outputs recorded via `$WORK_OUTPUT`, never gating) |
-| `work run test` | one VM, the `test:unit` tier, also capture-mode |
-| `work run review` | **five parallel work/agent reviewers** (one per subsystem via `promptFile` from `.workflows/prompts/`, + one reading the captured checks/test output via inherited `needs`), then a `collect` editor that **verifies candidates against the checkout**, suppresses `.review/accepted.md` entries, and emits sentinel-wrapped JSON |
+| `work run checks` | one VM, `npm ci`, then lint/typecheck/knip/fan-in each as its own `continue-on-error` step (a failing tool doesn't gate the job; its output is captured for `review`) |
+| `work run test` | one VM, the `test:unit` tier as a single `continue-on-error` step |
+| `work run review` | **five parallel work/agent reviewers** (one per subsystem via `promptFile` from `.workflows/prompts/`, + one reviewing the tooling output passed in as `inputs.*`), then a `collect` editor that **verifies candidates against the checkout**, suppresses `.review/accepted.md` entries, and emits sentinel-wrapped JSON |
 
 Notes for using them:
 
 - `review` (and `ci`) need a model in `work.json` (gitignored — copy
   `work.example.json`; `apiKey` takes `$VAR` expansion). The key is injected
   host-side via mediated egress; it never enters the guest.
-- Capture-mode means `checks`/`test` **don't fail the run** on a red tool —
-  the review agent interprets the captured output. The hard gate is GitHub
-  Actions.
+- The tool steps are `continue-on-error`, so `checks`/`test` **don't fail the
+  run** on a red tool — the failure is captured and the review agent interprets
+  it. The hard gate is GitHub Actions.
 - Reviewers are `machine: small`; five in parallel ≈ 10G peak RAM.
 - Run history persists in `.workflows/db` (PGLite, gitignored):
   `work runs`, `work resume <id>` (reuse finished jobs), `work rerun <id>`,

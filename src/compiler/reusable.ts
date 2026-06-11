@@ -112,12 +112,14 @@ export function inlineCall(p: InlineParams): InlineResult {
     throw new WorkflowCompileError(`job "${p.baseId}": workflow "${W.name}" is not callable — add 'on: workflow_call' to ${file}`);
   }
 
-  // B. Bind `with:` against compile-time context only.
-  const boundWith = bindWith(p, W);
+  // B. Bind `with:`: resolve compile-time roots now; carry runtime (`needs.*`)
+  //    values through as deferred input expressions.
+  const { boundWith, deferred } = bindWith(p, W);
 
   // C. Recursively compile the callee with the bound inputs.
   const sub = compile(W, {
     inputs: boundWith,
+    ...(deferred.size > 0 ? { _deferredInputs: deferred } : {}),
     ...(p.event ? { event: p.event } : {}),
     resolveWorkflow: resolve,
     _fromDir: dir,
@@ -181,42 +183,68 @@ function collapseSingle(
   return out;
 }
 
-/** Bind a call's `with:` against the caller's compile-time context, rejecting any
- *  runtime (`needs`/`steps`) reference, then validate against the callee's inputs. */
-function bindWith(p: InlineParams, W: WorkflowSpec): Record<string, unknown> {
+/**
+ * Bind a call's `with:` and report which inputs are runtime-deferred.
+ *
+ * Compile-time roots (`inputs`/`matrix`/`event`) are resolved here; a
+ * `needs.<job>.outputs.*` reference is left intact and the input is marked
+ * **deferred** — the recursive compile substitutes it into `${{ inputs.<name> }}`
+ * so it resolves at runtime through the callee's inherited `needs`. This is how
+ * runtime data flows into a reusable workflow: explicitly, via the call site's
+ * `with:`, matching GitHub Actions — no implicit reaching into a caller-side job
+ * from inside the callee.
+ *
+ * Two guards keep it honest:
+ *  - a referenced `needs.<job>` must be in *this call's* `needs:`, or the value
+ *    can't resolve at runtime (the callee's roots only inherit those needs);
+ *  - `steps.*` is rejected — a `uses:` job has no steps of its own.
+ */
+function bindWith(p: InlineParams, W: WorkflowSpec): { boundWith: Record<string, unknown>; deferred: Set<string> } {
   const ictx: ExprContext = {
     inputs: p.inputs,
     ...(p.leg.cell ? { matrix: p.leg.cell } : {}),
     ...(p.event ? { event: p.event } : {}),
   };
+  const callerNeeds = new Set(p.job.needs ?? []);
   const boundWith: Record<string, unknown> = {};
+  const deferred = new Set<string>();
   for (const [k, v] of Object.entries(p.job.with ?? {})) {
     if (typeof v === "string") {
-      // Reject runtime roots BEFORE interpolation — `interpolate` would silently
-      // defer `needs.*`/`steps.*`, letting them slip past input validation.
       for (const body of expressionBodies(v)) {
         const root = parseAccessPath(body)[0];
-        if (root && root.kind === "key" && (root.name === "needs" || root.name === "steps")) {
+        if (!root || root.kind !== "key") continue;
+        if (root.name === "steps") {
           throw new WorkflowCompileError(
-            `job "${p.baseId}": with.${k} may not reference a runtime value ("\${{ ${body} }}"). ` +
-              `'with' is bound at compile time — pass runtime data through 'needs' instead (see docs/reusable-workflows.md §8).`,
+            `job "${p.baseId}": with.${k} may not reference "steps.*" — a reusable call has no steps; ` +
+              `pass step output through a job output and 'needs' instead.`,
           );
         }
+        if (root.name === "needs") {
+          const dep = /^needs\.([A-Za-z_][\w-]*)/.exec(body)?.[1];
+          if (dep && !callerNeeds.has(dep)) {
+            throw new WorkflowCompileError(
+              `job "${p.baseId}": with.${k} references "needs.${dep}" but "${dep}" is not in this job's 'needs:' — ` +
+                `add it so the value is available when the call runs.`,
+            );
+          }
+          deferred.add(k);
+        }
       }
+      // Resolve compile-time roots; a deferred value keeps its `${{ needs.* }}` text.
       boundWith[k] = interpolate(v, ictx);
     } else {
       boundWith[k] = v;
     }
   }
   try {
-    resolveInputs(W.inputs, boundWith);
+    resolveInputs(W.inputs, boundWith, deferred);
   } catch (err) {
     if (err instanceof WorkflowCompileError) {
       throw new WorkflowCompileError(`job "${p.baseId}" calling workflow "${W.name}": ${err.message}`);
     }
     throw err;
   }
-  return boundWith;
+  return { boundWith, deferred };
 }
 
 /** Parse a `workflow_call.outputs` value, which must be `${{ jobs.<id>.outputs.<key> }}`,

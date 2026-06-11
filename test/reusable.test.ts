@@ -108,13 +108,35 @@ describe("reusable — with: binding", () => {
     assert.equal(p.jobs["dep"]!.steps[0]!.run, 'echo "deploy to staging"');
   });
 
-  it("rejects a runtime value (needs.*) in with:", () => {
+  it("threads a runtime value (needs.*) in with: into the callee's inputs.*", () => {
+    const p = plan(
+      `name: caller\njobs:\n  prod:\n    steps:\n      - id: m\n        run: 'echo "v=1" >> "$WORK_OUTPUT"'\n    outputs:\n      v: "\${{ steps.m.outputs.v }}"\n  dep:\n    needs: [prod]\n    uses: workflow/deploy\n    with:\n      target: "\${{ needs.prod.outputs.v }}"`,
+      { deploy: `name: deploy\non: workflow_call\ninputs:\n  target: {}\njobs:\n  go:\n    steps:\n      - run: 'echo "to \${{ inputs.target }}"'` },
+    );
+    // The callee's inputs.target expands to the caller's runtime expression, which
+    // resolves at runtime through the inherited need on `prod`.
+    const go = p.jobs["dep"]!;
+    assert.deepEqual(go.needs, ["prod"]);
+    assert.equal(go.steps[0]!.run, 'echo "to ${{ needs.prod.outputs.v }}"');
+  });
+
+  it("rejects a runtime value in with: whose job is not in the call's needs", () => {
     assert.throws(
       () =>
         plan(`name: caller\njobs:\n  dep:\n    uses: workflow/deploy\n    with:\n      target: "\${{ needs.x.outputs.y }}"`, {
           deploy: `name: deploy\non: workflow_call\ninputs:\n  target: {}\njobs:\n  go:\n    steps: [{ run: "true" }]`,
         }),
-      (e) => e instanceof WorkflowCompileError && /runtime value/.test(e.message),
+      (e) => e instanceof WorkflowCompileError && /not in this job's 'needs:'/.test(e.message),
+    );
+  });
+
+  it("rejects steps.* in with: (a reusable call has no steps)", () => {
+    assert.throws(
+      () =>
+        plan(`name: caller\njobs:\n  dep:\n    uses: workflow/deploy\n    with:\n      target: "\${{ steps.x.outputs.y }}"`, {
+          deploy: `name: deploy\non: workflow_call\ninputs:\n  target: {}\njobs:\n  go:\n    steps: [{ run: "true" }]`,
+        }),
+      (e) => e instanceof WorkflowCompileError && /may not reference "steps\.\*"/.test(e.message),
     );
   });
 

@@ -1,13 +1,13 @@
 # checks
 # description: reusable static-checks workflow — one gondolin VM, a single `npm ci`,
-#              then lint / typecheck / knip / fan-in run in CAPTURE mode: each tool's
-#              combined output (and exit code) is recorded as a workflow_call output
-#              rather than gating the job. This lets `ci` carry the results into the
-#              `review` workflow (which reads needs.checks.outputs.*) so an agent can
-#              interpret them — pass or fail. The job never aborts, so a lint/type
-#              error does NOT fail the run here; the real repo gate is GitHub Actions
+#              then lint / typecheck / knip / fan-in each as its own step. Every tool
+#              step is `continue-on-error: true`, so a failing tool does NOT fail the
+#              job — the run carries on and the result is captured as a job output for
+#              the `review` workflow's agent to interpret (pass or fail). Each step's
+#              real outcome still shows in the run (a failed tool step reads as failed,
+#              the job stays green). The hard repo gate is GitHub Actions
 #              (.github/workflows/ci.yml), which runs these tools directly. Called by
-#              `ci` via `uses: workflow/checks`; also runnable directly: `work run checks`.
+#              `ci` via `uses: workflow/checks`; also runnable: `work run checks`.
 ---
 name: checks
 
@@ -23,28 +23,49 @@ jobs:
   static:
     runs-on: work:base
     outputs:
-      lint: ${{ steps.run.outputs.lint }}
-      typecheck: ${{ steps.run.outputs.typecheck }}
-      knip: ${{ steps.run.outputs.knip }}
-      fanin: ${{ steps.run.outputs.fanin }}
+      lint: ${{ steps.lint.outputs.log }}
+      typecheck: ${{ steps.typecheck.outputs.log }}
+      knip: ${{ steps.knip.outputs.log }}
+      fanin: ${{ steps.fanin.outputs.log }}
     steps:
       - name: install
         run: npm ci
-      - id: run
-        name: run checks (capture output; never gate — review reads these)
+
+      # Each tool runs on its own and is allowed to fail: continue-on-error keeps
+      # the job green so `ci` can carry every result into `review`. The tool's
+      # combined output (prefixed with its exit code) is captured as `log`.
+      - id: lint
+        name: lint
+        continue-on-error: true
         run: |
-          set +e
-          emit() {
-            key=$1; shift
-            out=$("$@" 2>&1); rc=$?
-            {
-              printf '%s\n' "${key}<<__WF_EOF__"
-              printf 'exit %s\n' "$rc"
-              printf '%s\n' "$out"
-              printf '%s\n' "__WF_EOF__"
-            } >> "$WORK_OUTPUT"
-          }
-          emit lint      npm run lint
-          emit typecheck npm run typecheck
-          emit knip      npm run knip
-          emit fanin     npm run fan-in
+          out=$(npm run lint 2>&1); rc=$?
+          printf '%s\n' "$out"
+          { echo "log<<__EOF__"; echo "exit $rc"; printf '%s\n' "$out"; echo "__EOF__"; } >> "$WORK_OUTPUT"
+          exit $rc
+
+      - id: typecheck
+        name: typecheck
+        continue-on-error: true
+        run: |
+          out=$(npm run typecheck 2>&1); rc=$?
+          printf '%s\n' "$out"
+          { echo "log<<__EOF__"; echo "exit $rc"; printf '%s\n' "$out"; echo "__EOF__"; } >> "$WORK_OUTPUT"
+          exit $rc
+
+      - id: knip
+        name: knip
+        continue-on-error: true
+        run: |
+          out=$(npm run knip 2>&1); rc=$?
+          printf '%s\n' "$out"
+          { echo "log<<__EOF__"; echo "exit $rc"; printf '%s\n' "$out"; echo "__EOF__"; } >> "$WORK_OUTPUT"
+          exit $rc
+
+      - id: fanin
+        name: fan-in
+        continue-on-error: true
+        run: |
+          out=$(npm run fan-in 2>&1); rc=$?
+          printf '%s\n' "$out"
+          { echo "log<<__EOF__"; echo "exit $rc"; printf '%s\n' "$out"; echo "__EOF__"; } >> "$WORK_OUTPUT"
+          exit $rc

@@ -140,4 +140,68 @@ jobs:
       await rm(workRoot, { recursive: true, force: true });
     }
   });
+
+  // The PREFERRED pattern (what ci.yaml→review.yaml now uses): the caller passes a
+  // producer's runtime output into the callee EXPLICITLY via `with:`, mapping it
+  // onto the callee's declared `inputs:`. The callee references only `inputs.*` —
+  // it never reaches into a caller-side job — so it reads cleanly and runs
+  // standalone with input defaults. The runtime value resolves through the need
+  // the caller declared.
+  const CALLER3 = `name: caller3
+jobs:
+  producer:
+    steps:
+      - id: m
+        run: 'echo "x=explicit" >> "$WORK_OUTPUT"'
+    outputs:
+      x: "\${{ steps.m.outputs.x }}"
+  consumer:
+    needs: [producer]
+    uses: workflow/sink3
+    with:
+      payload: "\${{ needs.producer.outputs.x }}"
+`;
+  const SINK3 = `name: sink3
+on: workflow_call
+inputs:
+  payload: { type: string, default: "none" }
+jobs:
+  reader:
+    steps:
+      - run: 'echo "saw=\${{ inputs.payload }}"'
+`;
+
+  it("threads a runtime with: value into the callee's inputs.* and resolves it at runtime", async () => {
+    const sinkResolver: ResolveWorkflow = (ref) => {
+      if (ref.replace(/^workflow\//, "") !== "sink3") throw new Error(`unexpected ref ${ref}`);
+      return { spec: parseWorkflow(SINK3), dir: "/wf", file: "/wf/sink3.yaml" };
+    };
+    const plan = compile(parseWorkflow(CALLER3), {
+      resolveWorkflow: sinkResolver,
+      _fromDir: "/wf",
+      _chain: ["/wf/caller.yaml"],
+      _depth: 0,
+    });
+
+    // Single-job callee → collapses onto the call id `consumer`. inputs.payload
+    // was rewritten to the caller's runtime expression, scoped to the inherited
+    // need on `producer`.
+    const reader = plan.jobs["consumer"]!;
+    assert.deepEqual(reader.needs, ["producer"]);
+    assert.match(reader.steps[0]!.run!, /needs\.producer\.outputs\.x/);
+    assert.doesNotMatch(reader.steps[0]!.run!, /inputs\.payload/);
+
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-with-runtime-"));
+    let output = "";
+    try {
+      const result = await runtime.run(plan, {
+        workRoot,
+        hooks: { onOutput: (_j, _s, c) => (output += c.text) },
+      });
+      assert.equal(result.status, "success");
+      assert.match(output, /saw=explicit/);
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
+  });
 });

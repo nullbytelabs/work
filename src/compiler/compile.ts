@@ -52,6 +52,10 @@ export interface CompileOptions {
   _depth?: number;
   /** @internal Recursion state: directory of the workflow being compiled, for relative `./` refs. */
   _fromDir?: string;
+  /** @internal Reusable-call state: input names whose value is a runtime
+   *  expression (`${{ needs.* }}` passed via the caller's `with:`), to be
+   *  substituted verbatim rather than compile-time-validated. */
+  _deferredInputs?: Set<string>;
 }
 
 export const DEFAULT_RUNS_ON = "gondolin";
@@ -110,6 +114,7 @@ function compileStep(
   const planned: PlannedStep = { name: `${jobId}/${stepKey}`, env };
   if (step.name !== undefined) planned.title = step.name;
   if (step.id !== undefined) planned.id = step.id;
+  if (step.continueOnError) planned.continueOnError = true;
   if (step.run !== undefined) planned.run = interpolate(step.run, ictx);
   if (step.uses !== undefined) planned.uses = step.uses;
   if (step.with !== undefined) {
@@ -331,7 +336,7 @@ function applyOutputRewrites(job: PlannedJob, byBase: Map<string, Record<string,
 
 /** Compile a validated spec into an execution plan, binding any provided inputs. */
 export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): ExecutionPlan {
-  const inputs = resolveInputs(spec.inputs, opts.inputs ?? {});
+  const inputs = resolveInputs(spec.inputs, opts.inputs ?? {}, opts._deferredInputs);
   const workflowEnv = spec.env ?? {};
   const event = opts.event;
 

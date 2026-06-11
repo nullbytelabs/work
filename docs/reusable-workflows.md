@@ -9,13 +9,15 @@
 > (durability model), [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (the
 > *step*-level `uses:` surface this deliberately does **not** touch). Date: 2026-06-06.
 >
-> **Status: implemented (v1).** The core vertical shipped — spec (`uses:`/`with:`
-> jobs + `on: workflow_call`), compile-time inlining (`src/compiler/reusable.ts`),
-> and the CLI resolver (`resolveWorkflowRef` in `src/project.ts`). Two design
-> points were **revised in implementation** and are flagged inline: the compiler
-> takes an *injected* resolver (stays filesystem-pure) rather than reading files
-> itself (§7), and the inlining namespace uses `__` not `::` (§14-Q2).
-> remote/cross-repo refs are reserved (§14-Q6).
+> **Status: implemented.** The core vertical shipped — spec (`uses:`/`with:`
+> jobs + `on: workflow_call`), inlining by substitution (`src/compiler/reusable.ts`),
+> and the CLI resolver (`resolveWorkflowRef` in `src/project.ts`). `with:` carries
+> both compile-time and **runtime** (`needs.*`) values — the latter deferred and
+> substituted into the callee's `inputs.*`, resolving at run (§8). Design points
+> revised in implementation are flagged inline: the compiler takes an *injected*
+> resolver (stays filesystem-pure, §7); the inlining namespace uses `__` not `::`
+> (§14-Q2); runtime-valued inputs are supported, not deferred to "Strategy B"
+> (§8, §14-Q3). Remote/cross-repo refs are reserved (§14-Q6).
 >
 > **Superseded — inlining is now by substitution, not a join node.** This doc was
 > written around a synthesized *virtual join* node (`PlannedJob.virtual`) per call.
@@ -206,8 +208,9 @@ are "one caller job → a sub-DAG of `PlannedJob`s." Same shape, larger unit.
   work unchanged — they operate on the flattened DAG. Maximum reuse, minimum new
   surface.
 - **Con:** namespacing + `needs`-rewiring + an output-join node to build
-  (§7); and **inputs bind at compile time**, so a callee can't be parameterized
-  by a *runtime* value (§8) — the central constraint.
+  (§7). Inputs that drive the callee's *own* compilation (its `matrix`/`if:`)
+  must be compile-time; **runtime data still passes cleanly through `with:` →
+  `inputs.*`** via deferred substitution (§8).
 
 ### Strategy B — runtime sub-run
 
@@ -225,13 +228,15 @@ collecting its outputs.
   show the inner DAG without resolving + compiling the callee. Parallelism is
   coarser (the sub-run is one scheduling unit).
 
-> **RECOMMENDATION:** ship **Strategy A** for v1. It is the architecturally
-> consistent move (the plan is deliberately flat and runtime-agnostic; matrix
-> already flattens), and it makes every existing tool work for free. Its one real
-> limitation — compile-time-only inputs — is acceptable for the dominant use case
-> (callees parameterized by *which env / which target*, which is known up front),
-> and §8 shows runtime **data flow** still works through the normal `needs` graph.
-> Revisit Strategy B only if runtime-valued inputs become a hard requirement.
+> **RECOMMENDATION:** ship **Strategy A**. It is the architecturally consistent
+> move (the plan is flat and runtime-agnostic; matrix already flattens), and it
+> makes every existing tool work for free. Runtime-valued inputs are supported on
+> top of it via deferred substitution (§8): a `with:` value that references
+> `needs.*` is left intact and substituted into the callee's `${{ inputs.* }}`,
+> resolving at runtime. The only thing that genuinely *must* be compile-time is a
+> value that drives the callee's **own** `matrix`/`if:`. Strategy B (a true
+> sub-run) remains the escape hatch only if a future need can't be met by
+> substitution.
 
 ## 7. How inlining works (Strategy A in detail)
 
@@ -250,11 +255,13 @@ When `compile()` hits a `uses:` job `C` referencing workflow `W`:
    `./path.yaml` resolves relative to the referencing file's dir). It returns the
    parsed spec plus the callee's dir and canonical file path (the cycle key).
 2. **Assert opt-in** — `W` declares `on: workflow_call`, else a compile error.
-3. **Bind inputs** — first **reject** any `needs.*`/`steps.*` reference in `C`'s
-   `with:` (a runtime value can't bind at compile time — §8), then interpolate
-   against the *caller's* compile-time context (`inputs`/`matrix`/`event`), then
-   `resolveInputs(W.inputs, boundWith)`. Unknown/missing-required/option/pattern
-   errors surface here, reusing today's validator unchanged.
+3. **Bind inputs** — interpolate `C`'s `with:` against the *caller's*
+   compile-time context (`inputs`/`matrix`/`event`); a `needs.*` reference is
+   left intact and its input marked **deferred** (§8), while `steps.*` and a
+   `needs.<job>` not in `C`'s `needs:` are rejected with a clear error. Then
+   `resolveInputs(W.inputs, boundWith, deferred)` validates the rest
+   (unknown/missing-required/option/pattern), passing deferred values through
+   verbatim for substitution into the callee.
 4. **Recursively compile** `W` with those inputs → a sub-`ExecutionPlan`.
 5. **Namespace** every sub-job id off a `\w`-safe prefix: `C__<subjobId>`. (The
    join keeps the call's id — `C`, or `C::<cell>` for a matrix call — but sub-jobs
@@ -300,57 +307,57 @@ join, all in the caller's flat map. `topoSort` orders them with everything else;
 `work graph` renders the whole thing; the durable runtime runs them as normal
 Absurd tasks.
 
-## 8. The crux: compile-time inputs vs runtime data flow
+## 8. Runtime data flow: runtime-valued `with:` inputs
 
-The one thing Strategy A *can't* do: parameterize a callee's **compilation** with
-a value only known at **runtime**.
+A reusable call can be parameterized with a value known only at **runtime** — a
+producer job's output — passed explicitly through `with:`, matching GitHub
+Actions:
 
 ```yaml
 build:
-  uses: workflow/build
+  uses: workflow/build          # exposes output `version`
 deploy:
-  needs: [build]
+  needs: [build]                # required: the value's producer must be a need
   uses: workflow/deploy
   with:
-    version: ${{ needs.build.outputs.version }}   # ❌ runtime value — NOT allowed as an input in v1
+    version: ${{ needs.build.outputs.version }}   # ✅ runtime value → callee's inputs.version
 ```
 
-Inputs resolve at compile time (it's how the architecture binds them — they drive
-matrix fan-out, `if:`, interpolation). A `needs.*`/`steps.*` value isn't known
-then. So **`with:` may reference only compile-time contexts** (`inputs`,
-`matrix`, `event`) — the compiler must reject `needs.*`/`steps.*` in `with:` with
-a clear error pointing here.
+The callee declares `inputs: { version: { type: string } }` and references only
+`${{ inputs.version }}`. It never reaches into a caller-side job, so it reads
+cleanly and runs standalone (the input falls back to its default).
 
-> **DIVERGENCE FROM GHA (deliberate).** On GitHub this restriction does *not*
-> exist: GHA evaluates a caller job's `with:` at **runtime**, and its allowed
-> contexts for `jobs.<id>.with.<input>` explicitly include `needs` (along with
-> `github, strategy, matrix, inputs, vars`). So `with: { version: ${{
-> needs.build.outputs.version }} }` is legal there. We can't match that under
-> Strategy A because our inputs bind at compile time — this is the single concrete
-> behavioral difference between our reusable workflows and GHA's, and it's the
-> price of the flat-plan architecture. We document it rather than hide it; §14-Q3
-> records the decision and Strategy B (§6) is the escape hatch if it ever has to go.
+How it compiles, given the flat-plan model (inputs are otherwise bound at compile
+time, where they drive matrix fan-out, `if:`, and interpolation):
 
-This sounds worse than it is. **Runtime data still flows** — just through the
-`needs` graph, not through inputs:
+- The compiler resolves the **compile-time** roots in a `with:` value
+  (`inputs`/`matrix`/`event`) immediately, but leaves a `${{ needs.* }}`
+  reference **intact** and marks that input *deferred*.
+- Inside the callee, `${{ inputs.version }}` expands to the deferred expression
+  `${{ needs.build.outputs.version }}` — a single substitution, not a literal.
+- That expression then resolves at runtime through the callee's inherited
+  `needs` (the call's `needs: [build]` flows onto the callee's root jobs, step
+  6), exactly like any other `needs.*` reference.
 
-```yaml
-build:  { uses: workflow/build }
-deploy:
-  needs: [build]                # deploy's sub-DAG roots inherit this need
-  uses: workflow/deploy
-```
+Two guardrails keep it honest (`bindWith` in `reusable.ts`):
 
-Because deploy's root sub-jobs inherit `needs: [build]` (step 6), they can read
-`${{ needs.build.outputs.version }}` **at runtime** like any other job. The cost:
-the callee's authors reference a caller-side job name (`build`), which leaks the
-composition — a mild encapsulation break. Passing *config* (which env, which
-target — compile-time) goes through `with:`; passing *data* (a built version —
-runtime) goes through `needs`. v1 documents this split explicitly.
+- a `needs.<job>` referenced in `with:` **must** be in the call's own `needs:`,
+  or it can't resolve at runtime — the compiler rejects it with a clear error;
+- `steps.*` is rejected outright — a `uses:` job has no steps of its own.
 
-> If clean runtime-valued **inputs** become a hard requirement, that is the
-> trigger to adopt Strategy B (or a hybrid: inline by default, sub-run when
-> `with:` carries a runtime expression).
+The split to keep in mind: pass **config** (which env, which target) and
+**data** (a built version, captured tool output) both through `with:` →
+`inputs.*`. The data simply happens to be a runtime expression. What you must
+*not* do is have a reusable workflow read `${{ needs.<caller-job>.* }}` for a job
+it never declared — that's the implicit, surprising coupling this design exists
+to avoid. Declare an input; pass it at the call site.
+
+> Compile-time-only contexts still apply where a value genuinely must be known at
+> compile time: a `with:` value that drives the **callee's own** `matrix`, `if:`,
+> or further nested input binding can't be a runtime expression (the callee is
+> compiled before any job runs). Such uses still resolve only against
+> `inputs`/`matrix`/`event`. Passing a runtime value into a plain `run:`/`env:`/
+> step `with:` — the common case — works as shown above.
 
 ## 9. Secrets / egress
 
@@ -408,7 +415,8 @@ validated like `webhook`. **No execution logic here** — syntax only.
 - resolve + opt-in-assert the callee **via the injected `resolveWorkflow`** (the
   compiler does no file I/O itself — the CLI's `resolveWorkflowRef` does, keeping
   `compile()` pure and unit-testable with an in-memory resolver),
-- bind `with:` (reject runtime contexts; §8) and `resolveInputs`,
+- bind `with:` (defer runtime `needs.*`; reject `steps.*` and out-of-`needs`
+  refs; §8) and `resolveInputs`,
 - recursively `compile()`, namespace ids (`__`), rewrite `needs` **and deferred
   `needs.<sibling>` references in steps/outputs/`if:`**, synthesize the virtual
   join (§7),
@@ -447,8 +455,9 @@ jobs:
   deploy:
     needs: [build]
     uses: workflow/deploy
-    with: { env: ${{ inputs.target }} }
-    # build's runtime version reaches deploy's jobs via needs, not with: (§8)
+    with:
+      env: ${{ inputs.target }}                  # compile-time input
+      version: ${{ needs.build.outputs.version }} # runtime input — deferred, resolves at run (§8)
 ```
 
 ```yaml
@@ -497,15 +506,18 @@ inlined jobs are. Rather than widen the shared expression language in three plac
 `C::<cell>` for a matrix call, since that id only appears as a `needs:` *array
 entry*, never inside an expression). A matrix call composes as `C__<cell>__<sub>`.
 
-**Q3 — The `needs`-leak (§8). DECIDED: accept for v1; Strategy B is the documented
-escape hatch.** Config flows through `with:` (compile-time); runtime *data* flows
-through `needs` exactly as it does between any two jobs. The cost is mild — a callee
-root job names a caller-side job — and it's the direct consequence of the flat-plan
-architecture, the same trade that buys us free durability/graph/TUI reuse. This is
-the one decision with genuine tension (GHA *doesn't* have this limit, §8 divergence
-callout); if clean runtime-valued **inputs** ever become a hard requirement, that
-single requirement is the trigger to adopt Strategy B or the inline-by-default /
-sub-run-on-runtime-`with:` hybrid — not before.
+**Q3 — Runtime-valued inputs (§8). DECIDED: support them via deferred
+substitution, matching GHA.** An earlier iteration of this design shipped only
+compile-time `with:` and told authors to route runtime data by having the callee
+read `${{ needs.<caller-job>.* }}` directly — an implicit coupling where a
+reusable workflow silently depended on a job in whoever called it. That violated
+least-surprise and was wrong, regardless of how it was rationalized. The fix:
+`with:` accepts a `needs.*` expression, the compiler defers it and substitutes it
+into the callee's `${{ inputs.* }}`, and it resolves at runtime through the
+inherited need (§8). The callee now references only `inputs.*` — self-contained
+and runnable standalone. The only genuinely compile-time-bound case left is a
+value that drives the callee's *own* `matrix`/`if:`. Strategy B (a true sub-run)
+stays the escape hatch only if some future need can't be met by substitution.
 
 **Q4 — `env:` across the boundary. DECIDED: forbid `env:` on a `uses:` job; env
 stays per-workflow; no cross-boundary inheritance.** This is GHA-parity (GitHub
@@ -552,8 +564,9 @@ too. Exact numeric limit (jobs-per-plan) is a tuning knob, not a design fork.
 - GitHub Actions — How-to: reuse workflows (matrix on a caller job; input types
   limited to boolean/number/string):
   https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows
-- GitHub Actions — Contexts reference (the §8 divergence: `jobs.<id>.with.<input>`
-  allows `github, needs, strategy, matrix, inputs, vars` — i.e. runtime `needs`):
+- GitHub Actions — Contexts reference (`jobs.<id>.with.<input>` allows `github,
+  needs, strategy, matrix, inputs, vars` — i.e. runtime `needs`, which §8 now
+  matches via deferred substitution):
   https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
 - Internal seams: [`durable-orchestrator.md`](durable-orchestrator.md) (durability/orchestration),
   [`agent-primitive-and-actions.md`](agent-primitive-and-actions.md) (step-level `uses:`),

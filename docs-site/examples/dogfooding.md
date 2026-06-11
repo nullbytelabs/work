@@ -53,10 +53,10 @@ checks  ──▶  test  ──▶  review
 ## checks & test: run the tools, keep the output
 
 `checks` and `test` run the project's own tooling — `lint`, `typecheck`, `knip`,
-`fan-in`, and the non-VM `test:unit` tier. They run in **capture mode**: each tool's
-combined output and exit code is recorded as a `workflow_call` output instead of
-failing the job. That way the result becomes data the rest of the pipeline can read,
-pass or fail.
+`fan-in`, and the non-VM `test:unit` tier. Each tool is its own step marked
+[`continue-on-error`](../reference/workflow-syntax#steps): a failing tool doesn't
+fail the job, so its output becomes data the rest of the pipeline can read (pass
+or fail) while the run carries on. The step's real outcome still shows in the run.
 
 ```yaml
 # .workflows/checks.yaml
@@ -65,37 +65,34 @@ on:
   workflow_call:
     outputs:
       lint: ${{ jobs.static.outputs.lint }}
-      typecheck: ${{ jobs.static.outputs.typecheck }}
-      knip: ${{ jobs.static.outputs.knip }}
-      fanin: ${{ jobs.static.outputs.fanin }}
+      # …typecheck / knip / fanin likewise
 jobs:
   static:
     outputs:
-      lint: ${{ steps.run.outputs.lint }}
+      lint: ${{ steps.lint.outputs.log }}
       # …typecheck / knip / fanin likewise
     steps:
-      - run: npm ci
-      - id: run
+      - name: install
+        run: npm ci
+      - id: lint
+        name: lint
+        continue-on-error: true          # a lint failure doesn't fail the job
         run: |
-          set +e
-          emit() {                       # record output + exit code, never abort
-            key=$1; shift
-            out=$("$@" 2>&1); rc=$?
-            { printf '%s\n' "${key}<<EOF" "exit ${rc}" "$out" EOF; } >> "$WORK_OUTPUT"
-          }
-          emit lint      npm run lint
-          emit typecheck npm run typecheck
-          emit knip      npm run knip
-          emit fanin     npm run fan-in
+          out=$(npm run lint 2>&1); rc=$?
+          printf '%s\n' "$out"
+          { echo "log<<__EOF__"; echo "exit $rc"; printf '%s\n' "$out"; echo "__EOF__"; } >> "$WORK_OUTPUT"
+          exit $rc
+      # …typecheck / knip / fan-in are identical, one step each
 ```
 
 `test` follows the same shape for `test:unit`, exposing one `test` output.
 
 ::: info The build gate lives elsewhere
-Because the dogfood `checks`/`test` capture instead of abort, `work run ci` does not
-fail on a lint or test error — the signal is carried into the review. The repository's
-actual gate is GitHub Actions (`.github/workflows/ci.yml`), which runs the same tools
-directly and fails the build. The dogfood pipeline is a demonstration, not the gate.
+Because the dogfood tool steps are `continue-on-error`, `work run ci` does not
+fail on a lint or test error — the signal is carried into the review. The
+repository's actual gate is GitHub Actions (`.github/workflows/ci.yml`), which
+runs the same tools directly and fails the build. The dogfood pipeline is a
+demonstration, not the gate.
 :::
 
 ## review: five agents fan out, one fans them in
@@ -106,12 +103,26 @@ own micro-VM (`uses: work/agent`). Four read a single source subsystem from the
 checkout; the fifth, `scan-checks`, reads the tooling output that `checks` and `test`
 already produced — no re-running.
 
-It reaches that output through **inherited needs**. The `review` job declared
-`needs: [checks, test]`, so the reusable workflow's jobs inherit those needs and can
-read `needs.checks.outputs.*` at run time, exactly like any other job:
+That output flows in **explicitly**. `review` declares `inputs:` for the tooling
+results, and the caller (`ci.yaml`) passes them via `with:`, mapping the
+`checks`/`test` job outputs onto those inputs — so the data flow is visible right
+at the call site, and `review` itself references only `inputs.*`:
 
 ```yaml
+# .workflows/ci.yaml  (excerpt)
+  review:
+    needs: [checks, test]
+    uses: workflow/review
+    with:
+      lint: ${{ needs.checks.outputs.lint }}    # runtime value → review's inputs.lint
+      typecheck: ${{ needs.checks.outputs.typecheck }}
+      test: ${{ needs.test.outputs.test }}      # …and so on
+
 # .workflows/review.yaml  (excerpt)
+inputs:
+  lint: { type: string, default: "" }           # self-contained; default for standalone runs
+  typecheck: { type: string, default: "" }
+  test: { type: string, default: "" }
 jobs:
   scan-checks:
     machine: small
@@ -123,11 +134,9 @@ jobs:
         with:
           prompt: |
             Review this project's tooling output and report what matters.
-            === lint ===      ${{ needs.checks.outputs.lint }}
-            === typecheck === ${{ needs.checks.outputs.typecheck }}
-            === knip ===      ${{ needs.checks.outputs.knip }}
-            === fan-in ===    ${{ needs.checks.outputs.fanin }}
-            === test:unit === ${{ needs.test.outputs.test }}
+            === lint ===      ${{ inputs.lint }}
+            === typecheck === ${{ inputs.typecheck }}
+            === test:unit === ${{ inputs.test }}
 
   collect:
     needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security, scan-checks]
@@ -169,7 +178,7 @@ Every part of the pipeline maps to a feature you can use directly:
 |---|---|
 | `ci` calls `checks` / `test` / `review` with `uses: workflow/<name>` | [Reusable workflows](../guide/reusable-workflows) — a job calls a whole workflow |
 | `checks` / `test` expose tool output as `workflow_call` outputs | Job and workflow outputs threaded across the `needs` DAG |
-| `review` reads `needs.checks.outputs.*` it never declared | Inherited needs: runtime data flows into a reusable workflow, with no re-running |
+| `ci` passes `checks`/`test` outputs into `review` via `with:` | Runtime-valued reusable-workflow inputs — a `needs.*` value resolves at run inside the callee's `inputs.*` |
 | Five `uses: work/agent` reviewers running real Pi | [Agent steps](../guide/agent-steps) — a model works inside the job's sandbox |
 | Five reviewers in their own micro-VMs, at once | Per-job isolation and the `needs` DAG's parallelism |
 

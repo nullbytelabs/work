@@ -479,11 +479,14 @@ async function runSteps(
     status: { success: !failed, failure: failed },
   });
 
-  /** Record a step's result: capture outputs/result for `id`ed steps, mark the job failed. */
+  /** Record a step's result: capture outputs/result for `id`ed steps, and mark the
+   *  job failed on a real failure — unless the step is `continue-on-error`, which
+   *  records the failure outcome (visible in `steps.<id>.result`) but lets the job
+   *  carry on and still succeed. */
   const recordStep = (step: PlannedStep, result: StepResult): void => {
     if (step.id) stepOutputs[step.id] = { outputs: result.outputs ?? {}, result: result.status };
     steps.push(result);
-    if (result.status === "failure") failed = true;
+    if (result.status === "failure" && !step.continueOnError) failed = true;
   };
 
   try {
@@ -618,10 +621,12 @@ async function runShellStep(
     stdout: run.stdout,
     stderr: run.stderr,
   };
-  if (run.ok) {
-    const text = await readFile(hostOutFile, "utf-8").catch(() => "");
-    if (text) result.outputs = parseOutputFile(text);
-  }
+  // Capture $WORK_OUTPUT regardless of exit code (GitHub captures $GITHUB_OUTPUT
+  // either way). This is what lets a `continue-on-error` step that runs a tool,
+  // records its combined output, and exits non-zero still expose that output to
+  // a consumer — the step's real failure is preserved in `status`.
+  const text = await readFile(hostOutFile, "utf-8").catch(() => "");
+  if (text) result.outputs = parseOutputFile(text);
   return result;
 }
 

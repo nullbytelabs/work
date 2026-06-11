@@ -2,13 +2,19 @@
 # description: reusable agent review — fan-out / fan-in. Five reviewers run in
 #              parallel, each in its own small gondolin VM: four review one source
 #              subsystem (prompts in .workflows/prompts/review-*.md, loaded via
-#              promptFile), and `scan-checks` reads the tool output `ci`'s
-#              `checks`/`test` jobs already captured (via inherited needs — no
-#              re-running). A `collect` editor agent fans findings in: it VERIFIES
-#              each candidate against the checkout, drops anything listed in
+#              promptFile), and `scan-checks` reviews the project's own tooling
+#              output. A `collect` editor agent fans findings in: it VERIFIES each
+#              candidate against the checkout, drops anything listed in
 #              .review/accepted.md, ranks, caps, and emits machine-readable JSON
 #              between REVIEW JSON sentinels (the contract the Pi feedback loop
 #              parses — see .pi/skills/work/SKILL.md).
+#
+#              Inputs (explicit): the tooling output it reviews arrives through
+#              declared `inputs:` (lint/typecheck/knip/fanin/test), which the
+#              caller passes via `with:` from its checks/test job outputs — see
+#              ci.yaml. This workflow references ONLY `inputs.*`, never a caller's
+#              jobs; run standalone (`work run review`) the inputs default to empty
+#              and scan-checks reports there was no tooling feeding it.
 #
 #              Diff-aware: if `.review/diff.patch` exists in the checkout (write it
 #              with `git diff > .review/diff.patch` before running), reviewers scope
@@ -19,8 +25,7 @@
 #
 #              Needs a model in work.json (the agent egress allowlists the model
 #              host and injects the key host-side). Called by `ci` via
-#              `uses: workflow/review`; also runnable: `work run review`
-#              (standalone, scan-checks just notes there was no ci feeding it).
+#              `uses: workflow/review`; also runnable: `work run review`.
 #
 #              Sizing: every reviewer is agent-only → `machine: small` (2G); five in
 #              parallel ≈ 10G peak.
@@ -31,6 +36,15 @@ on:
   workflow_call:
     outputs:
       review: ${{ jobs.collect.outputs.review }}
+
+# Tooling output to review, passed in by the caller (ci.yaml) from its checks/test
+# job outputs. Defaults are empty so a standalone `work run review` is well-defined.
+inputs:
+  lint: { type: string, default: "" }
+  typecheck: { type: string, default: "" }
+  knip: { type: string, default: "" }
+  fanin: { type: string, default: "" }
+  test: { type: string, default: "" }
 
 jobs:
   scan-compiler:
@@ -81,12 +95,11 @@ jobs:
         with:
           promptFile: .workflows/prompts/review-agent-security.md
 
-  # The tooling reviewer. It does NOT re-run anything: when `review` is called by
-  # `ci` (which does `needs: [checks, test]`), this job inherits those needs and
-  # reads the tool output `checks`/`test` already captured as their outputs. Run
-  # standalone (`work run review`) there is no ci, so these resolve to empty and
-  # the agent reports that. Inline prompt: it interpolates `needs.*`, which a
-  # promptFile cannot. Agent-only → small.
+  # The tooling reviewer. It re-runs nothing: the captured tool output arrives
+  # through this workflow's declared `inputs:`, which the caller (ci.yaml) fills
+  # from its checks/test job outputs. Standalone, the inputs default to empty and
+  # the agent reports there was no tooling feeding it. Inline prompt (a promptFile
+  # can't interpolate `${{ inputs.* }}`). Agent-only → small.
   scan-checks:
     runs-on: work:base
     machine: small
@@ -98,14 +111,13 @@ jobs:
         uses: work/agent
         with:
           prompt: |
-            Below is the captured output of this project's own tooling from the ci
-            run that called this review (each block starts with its exit code).
-            Report anything that warrants attention: lint or type errors, knip
-            dead-code / unused-export findings, failing or flaky tests, or a
-            fan-in distribution showing an over-relied-on ("god") symbol. Do not
-            invent problems the output doesn't show; clean tools produce no
-            finding. If the blocks are empty, there was no ci run feeding this —
-            output [] in that case too.
+            Below is the captured output of this project's own tooling (each block
+            starts with its exit code). Report anything that warrants attention:
+            lint or type errors, knip dead-code / unused-export findings, failing
+            or flaky tests, or a fan-in distribution showing an over-relied-on
+            ("god") symbol. Do not invent problems the output doesn't show; clean
+            tools produce no finding. If the blocks are empty, there was no tooling
+            feeding this — output [] in that case too.
 
             Output: a JSON array ONLY — no prose, no markdown fences. Each finding:
             {"file": "<tool: lint|typecheck|knip|fan-in|test>", "line": null,
@@ -114,19 +126,19 @@ jobs:
              "evidence": "the relevant lines from the tool output"}
 
             === lint ===
-            ${{ needs.checks.outputs.lint }}
+            ${{ inputs.lint }}
 
             === typecheck ===
-            ${{ needs.checks.outputs.typecheck }}
+            ${{ inputs.typecheck }}
 
             === knip ===
-            ${{ needs.checks.outputs.knip }}
+            ${{ inputs.knip }}
 
             === fan-in ===
-            ${{ needs.checks.outputs.fanin }}
+            ${{ inputs.fanin }}
 
             === test:unit ===
-            ${{ needs.test.outputs.test }}
+            ${{ inputs.test }}
 
   collect:
     runs-on: work:base

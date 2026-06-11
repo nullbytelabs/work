@@ -308,6 +308,13 @@ function parseStep(raw: unknown, path: string): StepSpec {
   if (isPlainObject(raw.with)) step.with = raw.with;
   const cond = parseCondition(raw, path);
   if (cond !== undefined) step.if = cond;
+  const coe = raw["continue-on-error"] ?? raw.continueOnError;
+  if (coe !== undefined) {
+    if (typeof coe !== "boolean") {
+      throw new WorkflowParseError("continue-on-error must be a boolean", `${path}.continue-on-error`);
+    }
+    step.continueOnError = coe;
+  }
   const env = parseEnv(raw.env, `${path}.env`);
   if (env) step.env = env;
   return step;

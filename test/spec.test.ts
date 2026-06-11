@@ -190,6 +190,17 @@ describe("parseWorkflow — validation", () => {
     assert.equal(spec.jobs["a"]!.if, "success()");
   });
 
+  it("parses step continue-on-error", () => {
+    const spec = parseWorkflow(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        continue-on-error: true`);
+    assert.equal(spec.jobs["a"]!.steps![0]!.continueOnError, true);
+  });
+
+  it("rejects a non-boolean continue-on-error", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        continue-on-error: yep`);
+    assert.equal(e.path, "jobs.a.steps[0].continue-on-error");
+    assert.match(e.message, /continue-on-error must be a boolean/);
+  });
+
   it("rejects a step that declares both if and when", () => {
     const e = err(`name: w\njobs:\n  a:\n    steps:\n      - run: x\n        if: success()\n        when: failure()`);
     assert.equal(e.path, "jobs.a.steps[0]");
