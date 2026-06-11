@@ -51,6 +51,20 @@ function hostLanIPv4(): string | undefined {
 const ip = hostLanIPv4();
 const skip = vmTestSkip() || (ip ? false : "no non-loopback IPv4 interface on this host");
 
+// When this test process is ITSELF running inside a gondolin guest (the nested,
+// self-hosted e2e tier — see .workflows/test.yaml, which sets WORK_NESTED=1), the
+// on-box "model host" can't be reached: the inner VM's gondolin uses the SAME
+// 192.168.127.0/24 guest subnet as the outer one, so the server's address (the
+// outer guest's own 192.168.127.3) means "myself" to the inner guest and the
+// request never escapes. gondolin's QemuNetworkBackend hardcodes that subnet and
+// doesn't expose vmIP/gatewayIP via VM.create, so there is no host-side fix today.
+// Only the two assertions that need the on-box dial-back skip; the core property —
+// the REAL secret never enters the guest — still runs nested, and the full
+// contract stays covered on bare metal (host + GitHub Actions, the hard gate).
+const nestedSkip = process.env["WORK_NESTED"] === "1"
+  ? "nested gondolin guest: on-box model host collides with the guest subnet (covered on bare metal)"
+  : false;
+
 describe("egress e2e — mediated network + secret injection (real VM)", { skip }, () => {
   let server: Server;
   let port: number;
@@ -94,7 +108,7 @@ describe("egress e2e — mediated network + secret injection (real VM)", { skip 
     assert.notEqual(placeholder, REAL_SECRET, "the REAL secret leaked into the guest env");
   });
 
-  it("an outbound request to the allowed host carries the real secret", async () => {
+  it("an outbound request to the allowed host carries the real secret", { skip: nestedSkip }, async () => {
     const r = await target.run(
       `wget -qO- -T 15 --header "Authorization: Bearer $${SECRET_ENV}" http://${ip}:${port}/v1/check`,
     );
@@ -112,7 +126,7 @@ describe("egress e2e — mediated network + secret injection (real VM)", { skip 
     );
   });
 
-  it("for a mediated job, a non-allowlisted host is refused — and never dialed", async () => {
+  it("for a mediated job, a non-allowlisted host is refused — and never dialed", { skip: nestedSkip }, async () => {
     // This `target` is mediated (allowlist = [ip] only), so other hosts are
     // denied. 203.0.113.7 is TEST-NET-3 (RFC 5737): never routable, so if the
     // policy layer failed to block this pre-dial the request would hang, not

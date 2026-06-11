@@ -44,4 +44,5 @@ jobs:
         env:
           GONDOLIN_IMAGE_STORE: /opt/gondolin-images
           WORK_SKIP_VM: ""
+          WORK_NESTED: "1"            # we ARE a gondolin guest: see egress-e2e skip
         run: npm test
