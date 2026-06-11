@@ -36,21 +36,41 @@ jobs:
 ```
 
 At compile time each call is inlined into one flat DAG, so a single `work run ci`
-expands to the graph below. Every box is a real job in its own gondolin micro-VM:
+expands to the graph below — the actual output of `work graph ci --format mermaid`.
+Every box is a real job in its own gondolin micro-VM; the `review__*` names are the
+reusable `review` workflow's jobs after inlining:
 
+```mermaid
+flowchart TD
+  n0["checks<br/>work:base · 5 steps"]
+  n1["test<br/>work:nested · 2 steps"]
+  n2["review__scan-agent-security<br/>work:base · 1 step"]
+  n3["review__scan-checks<br/>work:base · 1 step"]
+  n4["review__scan-compiler<br/>work:base · 1 step"]
+  n5["review__scan-runtime<br/>work:base · 1 step"]
+  n6["review__scan-web<br/>work:base · 1 step"]
+  n7["review__collect<br/>work:base · 2 steps"]
+  n0 --> n1
+  n0 --> n2
+  n1 --> n2
+  n0 --> n3
+  n1 --> n3
+  n0 --> n4
+  n1 --> n4
+  n0 --> n5
+  n1 --> n5
+  n0 --> n6
+  n1 --> n6
+  n4 --> n7
+  n5 --> n7
+  n6 --> n7
+  n2 --> n7
+  n3 --> n7
 ```
-work run ci
-│
-checks  ──▶  test  ──▶  review
-  │            │          │
-  │            │          ├─ scan-compiler ───────┐
-  capture      runs the   ├─ scan-runtime ────────┤
-  lint /       FULL suite ├─ scan-web ────────────┼──▶  collect
-  typecheck /  in NESTED  ├─ scan-agent-security ─┤     dedupe · rank ·
-  knip /       VMs (TCG)  └─ scan-checks ─────────┘     cap → final review
-  fan-in                      (reads checks + test
-  as outputs                   output via needs)
-```
+
+The four `scan-*` source reviewers and `scan-checks` each depend on **both**
+`checks` and `test` (they read the tooling output), then `collect` fans them back
+in. Note `test` runs on `work:nested` — the [self-hosted nested run](#test-the-suite-runs-itself-nested).
 
 ## checks: run the tools, keep the output
 

@@ -1,10 +1,13 @@
 import { defineConfig } from "vitepress";
+import { withMermaid } from "vitepress-plugin-mermaid";
 
 // Served from GitHub Pages at https://nullbytelabs.github.io/work/
 // so every absolute asset/link is prefixed with the repo name.
 const base = "/work/";
 
-export default defineConfig({
+// withMermaid wraps the config so ```mermaid fences render as diagrams
+// (e.g. the live `work graph ci` output on the dogfooding page).
+export default withMermaid(defineConfig({
   base,
   lang: "en-US",
   title: "work",
@@ -124,4 +127,4 @@ export default defineConfig({
 
     outline: { level: [2, 3] },
   },
-});
+}));
