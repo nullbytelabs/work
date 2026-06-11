@@ -3,20 +3,20 @@
 #              e2e tier) SELF-HOSTED inside a `work:nested` guest. examples.test.ts
 #              boots NESTED gondolin micro-VMs: inside the guest there is no
 #              /dev/kvm, so gondolin's selectAccel() falls back to TCG (software
-#              emulation) automatically. The `work:nested` image bundles
-#              qemu-system-aarch64 + qemu-img and bakes the alpine-base guest image
-#              at /opt/gondolin-images, so inner VMs need no download or job-time
-#              egress (GONDOLIN_IMAGE_STORE points the inner runtime at it). One
-#              `npm ci`, then `npm test` as a `continue-on-error` step so a failure
-#              doesn't fail the job — `ci` carries the result into `review`. The
-#              step's real outcome still shows in the run. Called by `ci` via
+#              emulation) automatically. The `work:nested` image is just `work:base`
+#              + qemu-system-aarch64 + qemu-img (all stock apk packages — fully
+#              portable, nothing machine-specific baked in). The inner VMs download
+#              the alpine-base guest image once over the job's egress and reuse it
+#              for the whole run (the cache lives in the outer guest). One `npm ci`,
+#              then `npm test` as a `continue-on-error` step so a failure doesn't
+#              fail the job — `ci` carries the result into `review`. The step's real
+#              outcome still shows in the run. Called by `ci` via
 #              `uses: workflow/test`; also runnable: `work run test`.
 #
-# WIP / not yet portable: `work:nested` (.workflows/images/nested/build-config.json)
-# currently bakes the guest image from a MACHINE-SPECIFIC host path + object id, so
-# this only runs where that image was built. GitHub Actions CI is unaffected — it
-# runs `npm test` directly, not `work run`. Known-failing nested: the mediated-egress
-# secret-injection e2e (2 tests) doesn't survive the two-layer network hop yet.
+# GitHub Actions CI is unaffected — ci.yml runs `npm test` directly, not `work run`.
+# The mediated-egress secret-injection e2e skips its two on-box-dial assertions when
+# nested (WORK_NESTED) — a gondolin guest-subnet collision, documented in that test;
+# the contract stays covered on bare metal.
 ---
 name: test
 
@@ -42,7 +42,6 @@ jobs:
         name: test (full suite, nested VMs)
         continue-on-error: true
         env:
-          GONDOLIN_IMAGE_STORE: /opt/gondolin-images
           WORK_SKIP_VM: ""
           WORK_NESTED: "1"            # we ARE a gondolin guest: see egress-e2e skip
         run: npm test

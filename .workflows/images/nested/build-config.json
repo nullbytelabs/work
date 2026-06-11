@@ -23,12 +23,5 @@
     ],
     "initramfsPackages": []
   },
-  "rootfs": { "label": "gondolin-root" },
-  "postBuild": {
-    "copy": [
-      { "src": "/Users/josh/.cache/gondolin/images/objects/108a1836-bdf3-53f1-a4f1-7c65988152d1", "dest": "/opt/gondolin-images/objects/108a1836-bdf3-53f1-a4f1-7c65988152d1" },
-      { "src": "/Users/josh/.cache/gondolin/images/refs/alpine-base", "dest": "/opt/gondolin-images/refs/alpine-base" },
-      { "src": "/Users/josh/.cache/gondolin/images/builtin-image-registry-cache.json", "dest": "/opt/gondolin-images/builtin-image-registry-cache.json" }
-    ]
-  }
+  "rootfs": { "label": "gondolin-root" }
 }
