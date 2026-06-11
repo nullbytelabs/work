@@ -28,7 +28,16 @@ The console has three pages, all backed by the real engine:
 | **History** | Past runs with status and timing. Open one to replay its output, or **re-run** it with the same inputs in one click. |
 | **Webhooks** | The webhook triggers declared in your config — each with its public receiver URL, a **Send test** button, and a delivery audit log. |
 
+![A finished run in the work console: the job graph and per-step timings, replayed from history](/screenshots/console-run.png)
+
+*A finished `checks` run replayed in the console — the job graph plus each step's
+output and timing. This is the project's own dogfood pipeline (see
+[Dogfooding](../examples/dogfooding)).*
+
 ### Running a workflow
+
+![The Workflows page listing the project's workflows as cards](/screenshots/console-workflows.png)
+
 
 On the **Workflows** page, click a workflow to open it. If it declares
 [`inputs:`](../reference/workflow-syntax#inputs), the console renders a typed form
@@ -46,6 +55,8 @@ Every run is recorded durably (see [Where data lives](#where-data-lives)), so th
 **History** page survives restarts of the server. Open any past run to read its
 full output again, or hit **Re-run** to launch a fresh run with the same workflow
 and inputs — handy for retrying a flaky job or re-triggering a report.
+
+![The History page listing recent runs with status badges and timing](/screenshots/console-history.png)
 
 If the server is stopped while a run is still in flight, that run isn't lost: when
 the server next starts it **resumes** the run automatically, picking up from where
@@ -107,6 +118,12 @@ The hook's public URL is `POST /hooks/alertmanager`. The **Webhooks** page shows
 it, lets you fire a signed **test** delivery, and lists every delivery with its
 result (`accepted`, `unauthorized`, `duplicate`, …) — the audit log never stores
 the payload or the secret.
+
+![The Webhooks page: a hook card with its receiver URL and a fail-closed delivery audit log](/screenshots/console-webhooks.png)
+
+*The repo's own `ci` hook (`on: webhook`), its receiver URL, and the delivery
+audit log — here showing two rejected, unauthenticated attempts (`401`/`403`),
+the fail-closed behavior in action.*
 
 ### 3. Read the payload with `event.*`
 

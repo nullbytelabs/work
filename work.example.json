@@ -13,5 +13,12 @@
       "temperature": 0
     }
   },
-  "defaultModel": "kimi"
+  "defaultModel": "kimi",
+  "webhooks": {
+    "ci": {
+      "workflow": "ci",
+      "auth": "bearer",
+      "secret": "$CI_WEBHOOK_SECRET"
+    }
+  }
 }
