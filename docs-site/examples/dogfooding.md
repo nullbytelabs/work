@@ -58,6 +58,11 @@ checks  ──▶  test  ──▶  review
 fail the job, so its output becomes data the rest of the pipeline can read (pass
 or fail) while the run carries on. The step's real outcome still shows in the run.
 
+Forwarding a tool's output is a one-liner: the engine already captures every
+step's combined stdout+stderr, exposed as
+[`steps.<id>.logs`](../reference/workflow-syntax#step-context). No `$WORK_OUTPUT`
+plumbing — the step is just `run: npm run lint`.
+
 ```yaml
 # .workflows/checks.yaml
 name: checks
@@ -69,7 +74,7 @@ on:
 jobs:
   static:
     outputs:
-      lint: ${{ steps.lint.outputs.log }}
+      lint: ${{ steps.lint.logs }}       # the step's captured combined output
       # …typecheck / knip / fanin likewise
     steps:
       - name: install
@@ -77,11 +82,7 @@ jobs:
       - id: lint
         name: lint
         continue-on-error: true          # a lint failure doesn't fail the job
-        run: |
-          out=$(npm run lint 2>&1); rc=$?
-          printf '%s\n' "$out"
-          { echo "log<<__EOF__"; echo "exit $rc"; printf '%s\n' "$out"; echo "__EOF__"; } >> "$WORK_OUTPUT"
-          exit $rc
+        run: npm run lint
       # …typecheck / knip / fan-in are identical, one step each
 ```
 

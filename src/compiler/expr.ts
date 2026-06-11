@@ -6,6 +6,9 @@
  *   - `matrix.<axis>`               (resolved at COMPILE time, per matrix leg)
  *   - `needs.<job>.outputs.<name>`  (resolved at RUNTIME, after the dep finishes)
  *   - `steps.<id>.outputs.<key>`    (resolved at RUNTIME, within the job)
+ *   - `steps.<id>.logs` / `.outcome` / `.exitCode`
+ *                                   (resolved at RUNTIME — the step's captured
+ *                                    combined output, result, and exit code)
  *   - `event` / `event.a.b.c` / `event.alerts[0].labels.severity`
  *                                   (resolved at COMPILE/INGRESS time from the
  *                                    webhook/dispatch payload — see below)
@@ -20,12 +23,28 @@ export interface OutputBag {
   outputs: Record<string, string>;
 }
 
+/**
+ * What a *step* exposes to expressions. Beyond its declared `outputs` (values it
+ * wrote to `$WORK_OUTPUT`), the engine surfaces data it already captures for
+ * every step at no extra cost:
+ *   - `logs`     — the step's combined stdout+stderr
+ *   - `outcome`  — "success" | "failure" | "skipped" (mirrors GitHub Actions)
+ *   - `exitCode` — the command's exit code
+ * These let a job forward a tool's output downstream (`outputs: { lint: ${{
+ * steps.lint.logs }} }`) without a hand-rolled `$WORK_OUTPUT` capture wrapper.
+ */
+export interface StepBag extends OutputBag {
+  logs?: string;
+  outcome?: string;
+  exitCode?: number;
+}
+
 export interface ExprContext {
   inputs?: Record<string, string | number | boolean>;
   /** Resolved matrix cell for the current leg; only present in a matrix job. */
   matrix?: Record<string, string | number | boolean>;
   needs?: Record<string, OutputBag>;
-  steps?: Record<string, OutputBag>;
+  steps?: Record<string, StepBag>;
   /**
    * The resolved webhook/dispatch payload, exposed as `${{ event.* }}`. Arbitrary
    * deeply-nested JSON (Alertmanager's `alerts[]`, `commonLabels{}`, …). When
@@ -113,13 +132,22 @@ const resolveNeeds: Resolver = (expr, ctx, whole) => {
 };
 
 const resolveSteps: Resolver = (expr, ctx, whole) => {
-  const m = /^steps\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(expr);
+  // Either a declared output (`steps.<id>.outputs.<key>`) or a built-in the
+  // engine captures for free (`steps.<id>.logs` / `.outcome` / `.exitCode`).
+  const m = /^steps\.([A-Za-z_][\w-]*)\.(?:outputs\.([A-Za-z_][\w-]*)|(logs|outcome|exitCode))$/.exec(expr);
   if (!m) return null;
   if (!ctx.steps) return whole; // defer to runtime
   const id = m[1]!;
-  const key = m[2]!;
   const bag = ctx.steps[id];
-  if (!bag || !Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
+  if (!bag) {
+    throw new WorkflowCompileError(`expression references unknown step: steps.${id}`);
+  }
+  const builtin = m[3];
+  if (builtin === "logs") return bag.logs ?? "";
+  if (builtin === "outcome") return bag.outcome ?? "";
+  if (builtin === "exitCode") return bag.exitCode !== undefined ? String(bag.exitCode) : "";
+  const key = m[2]!;
+  if (!Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
     throw new WorkflowCompileError(`expression references missing output: steps.${id}.outputs.${key}`);
   }
   return bag.outputs[key]!;
@@ -148,7 +176,7 @@ function resolveExpr(expr: string, ctx: ExprContext, whole: string): string {
     if (out !== null) return out;
   }
   throw new WorkflowCompileError(
-    `unsupported expression "\${{ ${expr} }}" — supported: inputs.<name>, needs.<job>.outputs.<name>, steps.<id>.outputs.<key>, event.<path>`,
+    `unsupported expression "\${{ ${expr} }}" — supported: inputs.<name>, needs.<job>.outputs.<name>, steps.<id>.outputs.<key>, steps.<id>.(logs|outcome|exitCode), event.<path>`,
   );
 }
 

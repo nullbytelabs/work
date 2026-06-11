@@ -59,7 +59,7 @@ file — a layer that looks "incomplete" on its own is still valid once merged.
     "kimi": {
       "provider": "fireworks",
       "model": "accounts/fireworks/models/kimi-k2p6",
-      "maxTokens": 2048,
+      "maxTokens": 32768,
       "temperature": 0
     }
   },
@@ -149,6 +149,7 @@ config alone can't make a workflow webhook-triggerable.
 | Field | Type | Notes |
 |---|---|---|
 | `workflow` | string | **Required.** The workflow `name:` this hook triggers. |
+| `enabled` | boolean | Optional operator toggle. Absent means enabled; set `false` to disable the hook without removing its config. |
 | `auth` | `"hmac-sha256"` \| `"bearer"` | Delivery auth scheme. |
 | `secret` | string | Per-hook secret; literal, or `$VAR` / `${VAR}`. Verified constant-time. |
 | `signatureHeader` | string | Header the signature/token arrives in, e.g. `X-Hub-Signature-256`. |

@@ -337,6 +337,28 @@ jobs:
     assert.deepEqual(p.jobs["report"]!.needs.sort(), ["test::node-20", "test::node-22"]);
   });
 
+  it("defers steps.<id>.logs / .outcome / .exitCode to runtime (left intact in the plan)", () => {
+    const p = plan(`
+name: w
+jobs:
+  a:
+    outputs:
+      l: "\${{ steps.tool.logs }}"
+      o: "\${{ steps.tool.outcome }}"
+      c: "\${{ steps.tool.exitCode }}"
+    steps:
+      - id: tool
+        run: npm run lint
+`);
+    // Like steps.<id>.outputs.*, the built-ins resolve in the runtime, so the
+    // compiler must leave the expressions untouched rather than erroring on them.
+    assert.deepEqual(p.jobs["a"]!.outputs, {
+      l: "${{ steps.tool.logs }}",
+      o: "${{ steps.tool.outcome }}",
+      c: "${{ steps.tool.exitCode }}",
+    });
+  });
+
   it("resolves matrix.* in run, env, and outputs", () => {
     const p = plan(`
 name: w

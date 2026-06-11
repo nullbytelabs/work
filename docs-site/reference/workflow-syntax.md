@@ -87,7 +87,7 @@ jobs:
 | `outputs` | `map<string,string>` | Outputs exposed to dependents as `needs.<job>.outputs.<name>`; values are expressions. |
 | `steps` | list | The ordered steps (see [Steps](#steps)). Required **unless** the job is a `uses:` call. |
 | `uses` | string | Call a [reusable workflow](#reusable-workflows) (`workflow/<name>` or a `./path.yaml`). Mutually exclusive with `steps`. |
-| `with` | map | Inputs for a `uses:` job, validated against the callee's `inputs:`. Compile-time values only — see [Reusable workflows](#reusable-workflows). |
+| `with` | map | Inputs for a `uses:` job, validated against the callee's `inputs:`. Accepts compile-time values (`inputs.*`, `matrix.*`, `event.*`) and runtime `needs.<job>.outputs.*` values — see [Reusable workflows](#reusable-workflows). |
 
 ## Machine types
 
@@ -151,7 +151,7 @@ steps:
 | `uses` | string | A step reference: `work/agent`, `action/<name>`, or a built-in `work/*` action. Mutually exclusive with `run`. See [Step `uses:` forms](#step-uses-forms). |
 | `with` | map | Inputs for a `uses` step. Meaning depends on the form — see [Step `uses:` forms](#step-uses-forms). |
 | `if` / `when` | string | Conditional guard; a false result skips the step. Use one, not both. |
-| `continue-on-error` | boolean | When `true`, a non-zero exit doesn't fail the job — the run continues and the job can still succeed. The step's real outcome is still recorded (`steps.<id>.result` is `failure`). GitHub Actions semantics. |
+| `continue-on-error` | boolean | When `true`, a non-zero exit doesn't fail the job — the run continues and the job can still succeed. The step's real outcome is still recorded: it reads `failure` via <code v-pre>${{ steps.&lt;id&gt;.outcome }}</code> in expressions, or `steps.<id>.result` in an `if:`/`when:` condition. GitHub Actions semantics. |
 | `env` | `map<string,string>` | Step-level env, layered over job and workflow env. |
 
 ### Step outputs
@@ -174,6 +174,36 @@ output still exposes that output to a consumer.
 
 A `uses:` step also produces outputs (an agent's final message, an action's
 declared outputs); read them the same way. See below.
+
+### Step context
+
+Beyond the `outputs` it explicitly writes, every step with an `id` exposes data
+the engine already captures — so you can forward a command's output without a
+`$WORK_OUTPUT` wrapper:
+
+| Accessor | Value |
+|---|---|
+| <code v-pre>${{ steps.&lt;id&gt;.logs }}</code> | The step's combined stdout+stderr. |
+| <code v-pre>${{ steps.&lt;id&gt;.outcome }}</code> | `success`, `failure`, or `skipped` — the step's real result (a `continue-on-error` failure still reads `failure`). |
+| <code v-pre>${{ steps.&lt;id&gt;.exitCode }}</code> | The command's exit code. |
+
+This is what lets a tool step stay a plain one-liner while still feeding its
+result downstream:
+
+```yaml
+jobs:
+  static:
+    outputs:
+      lint: ${{ steps.lint.logs }}   # forward the captured output as a job output
+    steps:
+      - id: lint
+        continue-on-error: true      # a lint failure doesn't fail the job
+        run: npm run lint            # no capture plumbing needed
+```
+
+`.outcome` mirrors GitHub Actions; `.logs` is the engine's addition (GitHub
+withholds step stdout from expressions). For an explicit, structured value, write
+to `$WORK_OUTPUT` and read `steps.<id>.outputs.<key>` as above.
 
 ### Step `uses:` forms
 

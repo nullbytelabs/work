@@ -25,8 +25,7 @@ npm i -g @nullbytelabs/work
 work --help
 ```
 
-This gives you the `work` command and its alias `workflow` (both point at the same
-engine). Throughout these docs we use `work`.
+This gives you the `work` command. Throughout these docs we use `work`.
 
 ## From source (development)
 

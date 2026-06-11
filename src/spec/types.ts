@@ -51,9 +51,10 @@ export interface StepSpec {
   /**
    * When true, a non-zero exit from this step does not fail the job — the run
    * continues to later steps and the job can still succeed (GitHub Actions
-   * `continue-on-error`). The step's real outcome is still recorded
-   * (`steps.<id>.result` is `failure`), so conditions and downstream consumers
-   * can react to it.
+   * `continue-on-error`). The step's real outcome is still recorded, so
+   * downstream consumers can react to it: `${{ steps.<id>.outcome }}` reads
+   * `failure` in expressions, and `steps.<id>.result` does the same in an
+   * `if:`/`when:` condition.
    */
   continueOnError?: boolean;
   /** Step-level env, layered over job and workflow env. */

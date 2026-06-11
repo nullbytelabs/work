@@ -4,7 +4,7 @@ export { parseRunsOn, type RunsOnSpec } from "./runs-on.ts";
 export type { ResolveWorkflow, ResolvedWorkflow } from "./reusable.ts";
 export { resolveMachine, MACHINE_TYPES, DEFAULT_MACHINE, type ResolvedMachine } from "./machines.ts";
 export { resolveInputs, type ResolvedInputs } from "./inputs.ts";
-export { interpolate, parseAccessPath, walkPath, type ExprContext, type OutputBag, type Segment } from "./expr.ts";
+export { interpolate, parseAccessPath, walkPath, type ExprContext, type OutputBag, type StepBag, type Segment } from "./expr.ts";
 export {
   evaluateCondition,
   ConditionError,

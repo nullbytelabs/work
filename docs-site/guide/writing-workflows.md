@@ -41,8 +41,9 @@ jobs:
 `jobs:` is a map of named jobs. Each job has ordered `steps:`. A step is either:
 
 - a **`run:`** command — a shell command or multi-line script, or
-- a **`uses:`** step — the built-in [`work/agent`](./agent-steps) AI agent or an
-  [action](./actions) (`action/<name>`).
+- a **`uses:`** step — the built-in [`work/agent`](./agent-steps) AI agent, a
+  [built-in action](./builtin-actions) (`work/checkout`, `work/install-node`), or
+  a user-space [action](./actions) (`action/<name>`).
 
 A step takes a `run` **or** a `uses`, never both.
 
@@ -219,6 +220,36 @@ Within the same job, a later step can read an earlier step's output directly via
 the `steps.<id>.outputs.<key>` context. Across jobs, go through
 `needs.<job>.outputs.<key>`.
 
+### Forwarding a command's output
+
+`$WORK_OUTPUT` is for values you choose to expose. To forward a command's **raw
+output** you don't need to capture it by hand — every step with an `id` already
+exposes what the engine captured:
+
+| Accessor | Value |
+|---|---|
+| <code v-pre>${{ steps.&lt;id&gt;.logs }}</code> | The step's combined stdout+stderr. |
+| <code v-pre>${{ steps.&lt;id&gt;.outcome }}</code> | `success`, `failure`, or `skipped`. |
+| <code v-pre>${{ steps.&lt;id&gt;.exitCode }}</code> | The command's exit code. |
+
+So a job can hand a tool's full output to a downstream consumer with a plain
+one-line step:
+
+```yaml
+jobs:
+  lint:
+    runs-on: work:base
+    steps:
+      - id: lint
+        run: npm run lint            # no capture wrapper
+    outputs:
+      log: ${{ steps.lint.logs }}    # forward the captured output
+```
+
+`.outcome` mirrors GitHub Actions; `.logs` is this engine's addition (GitHub
+withholds step stdout from expressions). See the
+[step context reference](../reference/workflow-syntax#step-context).
+
 ## Matrix
 
 `strategy.matrix:` fans a job out into one independent leg per combination of axis
@@ -247,9 +278,9 @@ All legs run in parallel, up to the engine's worker concurrency.
 ## Conditionals
 
 `if:` (or its synonym `when:`) guards a step or a job. A false result skips it.
-Conditions can reference `inputs.*`, `matrix.*`, `needs.*`, and `steps.*`, combine
-them with `==`, `!=`, `&&`, `||`, `!`, and use the status functions `success()`,
-`failure()`, `always()`, and `cancelled()`.
+Conditions can reference `inputs.*`, `matrix.*`, `needs.*`, `steps.*`, and
+`event.*`, combine them with `==`, `!=`, `&&`, `||`, `!`, and use the status
+functions `success()`, `failure()`, `always()`, and `cancelled()`.
 
 ```yaml
 jobs:
@@ -263,6 +294,27 @@ jobs:
 ```
 
 Use `if` or `when`, but not both on the same step/job.
+
+## Tolerating a step failure — `continue-on-error`
+
+By default a step that exits non-zero fails its job and skips the remaining
+steps. Mark a step `continue-on-error: true` and a non-zero exit no longer gates
+the job — the run continues and the job can still succeed. The step's real
+outcome is still recorded (it reads `failure` via <code v-pre>${{ steps.&lt;id&gt;.outcome }}</code>),
+and its `$WORK_OUTPUT` and <code v-pre>${{ steps.&lt;id&gt;.logs }}</code> are captured either way, so a
+later step or a downstream job can inspect what happened.
+
+```yaml
+steps:
+  - id: audit
+    continue-on-error: true
+    run: npm audit              # may exit non-zero; we don't want to fail the job
+  - run: echo "audit said: ${{ steps.audit.outcome }}"
+```
+
+This is GitHub Actions semantics. It's how the project's own `checks` pipeline
+runs each tool without one red tool masking the others — see
+[Dogfooding](../examples/dogfooding).
 
 ::: tip Worked examples
 Every block above has a runnable example under

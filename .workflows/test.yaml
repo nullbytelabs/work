@@ -18,19 +18,16 @@ on:
 jobs:
   unit:
     runs-on: work:base
+    # `steps.test.logs` is the engine's built-in capture of the step's combined
+    # output; `continue-on-error` keeps the job green on a test failure so the
+    # result still reaches `review`.
     outputs:
-      test: ${{ steps.test.outputs.log }}
+      test: ${{ steps.test.logs }}
     steps:
       - name: install
         run: npm ci
 
-      # continue-on-error keeps the job green on a test failure; the combined
-      # output (prefixed with its exit code) is captured as `log` for `review`.
       - id: test
         name: test:unit
         continue-on-error: true
-        run: |
-          out=$(npm run test:unit 2>&1); rc=$?
-          printf '%s\n' "$out"
-          { echo "log<<__EOF__"; echo "exit $rc"; printf '%s\n' "$out"; echo "__EOF__"; } >> "$WORK_OUTPUT"
-          exit $rc
+        run: npm run test:unit

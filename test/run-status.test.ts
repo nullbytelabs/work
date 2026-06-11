@@ -89,6 +89,39 @@ jobs:
     assert.equal(after.outputs?.ran, "yes");
   });
 
+  it("forwards a failing tool's combined output via steps.<id>.logs (the checks.yaml pattern)", async () => {
+    // The real dogfood pattern: a `continue-on-error` step runs a tool that
+    // fails; its stdout+stderr is exposed as `steps.<id>.logs` (no $WORK_OUTPUT
+    // wrapper) and forwarded as a job output for a downstream reviewer.
+    const result = await runFull(
+      `name: w
+jobs:
+  j:
+    outputs:
+      tool: \${{ steps.tool.logs }}
+      result: \${{ steps.tool.outcome }}
+      code: \${{ steps.tool.exitCode }}
+    steps:
+      - id: tool
+        name: tool
+        continue-on-error: true
+        run: |
+          echo "hello from stdout"
+          echo "oops on stderr" 1>&2
+          exit 7`,
+      hostTargetFactory,
+    );
+    assert.equal(result.status, "success");
+    const job = result.jobs.find((j) => j.id === "j")!;
+    assert.equal(job.status, "success");
+    // logs is the combined stdout+stderr — captured even though the tool failed.
+    assert.match(job.outputs?.tool ?? "", /hello from stdout/);
+    assert.match(job.outputs?.tool ?? "", /oops on stderr/);
+    // outcome reflects the real (failed) result; exitCode is the command's code.
+    assert.equal(job.outputs?.result, "failure");
+    assert.equal(job.outputs?.code, "7");
+  });
+
   it("without continue-on-error, a non-zero step fails the job and skips the rest", async () => {
     const result = await runFull(
       `name: w

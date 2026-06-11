@@ -37,9 +37,8 @@ so you fill it in instead of hand-writing `--inputs` JSON. Submit, and the run
 starts immediately.
 
 While it runs you see the job DAG light up as dependencies clear, and each step's
-output streams in live (the page subscribes to the run over
-[Server-Sent Events](#how-live-output-works)). The same view replays from history
-after the run finishes.
+output streams in live (the page subscribes to the run over Server-Sent Events).
+The same view replays from history after the run finishes.
 
 ### History and re-runs
 
@@ -159,8 +158,8 @@ auth, fail-closed.
 Run history and webhook deliveries are journaled to an in-process Postgres under
 `<workspace>/.workflows/db/`. That directory is the console's durable store — it's
 why History and the delivery log persist across restarts. It's machine-local
-runtime state, so keep it out of git (the scaffold's `.gitignore` already ignores
-`**/.workflows/db/`).
+runtime state, so keep it out of git — add `**/.workflows/db/` to your
+`.gitignore`.
 
 ## Flags
 

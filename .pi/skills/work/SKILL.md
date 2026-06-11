@@ -134,9 +134,13 @@ scratch; `.review/accepted.md` is committed and curated.
 - `machine:` catalog (`src/compiler/machines.ts`): small 2G / **medium 8G
   (default)** / large 12G / xlarge 24G. The 8G default exists because knip's
   oxc parser reserves a ~6 GiB ArrayBuffer — don't lower it casually.
-- Job outputs: append `key=value` (or `key<<EOF` heredoc for multiline) to
-  `$WORK_OUTPUT`; thread with `${{ needs.<job>.outputs.<key> }}` /
-  `${{ steps.<id>.outputs.<key> }}`. Inputs bind at compile time;
+- Step/job outputs: for an explicit value, append `key=value` (or `key<<EOF`
+  heredoc for multiline) to `$WORK_OUTPUT` and read `${{ steps.<id>.outputs.<key>
+  }}`. To forward a command's **raw output**, don't hand-roll a capture — every
+  `id`ed step exposes `${{ steps.<id>.logs }}` (combined stdout+stderr),
+  `${{ steps.<id>.outcome }}` (success/failure/skipped), and
+  `${{ steps.<id>.exitCode }}` for free (see `checks.yaml`). Thread across jobs
+  with `${{ needs.<job>.outputs.<key> }}`. Inputs bind at compile time;
   `needs.*`/`steps.*` resolve at runtime.
 - Agent steps: `uses: work/agent` + `with: { prompt | promptFile, model? }` —
   a real Pi agent in-guest, full toolset over the checkout, final message =

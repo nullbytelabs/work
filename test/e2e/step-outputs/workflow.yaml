@@ -1,10 +1,14 @@
 # step outputs
-# description: a `run` step exposes data by appending `key=value` lines to the
-#              file at $WORK_OUTPUT (GitHub-Actions $GITHUB_OUTPUT semantics). This
-#              exercises the full capture path on a real micro-VM: a single value,
-#              a multi-line heredoc value, a same-job read via steps.<id>.outputs,
-#              and a cross-job read via needs.<job>.outputs. Each consumer asserts
-#              the value it got, so a regression in output capture fails the run.
+# description: a `run` step exposes data two ways. Explicit values: append
+#              `key=value` lines to the file at $WORK_OUTPUT (GitHub-Actions
+#              $GITHUB_OUTPUT semantics), read via steps.<id>.outputs. Captured
+#              context: every id'd step also exposes steps.<id>.logs (combined
+#              stdout+stderr), .outcome, and .exitCode for free — no $WORK_OUTPUT
+#              wrapper. This exercises the full path on a real micro-VM: a single
+#              value, a multi-line heredoc value, a same-job read, a cross-job read
+#              via needs.<job>.outputs, and forwarding a continue-on-error tool's
+#              raw logs/outcome/exitCode. Each consumer asserts the value it got, so
+#              a regression in capture fails the run.
 # usage: ./work ./test/e2e/step-outputs/workflow.yaml
 ---
 name: step-outputs
@@ -30,9 +34,21 @@ jobs:
           echo "same-job version=${{ steps.meta.outputs.version }}"
           test "${{ steps.meta.outputs.version }}" = "1.4.2" \
             || { echo "same-job version mismatch" >&2; exit 1; }
+      # A failing tool whose output we still want downstream. continue-on-error
+      # keeps the job green; the engine captures its combined output as .logs.
+      - id: tool
+        name: flaky tool
+        continue-on-error: true
+        run: |
+          echo "tool stdout marker"
+          echo "tool stderr marker" >&2
+          exit 5
     outputs:
       version: ${{ steps.meta.outputs.version }}
       notes: ${{ steps.meta.outputs.notes }}
+      tool_logs: ${{ steps.tool.logs }}
+      tool_outcome: ${{ steps.tool.outcome }}
+      tool_code: ${{ steps.tool.exitCode }}
 
   consume:
     runs-on: gondolin
@@ -49,3 +65,14 @@ jobs:
           expected=$(printf 'line one\nline two')
           test "$got" = "$expected" \
             || { echo "multi-line notes mismatch: [$got]" >&2; exit 1; }
+      - name: read captured logs/outcome/exitCode
+        run: |
+          logs="${{ needs.produce.outputs.tool_logs }}"
+          # .logs is the combined stdout+stderr, captured despite the non-zero exit
+          case "$logs" in *"tool stdout marker"*) ;; *) echo "missing stdout in logs: [$logs]" >&2; exit 1;; esac
+          case "$logs" in *"tool stderr marker"*) ;; *) echo "missing stderr in logs: [$logs]" >&2; exit 1;; esac
+          # .outcome reflects the real (failed) result; .exitCode is the command code
+          test "${{ needs.produce.outputs.tool_outcome }}" = "failure" \
+            || { echo "tool outcome mismatch" >&2; exit 1; }
+          test "${{ needs.produce.outputs.tool_code }}" = "5" \
+            || { echo "tool exitCode mismatch" >&2; exit 1; }

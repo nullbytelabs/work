@@ -35,6 +35,7 @@ import {
   evaluateCondition,
   ConditionError,
   type OutputBag,
+  type StepBag,
   type ConditionContext,
   type ConditionBag,
 } from "../../compiler/index.ts";
@@ -359,7 +360,7 @@ async function runOrchestration(args: {
 }
 
 /** Expression context shape threaded to the step runners (needs + step outputs). */
-type StepExprCtx = { needs: NeedsContext; steps: Record<string, OutputBag> };
+type StepExprCtx = { needs: NeedsContext; steps: Record<string, StepBag & { result?: string }> };
 
 /**
  * Stage the job's checkout into `workdir` like a fresh `git checkout`: never carry
@@ -447,7 +448,7 @@ function executeStep(
  *  whether anything failed (used to gate job-output resolution). */
 interface StepsOutcome {
   steps: StepResult[];
-  stepOutputs: Record<string, OutputBag & { result?: string }>;
+  stepOutputs: Record<string, StepBag & { result?: string }>;
   failed: boolean;
 }
 
@@ -463,8 +464,8 @@ async function runSteps(
 ): Promise<StepsOutcome> {
   const { ctx } = deps;
   const steps: StepResult[] = [];
-  // by step id, for steps.<id>.outputs / steps.<id>.result
-  const stepOutputs: Record<string, OutputBag & { result?: string }> = {};
+  // by step id, for steps.<id>.outputs / steps.<id>.logs / .outcome / .exitCode / .result
+  const stepOutputs: Record<string, StepBag & { result?: string }> = {};
   let failed = false;
 
   const exprCtx = (): StepExprCtx => ({ needs, steps: stepOutputs });
@@ -484,7 +485,18 @@ async function runSteps(
    *  records the failure outcome (visible in `steps.<id>.result`) but lets the job
    *  carry on and still succeed. */
   const recordStep = (step: PlannedStep, result: StepResult): void => {
-    if (step.id) stepOutputs[step.id] = { outputs: result.outputs ?? {}, result: result.status };
+    if (step.id) {
+      // Built-ins (logs/outcome/exitCode) are derived from the StepResult the
+      // runtime already captured and persisted — exposing them costs nothing and
+      // survives resume, since they read from the durable result, not a closure.
+      stepOutputs[step.id] = {
+        outputs: result.outputs ?? {},
+        result: result.status,
+        logs: combineStreams(result.stdout, result.stderr),
+        outcome: result.status,
+        exitCode: result.exitCode,
+      };
+    }
     steps.push(result);
     if (result.status === "failure" && !step.continueOnError) failed = true;
   };
@@ -592,13 +604,21 @@ async function runJobInTask(
  * command sees* (`target.workspacePath`) while the host reads the same file back
  * from `workdir` — making output capture work uniformly across targets.
  */
+/** Combine a step's captured streams into one log blob for `steps.<id>.logs`.
+ *  Derived from the persisted StepResult (not a streaming closure) so it's stable
+ *  across resume; stdout then stderr, since the streams are captured separately. */
+function combineStreams(stdout: string, stderr: string): string {
+  if (stdout && stderr) return `${stdout}\n${stderr}`;
+  return stdout || stderr || "";
+}
+
 async function runShellStep(
   step: PlannedStep,
   job: PlannedJob,
   target: ExecutionTarget,
   workdir: string,
   ctx: RunContext,
-  expr: { needs: NeedsContext; steps: Record<string, OutputBag> },
+  expr: { needs: NeedsContext; steps: Record<string, StepBag & { result?: string }> },
 ): Promise<StepResult> {
   const command = interpolate(step.run!, expr);
   const env: Record<string, string> = {};
@@ -646,7 +666,7 @@ async function runUsesStep(
   target: ExecutionTarget,
   workdir: string,
   deps: JobDeps,
-  expr: { needs: NeedsContext; steps: Record<string, OutputBag> },
+  expr: { needs: NeedsContext; steps: Record<string, StepBag & { result?: string }> },
 ): Promise<StepResult> {
   const emit = (chunk: { stream: "stdout" | "stderr"; text: string }) =>
     deps.ctx.hooks?.onOutput?.(job.id, step.name, chunk);

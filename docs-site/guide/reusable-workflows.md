@@ -152,8 +152,8 @@ cleanly and runs standalone (an unprovided input falls back to its default).
 
 Under the hood a runtime value is **deferred**: the compiler leaves the
 <code v-pre>${{ needs.* }}</code> expression intact, substitutes it into the callee's
-<code v-pre>${{ inputs.version }}</code>, and it resolves at run time through the inherited
-need — so the callee must be able to see that need.
+<code v-pre>${{ inputs.version }}</code>, and it resolves at run time once the referenced
+dependency has produced its output — so that dependency must be in the call's `needs:`.
 
 Two rules keep it honest:
 

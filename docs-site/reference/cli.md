@@ -1,7 +1,6 @@
 # CLI reference
 
-The package installs three equivalent commands — `work`, `workflow`, and
-`work` — all pointing at the same engine. These docs use `work`.
+The package installs a single command, `work`. These docs use it throughout.
 
 ## Synopsis
 
@@ -247,13 +246,13 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 | `--workspace <dir>` | `run`, `graph`, `--web` | Project root for resolving a workflow by name / serving the web console (default: current directory). |
 | `--web` | (standalone) | Open the local web console over the workspace's `.workflows/` instead of running a workflow. |
 | `--port <n>` | `--web` | Port the web console binds (default `4280`; `1`–`65535`). |
-| `--inputs '<json>'` | run, `resume`, `rerun` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`, overrides the inputs stored in history. |
-| `--config <file>` | run | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
-| `--no-global` | run | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
-| `--workdir <dir>` | run | Where job workspaces are staged (default: a temp dir). |
-| `--resume <id>` | run | Continue an interrupted run instead of starting a new one (same run id; finished jobs are reused). Project workflows only. |
+| `--inputs '<json>'` | `run`, file, `resume`, `rerun` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`, overrides the inputs stored in history. |
+| `--config <file>` | `run`, file | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
+| `--no-global` | `run`, file | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
+| `--workdir <dir>` | `run`, file | Where job workspaces are staged (default: a temp dir). |
+| `--resume <id>` | `run` | Continue an interrupted run instead of starting a new one (same run id; finished jobs are reused). Project workflows only. |
 | `--status <s>` | `runs` | Filter the run history by status (`queued`, `running`, `success`, `failure`, `interrupted`). |
-| `--quiet` | run | Suppress the live board / per-job output. |
+| `--quiet` | `run`, file | Suppress the live board / per-job output. |
 | `--format <fmt>` | `graph` | DAG output format: `mermaid`, `dot`, `json`, `ascii`. |
 | `--steps` | `graph` | Expand each job into its ordered steps. |
 | `--json` | `doctor` | Emit machine-readable check results. |
