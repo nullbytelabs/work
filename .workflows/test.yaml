@@ -1,12 +1,22 @@
 # test
-# description: reusable test workflow — one gondolin VM, a single `npm ci`, then the
-#              non-QEMU test tier (`npm run test:unit`) as a single
-#              `continue-on-error` step: a test failure does NOT fail the job, so `ci`
-#              can carry the result into `review` for an agent to interpret. The test
-#              step's real outcome still shows in the run (failed reads as failed, the
-#              job stays green). The e2e + VM-smoke tiers self-skip under WORK_SKIP_VM;
-#              they still run in GitHub Actions, the hard gate. Called by `ci` via
+# description: reusable test workflow — runs the FULL suite (including the real-VM
+#              e2e tier) SELF-HOSTED inside a `work:nested` guest. examples.test.ts
+#              boots NESTED gondolin micro-VMs: inside the guest there is no
+#              /dev/kvm, so gondolin's selectAccel() falls back to TCG (software
+#              emulation) automatically. The `work:nested` image bundles
+#              qemu-system-aarch64 + qemu-img and bakes the alpine-base guest image
+#              at /opt/gondolin-images, so inner VMs need no download or job-time
+#              egress (GONDOLIN_IMAGE_STORE points the inner runtime at it). One
+#              `npm ci`, then `npm test` as a `continue-on-error` step so a failure
+#              doesn't fail the job — `ci` carries the result into `review`. The
+#              step's real outcome still shows in the run. Called by `ci` via
 #              `uses: workflow/test`; also runnable: `work run test`.
+#
+# WIP / not yet portable: `work:nested` (.workflows/images/nested/build-config.json)
+# currently bakes the guest image from a MACHINE-SPECIFIC host path + object id, so
+# this only runs where that image was built. GitHub Actions CI is unaffected — it
+# runs `npm test` directly, not `work run`. Known-failing nested: the mediated-egress
+# secret-injection e2e (2 tests) doesn't survive the two-layer network hop yet.
 ---
 name: test
 
@@ -17,7 +27,8 @@ on:
 
 jobs:
   unit:
-    runs-on: work:base
+    runs-on: work:nested
+    machine: { cpus: 8, memory: "64G" }   # outer VM hosts the nested e2e VMs
     # `steps.test.logs` is the engine's built-in capture of the step's combined
     # output; `continue-on-error` keeps the job green on a test failure so the
     # result still reaches `review`.
@@ -28,6 +39,9 @@ jobs:
         run: npm ci
 
       - id: test
-        name: test:unit
+        name: test (full suite, nested VMs)
         continue-on-error: true
-        run: npm run test:unit
+        env:
+          GONDOLIN_IMAGE_STORE: /opt/gondolin-images
+          WORK_SKIP_VM: ""
+        run: npm test
