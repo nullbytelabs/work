@@ -4,8 +4,8 @@
  * `absurd-sdk` (a node-postgres client) can talk to it.
  *
  * Verified recipe (see docs/pglite-wasm-postgres-database.md):
- *  - register PGLite's `uuid_ossp` contrib BEFORE applying the schema (PG17.5
- *    has no native uuidv7, so Absurd falls back to uuid_generate_v4);
+ *  - register PGLite's `uuid_ossp` contrib BEFORE applying the schema (the
+ *    vendored schema.sql opens with `create extension "uuid-ossp"`);
  *  - `pool.max: 1` is mandatory — PGLite is single-connection.
  */
 import { PGlite } from "@electric-sql/pglite";

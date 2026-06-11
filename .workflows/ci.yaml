@@ -7,6 +7,10 @@
 #              tiers live in GitHub Actions (.github/workflows/ci.yml), where QEMU is
 #              available and nested virtualization isn't needed.
 # usage: work run ci   (review needs a model in work.json)
+#        For a change-scoped review, write the pending diff first:
+#          git diff > .review/diff.patch && work run ci
+#        The review's verified findings print between REVIEW JSON sentinels —
+#        the Pi feedback loop parses them (see .pi/skills/work/SKILL.md).
 ---
 name: ci
 

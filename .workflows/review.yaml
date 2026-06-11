@@ -1,14 +1,25 @@
 # review (multi-agent)
 # description: reusable agent review — fan-out / fan-in. Five reviewers run in
-#              parallel, each in its own small gondolin VM: four read a single source
-#              subsystem from the checkout, and `scan-checks` reads the tool output
-#              `ci`'s `checks`/`test` jobs already captured (via inherited needs — no
-#              re-running). Each exposes findings as a job output, and a `collect`
-#              editor agent fans them in: de-duplicating, dropping over-flags, ranking
-#              by severity, and capping the result — keeping the review focused instead
-#              of letting raw findings pile up. Needs a model in work.json (the agent
-#              egress allowlists the model host and injects the key host-side). Called
-#              by `ci` via `uses: workflow/review`; also runnable: `work run review`
+#              parallel, each in its own small gondolin VM: four review one source
+#              subsystem (prompts in .workflows/prompts/review-*.md, loaded via
+#              promptFile), and `scan-checks` reads the tool output `ci`'s
+#              `checks`/`test` jobs already captured (via inherited needs — no
+#              re-running). A `collect` editor agent fans findings in: it VERIFIES
+#              each candidate against the checkout, drops anything listed in
+#              .review/accepted.md, ranks, caps, and emits machine-readable JSON
+#              between REVIEW JSON sentinels (the contract the Pi feedback loop
+#              parses — see .pi/skills/work/SKILL.md).
+#
+#              Diff-aware: if `.review/diff.patch` exists in the checkout (write it
+#              with `git diff > .review/diff.patch` before running), reviewers scope
+#              to the change and its blast radius; scanners whose subsystem is
+#              untouched return []. Without a patch it's a broad subsystem review.
+#              An empty findings list is a legitimate, expected outcome — reviewers
+#              carry no quota.
+#
+#              Needs a model in work.json (the agent egress allowlists the model
+#              host and injects the key host-side). Called by `ci` via
+#              `uses: workflow/review`; also runnable: `work run review`
 #              (standalone, scan-checks just notes there was no ci feeding it).
 #
 #              Sizing: every reviewer is agent-only → `machine: small` (2G); five in
@@ -16,7 +27,10 @@
 ---
 name: review
 
-on: workflow_call
+on:
+  workflow_call:
+    outputs:
+      review: ${{ jobs.collect.outputs.review }}
 
 jobs:
   scan-compiler:
@@ -29,15 +43,7 @@ jobs:
         name: review compiler + spec
         uses: work/agent
         with:
-          prompt: |
-            Review ONLY the compiler/spec subsystem of this workflow engine:
-            `src/compiler/` (parse-to-plan, expressions, conditions, matrix,
-            reusable-workflow inlining, machine sizing) and `src/spec/` (YAML →
-            WorkflowSpec). Read those files and report the most important
-            correctness or robustness issues — bad parsing, unsafe expansion,
-            edge cases. Each finding: `path/to/file` — the issue — a one-line fix.
-            Aim for 3–5, prioritise real bugs over style, be concise. Ignore other
-            subsystems.
+          promptFile: .workflows/prompts/review-compiler.md
 
   scan-runtime:
     runs-on: work:base
@@ -49,14 +55,7 @@ jobs:
         name: review runtime + targets
         uses: work/agent
         with:
-          prompt: |
-            Review ONLY the runtime/targets subsystem: `src/runtime/` (the durable
-            Absurd-backed executor — job/step orchestration, needs/outputs
-            threading, durability) and `src/targets/` (the gondolin micro-VM
-            target). Read those files and report the most important correctness,
-            durability, or resource-handling issues. Each finding: `path/to/file`
-            — the issue — a one-line fix. Aim for 3–5, real bugs over style, be
-            concise. Ignore other subsystems.
+          promptFile: .workflows/prompts/review-runtime.md
 
   scan-web:
     runs-on: work:base
@@ -68,14 +67,7 @@ jobs:
         name: review web + persistence
         uses: work/agent
         with:
-          prompt: |
-            Review ONLY the web/persistence subsystem: `src/web/` (the loopback
-            HTTP console, webhook receiver + auth, SSE) and `src/persistence/`
-            (run/event/delivery storage). Read those files and report the most
-            important correctness or security issues — auth, input handling,
-            resource limits, persistence bugs. Each finding: `path/to/file` — the
-            issue — a one-line fix. Aim for 3–5, real bugs over style, be concise.
-            Ignore other subsystems.
+          promptFile: .workflows/prompts/review-web.md
 
   scan-agent-security:
     runs-on: work:base
@@ -87,21 +79,14 @@ jobs:
         name: review agent + egress + config
         uses: work/agent
         with:
-          prompt: |
-            Review ONLY the agent/security surface: `src/agent/` (the in-guest Pi
-            runner + work/agent primitive), `src/egress/` (mediated egress) and
-            `src/config/` (provider/model config and secret expansion). Focus on
-            the security properties: the model API key must never enter the guest,
-            egress is deny-by-default, secrets are expanded host-side. Report the
-            most important correctness or security issues. Each finding:
-            `path/to/file` — the issue — a one-line fix. Aim for 3–5, real bugs
-            over style, be concise. Ignore other subsystems.
+          promptFile: .workflows/prompts/review-agent-security.md
 
   # The tooling reviewer. It does NOT re-run anything: when `review` is called by
   # `ci` (which does `needs: [checks, test]`), this job inherits those needs and
   # reads the tool output `checks`/`test` already captured as their outputs. Run
   # standalone (`work run review`) there is no ci, so these resolve to empty and
-  # the agent just notes there was no tooling output. Agent-only → small.
+  # the agent reports that. Inline prompt: it interpolates `needs.*`, which a
+  # promptFile cannot. Agent-only → small.
   scan-checks:
     runs-on: work:base
     machine: small
@@ -115,12 +100,18 @@ jobs:
           prompt: |
             Below is the captured output of this project's own tooling from the ci
             run that called this review (each block starts with its exit code).
-            Review it and report anything that warrants attention: lint or type
-            errors, knip dead-code / unused-export findings, failing or flaky tests,
-            or a fan-in distribution showing an over-relied-on ("god") symbol. Each
-            finding: `<source>` — the issue — a one-line note. If a tool is clean
-            (exit 0, no output) say so in one line. If a block is empty there was no
-            ci run feeding this; say that. Don't invent problems the output doesn't show.
+            Report anything that warrants attention: lint or type errors, knip
+            dead-code / unused-export findings, failing or flaky tests, or a
+            fan-in distribution showing an over-relied-on ("god") symbol. Do not
+            invent problems the output doesn't show; clean tools produce no
+            finding. If the blocks are empty, there was no ci run feeding this —
+            output [] in that case too.
+
+            Output: a JSON array ONLY — no prose, no markdown fences. Each finding:
+            {"file": "<tool: lint|typecheck|knip|fan-in|test>", "line": null,
+             "severity": "critical|high|medium|low", "confidence": "high|medium|low",
+             "issue": "what the tool output shows", "fix": "one-line fix direction",
+             "evidence": "the relevant lines from the tool output"}
 
             === lint ===
             ${{ needs.checks.outputs.lint }}
@@ -141,22 +132,41 @@ jobs:
     runs-on: work:base
     machine: small
     needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security, scan-checks]
+    outputs:
+      review: ${{ steps.editor.outputs.output }}
     steps:
       - id: editor
-        name: prioritize + organize the reviews
+        name: verify + prioritize the reviews
         uses: work/agent
         with:
           prompt: |
-            You are the review editor. Five reviewers each reported findings on this
-            codebase — four read source subsystems, one read the project's own
-            tooling output (verbatim below). Produce ONE prioritized review:
-              - De-duplicate findings that overlap across reviewers.
-              - DROP anything low-confidence, stylistic, or that reads as already
-                handled — be skeptical; a few high-confidence issues beat a long list.
-              - Rank by severity (critical / high / medium / low) and keep at most 6.
-              - Format each as: `<severity>` · `path/to/file` · the issue · the fix.
-            If a subsystem reported nothing real, just note it in one line. Do not
-            invent issues that no reviewer raised.
+            You are the review editor with the full checkout in your workspace.
+            Five reviewers reported candidate findings (their raw output is below —
+            ideally JSON arrays, but normalize whatever they sent). Produce ONE
+            verified, prioritized review:
+
+            1. VERIFY before keeping: for each candidate, open the cited file and
+               confirm the issue is real at that location. Drop anything that
+               doesn't hold up, is stylistic, or is speculative — be skeptical; a
+               few verified issues beat a long list. Record what you checked in
+               the finding's "evidence".
+            2. SUPPRESS known findings: if `.review/accepted.md` exists in your
+               workspace, read it — it lists findings the maintainers have already
+               judged acceptable. Drop any candidate that matches an entry.
+            3. De-duplicate overlapping reports, rank by severity, keep at most 6.
+
+            Output a single JSON object ONLY — no prose before or after, no
+            markdown fences. Exact shape:
+            {"verdict": "clean" | "findings",
+             "summary": "2-3 sentences: overall state, what you verified and dropped",
+             "findings": [
+               {"subsystem": "compiler|runtime|web|agent-security|tooling",
+                "file": "src/...", "line": 123, "severity": "critical|high|medium|low",
+                "confidence": "high|medium|low", "issue": "...", "fix": "...",
+                "evidence": "what you confirmed in the code"}
+             ]}
+            "verdict": "clean" with an empty findings array is the correct output
+            when nothing survives verification.
 
             === compiler + spec ===
             ${{ needs.scan-compiler.outputs.findings }}
@@ -176,5 +186,6 @@ jobs:
         env:
           REVIEW: ${{ steps.editor.outputs.output }}
         run: |
-          printf '%s\n' "===== prioritized review ====="
+          printf '%s\n' "===== REVIEW JSON BEGIN ====="
           printf '%s\n' "$REVIEW"
+          printf '%s\n' "===== REVIEW JSON END ====="

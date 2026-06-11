@@ -146,9 +146,14 @@ jobs:
 ```
 
 Each reviewer exposes its findings as a job output. `collect` is the editor: it
-`needs` all five, then a final agent de-duplicates the overlap, drops the
-low-confidence noise, ranks by severity, and caps the result — so the output stays a
-short, prioritized list instead of five raw piles.
+`needs` all five, then a final agent **verifies each candidate against the
+checkout** (it has the full source tree in its own sandbox), de-duplicates the
+overlap, drops what doesn't hold up, ranks by severity, and caps the result —
+emitting a machine-readable JSON review instead of five raw piles. The
+reviewers are also **diff-aware**: drop a `git diff` at `.review/diff.patch`
+before running and they scope themselves to the change, which makes the
+pipeline usable as an automated pre-commit review loop (an agent can run
+`work run ci`, parse the JSON findings, fix, and re-run).
 
 ::: tip The model key never enters the guest
 Each agent reaches the model only through the sandbox's mediated egress: the egress
