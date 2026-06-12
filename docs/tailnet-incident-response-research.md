@@ -325,6 +325,56 @@ and source IP, which is the paper trail an autonomous loop needs anyway.
     narrow, well-understood alert classes (the ConfigMap-key-mismatch kind),
     each phase earning the next with its track record.
 
+### Gated in-engine remediation: agent decides, parser gates, determinism acts
+
+The first remediation class small enough to live *inside* a workflow — a
+`rollout restart` of a known-flaky deployment, say — doesn't need the
+external hand-off. The engine's existing pieces compose into a guarded
+action path, with one rule doing the heavy lifting: **the model's free text
+is never the API.** The agent renders a verdict; a deterministic step you
+wrote produces the boolean that actually gates anything:
+
+```yaml
+diagnose:
+  outputs:
+    restart:   ${{ steps.gate.outputs.restart }}
+    namespace: ${{ steps.gate.outputs.namespace }}
+    name:      ${{ steps.gate.outputs.name }}
+  steps:
+    - id: sre
+      uses: work/agent
+      with: { prompt: "…end with exactly: RESTART: yes|no / WORKLOAD: <ns>/<name>" }
+    - id: gate     # strict parse + allowlist; writes key=value to $WORK_OUTPUT
+      env: { VERDICT: "${{ steps.sre.outputs.output }}" }
+      run: ./parse-verdict.sh   # restart=true only on exact format AND allowlisted workload
+
+remediate:
+  needs: [diagnose]
+  if: ${{ needs.diagnose.outputs.restart == 'true' }}
+  uses: ./restart-deployment.yaml         # reusable workflow, typed inputs
+  with:
+    namespace: ${{ needs.diagnose.outputs.namespace }}
+    name:      ${{ needs.diagnose.outputs.name }}
+```
+
+All engine-supported today: `if:`/`when:` read `needs.<job>.outputs.<key>`
+(outputs are strings — compare `== 'true'`); `run:` steps emit outputs as
+`key=value` lines to `$WORK_OUTPUT`; a reusable job's `with:` accepts runtime
+`needs.*` outputs validated against the callee's typed inputs. The gate step
+is where policy lives — exact-format match plus an allowlist of workloads
+that are *ever* auto-restartable — so a confused agent can recommend anything
+and the worst case is `restart=false`.
+
+**Two credentials, by necessity.** The API-server proxy's identity auth is
+per-*machine*: every job from the engine host shares one tailnet identity, so
+read-only triage and write-capable remediation can't be split by identity
+alone. Keep the host's grant read-only (the ceiling for everything), and give
+the `remediate` workflow a separate token datasource — a dedicated
+ServiceAccount whose RBAC is exactly `patch` on `deployments` (all a rollout
+restart needs), short-lived token, granted only to that workflow's hook. The
+agent job never receives it: the thing that thinks can't act, and the thing
+that acts can't think.
+
 Nothing in the loop transits the public internet: alert egress, webhook
 delivery, cluster reads, and the remediation hand-off (if it's also a tailnet
 service) all stay inside the tailnet's ACLs.
