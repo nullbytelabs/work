@@ -19,6 +19,7 @@ graph LR
   AM -->|"egress proxy →<br/>work.&lt;tailnet&gt;.ts.net"| WH["work --web<br/>POST /hooks/&lt;name&gt;"]
   WH --> TR["triage workflow<br/>(collect → agent review)"]
   TR -->|datasource| K8S["k8s-&lt;env&gt;.&lt;tailnet&gt;.ts.net<br/>(API-server proxy)"]
+  TR -->|datasource| LGTM["Loki / Tempo / Prometheus<br/>(telemetry APIs)"]
   TR --> SL["Slack<br/>(ops notify)"]
   TR -.->|"structured report"| RA["downstream remediation<br/>(rollback / roll-forward)"]
 ```
@@ -103,9 +104,11 @@ operator to point at an egress proxy it manages (HA variant:
 in-cluster service DNS, and delivery rides the tailnet end to end — the
 receiver is never exposed to the internet or even to the VPC.
 
-## 4. Routing: declarative, namespaced, self-service
+## 4. Routing: declarative, namespaced, GitOps-native
 
-Two layers, both CRDs ([prometheus-operator](https://prometheus-operator.dev/docs/developer/alerting/)):
+Two layers, both CRDs from
+[prometheus-operator](https://prometheus-operator.dev/docs/developer/alerting/)
+(typically deployed as part of the kube-prometheus-stack chart):
 
 - **`PrometheusRule`** defines what fires (already per-team, per-namespace).
 - **`AlertmanagerConfig`** (namespaced) defines where it goes: `route`
@@ -159,6 +162,14 @@ see prod. Recommendation: declarative per-class (or per-cluster) hooks;
 dynamic branching only *within* a class. (Future research: event-derived
 datasource scoping — narrowing, never widening, from a validated label.)
 
+**The whole routing surface is GitOps.** In a Flux/Argo shop,
+`PrometheusRule` and `AlertmanagerConfig` are already PRs; Grafana dashboards
+ride the same flow (the dashboard-ConfigMap sidecar pattern). The `work` side
+is symmetric — triage workflows are `.workflows/*.yaml` and hook wiring is
+the config's `webhooks` block — so "which alerts trigger which automated
+response, with access to which clusters" is end-to-end reviewable, versioned
+config. No imperative registration anywhere in the loop.
+
 ## 5. Payload → `event`: already aligned
 
 Alertmanager posts a stable JSON object
@@ -193,7 +204,74 @@ Sizing note: the receiver caps bodies at **256 KB**; set `max_alerts` on the
 webhook config so grouped storms truncate (`truncatedAlerts` counts the
 drops) instead of bouncing with 413.
 
-## 6. Delivery semantics: at-least-once meets ack-fast
+## 6. Evidence beyond kubectl: the telemetry stack as datasources
+
+An LGTM-style stack (Loki, Grafana, Tempo, Prometheus/Mimir — fed by
+collection agents like Grafana Alloy, often through a central gateway) is a
+set of token-authed HTTP APIs, which is exactly what the datasource
+abstraction brokers:
+
+| Signal | API | Query language |
+|---|---|---|
+| Metrics | `/api/v1/query`, `/api/v1/query_range` | PromQL |
+| Logs | `/loki/api/v1/query_range` | LogQL |
+| Traces | `/api/search`, `/api/traces/<id>` | TraceQL |
+| All of the above, brokered | Grafana `/api/ds/query` + service-account token | per-datasource |
+
+Expose each on the tailnet like everything else (the operator can front
+individual in-cluster Services as tailnet machines) and they're one
+token-less-or-tokened entry apiece — or broker the whole stack through
+Grafana with a single service-account token. Direct component APIs are the
+better fit for scripted collection: clean JSON for `jq`, and `logcli`/
+`promtool` bake into a `work:lgtm` image the same way kubectl bakes into
+`work:k8s`.
+
+**This is the general case, not an enhancement.** A real fleet has VMs and
+bare-metal reporting through on-host agents alongside the clusters. Alerts
+about those hosts arrive through the same Alertmanager → webhook path, but
+there is no API server to `kubectl describe` — telemetry queries are the
+*only* evidence channel. kubectl is just the Kubernetes-specific collector;
+LogQL/PromQL/TraceQL are the universal ones.
+
+**Conditionals steer the diagnostic DAG.** The alert's labels and window
+(`event.alerts[0].labels.*`, `startsAt`) parameterize which collectors run
+at all:
+
+```yaml
+jobs:
+  logs:      # crash-shaped alerts → logs around the firing window
+    if: ${{ event.commonLabels.alertname =~ 'Crash|OOM|Restart' }}
+    ...
+  traces:    # latency-shaped alerts → exemplar traces + RED metrics
+    if: ${{ event.commonLabels.signal == 'latency' }}
+    ...
+  describe:  # only when the alert names a Kubernetes workload
+    if: ${{ event.commonLabels.namespace != '' }}
+    ...
+  diagnose:
+    needs: [logs, traces, describe]   # fan-in; continue-on-error upstream
+```
+
+Each collector is a deterministic, time-windowed query; `continue-on-error`
+lets partial evidence still reach the fan-in; the DAG **is** the diagnostic
+runbook, reviewable in `work graph` and versioned like everything else.
+
+**Scripts vs in-guest MCP.** There is no MCP surface in `work/agent` today
+(the primitive is deliberately prompt-only), but a datasource grant already
+buys the interactive tier: grant the diagnose job `datasources: ["loki",
+"prom"]` and the agent can `curl` follow-up LogQL/PromQL mid-analysis using
+the placeholder token env — the engine injects the real token host-side, so
+the agent gets follow-up-question capability while never holding a
+credential. A key composition property makes this safe: agent jobs get
+wildcard egress for the model API, but **the wildcard deliberately excludes
+internal/private hosts** — reaching a tailnet service is always an explicit
+per-job grant. So the split is per-workflow and visible in the YAML:
+collectors get the broad telemetry grants; the diagnose agent gets nothing
+(pure evidence analysis) or a narrow read-only follow-up grant. MCP-in-guest
+remains a possible future `work/agent` extension if interactive tooling ever
+needs to be richer than curl.
+
+## 7. Delivery semantics: at-least-once meets ack-fast
 
 Alertmanager's delivery model (notifier retries on 429/5xx with backoff —
 **UNVERIFIED**, from the notify package's code, not docs; plus re-notification
@@ -227,7 +305,7 @@ Every delivery — accepted, deduped, 401/403, shed at capacity — is journaled
 to the receiver's durable audit log with timestamp, result, status, run id,
 and source IP, which is the paper trail an autonomous loop needs anyway.
 
-## 7. Closing the loop: ops and remediation
+## 8. Closing the loop: ops and remediation
 
 - **Slack is just another datasource.** `chat.postMessage` with the bot token
   as the datasource secret — injected host-side, scoped to `slack.com`, never
@@ -251,7 +329,7 @@ Nothing in the loop transits the public internet: alert egress, webhook
 delivery, cluster reads, and the remediation hand-off (if it's also a tailnet
 service) all stay inside the tailnet's ACLs.
 
-## 8. Open items
+## 9. Open items
 
 1. **`internal: true` datasource grant** — the prerequisite; plumbing exists,
    config field and resolver line needed (plus tests, docs row alongside

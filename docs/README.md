@@ -51,9 +51,9 @@ the rationale is the point.
   trigger and its security boundary (layered auth, sender constraints,
   deployment tiers).
 - [`tailnet-incident-response-research.md`](tailnet-incident-response-research.md) —
-  a cluster fleet as token-less datasources over a Tailscale tailnet, and the
-  autonomous loop: PrometheusRule → Alertmanager → `work` webhooks → triage →
-  ops notify → remediation hand-off.
+  a cluster fleet and its LGTM telemetry stack as datasources over a Tailscale
+  tailnet, and the autonomous loop: PrometheusRule → Alertmanager → `work`
+  webhooks → conditional diagnostic DAGs → ops notify → remediation hand-off.
 - [`gondolin-custom-images.md`](gondolin-custom-images.md) — the `work:*`
   image namespace: lazy builds through Gondolin's own builder, tagged store.
 - [`nested-self-hosting.md`](nested-self-hosting.md) — running the full test
