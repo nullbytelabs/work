@@ -72,12 +72,6 @@ The example ships a deliberately broken workload: `shop/checkout` reads
 `db_url`. The pod crash-loops; the proof is spread across the logs, the pod
 spec, and the ConfigMap — three clues a triage has to reassemble.
 
-::: warning Needs `work` from main
-`--datasources` and datasource `resolve` pins are newer than the latest
-published release — build from the repo (`npm run build && npm i -g .`) before
-running.
-:::
-
 All commands run from `examples/k8s-triage/`:
 
 ```bash

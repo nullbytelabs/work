@@ -15,10 +15,9 @@ proof is spread across the logs, the pod spec, and the ConfigMap.
 
 All commands below run **from this folder** (`examples/k8s-triage/`).
 
-Requirements: `kind`, `kubectl`, docker, and a `work` built from this
-repository — the `--datasources` flag and datasource `resolve` pins are newer
-than the latest published release. From the repo root:
-`npm run build && npm i -g .` (or invoke `node ./bin/work.mjs` directly).
+Requirements: `kind`, `kubectl`, and docker. The scripts use this repository's
+own CLI (`bin/work.mjs`, built on first run) — to run the commands by hand
+with a global `work` instead, install it from the repo root: `npm i -g .`.
 
 ```bash
 # 1. throwaway kind cluster + demo workloads + read-only triage credentials.
