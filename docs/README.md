@@ -27,6 +27,11 @@ the rationale is the point.
 - [`gondolin-secure-execution.md`](gondolin-secure-execution.md) — the Gondolin
   micro-VM isolation model: networking (deny-by-default), secret injection
   (header-swap; real values never enter the guest), lifecycle gotchas.
+- [`egress-data-path.md`](egress-data-path.md) — the five invariants of how a
+  guest byte actually reaches an upstream: synthetic DNS, host-side
+  re-resolution (the guest-dialed IP is ignored), the private-range block,
+  hook ordering, and what `resolve` pins build on. **Read before designing
+  anything that touches sandbox networking.**
 - [`pi-in-gondolin.md`](pi-in-gondolin.md) — why agent steps run *inside* the
   VM rather than on the host: the threat model and the placement options
   considered.

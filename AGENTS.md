@@ -116,6 +116,15 @@ an allowlisted `run:` step can reach a scoped datasource host with a header-inje
 deny-by-default. Per project memory: agents get the full toolset over their workspace — core does
 **not** govern agent permissions, and you must never mock the agent runner.
 
+**Before designing anything that touches sandbox networking, read
+`docs/egress-data-path.md`.** The headline invariant: guest DNS is synthetic and
+the host re-resolves the SNI hostname and dials from the engine process — the
+guest-dialed IP is ignored, so host-loopback upstreams are reachable (that's
+what datasource `resolve` pins are for) and no upstream ever needs to be made
+"routable from the VM". Gondolin's behavior is checkable in
+`node_modules/@earendil-works/gondolin/dist` — that source is the spec; verify
+an assumed limitation there before building a workaround for it.
+
 ### Project layout resolution (`src/project.ts`)
 
 Two ways to launch: a bare `<workflow.yaml>` path (ad-hoc), or `run <name>` which resolves the
@@ -163,6 +172,12 @@ live browser iteration) and should drive UI changes rather than ad-hoc edits.
   adding a workflow feature.
 - Keep status comments truthful (project memory): scrub stale "not-yet/phase-N/no-tools" comments
   when you ship the thing they describe.
+- **Examples never drive core features.** Before adding engine surface to make an
+  `examples/` workflow work, apply the deletion test: if the example were deleted
+  tomorrow, would the feature still be worth having, with independent precedent
+  (datasource `resolve` passes — curl `--resolve`, docker `--add-host`)? If not,
+  the example's constraint is probably a wrong assumption — verify it empirically
+  first (a one-line probe beats an architecture).
 - Deep-dive design docs live in `docs/` (e.g. `gondolin-secure-execution.md`,
   `pi-in-gondolin.md`, `absurd-durable-workflows.md`, `agent-primitive-and-actions.md`,
   `reusable-workflows.md`) — see `docs/README.md` for the index.
