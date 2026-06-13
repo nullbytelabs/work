@@ -4,7 +4,7 @@
 
 Developers and platform/infra engineers running workflows on their own machines.
 Their context: a terminal-first audience that already lives in YAML, CI configs, and
-shell. They reach for this when they want CI/Actions-style structure — jobs, a `needs`
+shell. They reach for this when they want CI-style structure — jobs, a `needs`
 DAG, matrix fan-out, durable resumable runs — but locally, isolated per-job in a
 micro-VM, optionally with an AI agent strapped to a step. The web console (`work --web`)
 is where they watch runs execute, inspect the DAG, read per-step output and history, and
@@ -14,7 +14,7 @@ leaving their own machine.
 
 ## Product Purpose
 
-A local, secure workflow engine: GitHub-Actions-style YAML workflows where each job runs
+A local, secure workflow engine: YAML workflows where each job runs
 isolated in a gondolin micro-VM with durable, crash-resumable execution and optional AI
 agent steps. The UI's job is observability and control over runs — render the DAG
 faithfully, stream step output live, surface state (running / succeeded / skipped /

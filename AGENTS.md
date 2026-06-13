@@ -4,7 +4,8 @@ This file provides guidance to Pi (and compatible agents) when working with code
 
 ## What this is
 
-A local workflow engine: GitHub-Actions-style YAML workflows (jobs → steps), each job
+A local workflow engine: YAML workflows (jobs → steps, a `needs` DAG — the syntax will
+feel familiar if you know GitHub Actions), each job
 isolated in a **gondolin** micro-VM, with durable crash-resumable execution and optional
 **AI agent steps** that run a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 agent inside the sandbox. Published to npm as `@nullbytelabs/work` (the `work` command).
