@@ -1,0 +1,72 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // `config:best-practices` bundles the conventions we want as a baseline:
+  //   - helpers:pinGitHubActionDigests — keep `actions/*` pinned to a commit SHA
+  //     (we pinned the current ones by hand; Renovate maintains them from here)
+  //   - npm:unpublishSafe — never adopt a release in its first 3 days (a yanked
+  //     or compromised release is usually caught in that window; matters more
+  //     because we auto-merge)
+  //   - the dependency dashboard + sane defaults
+  extends: [
+    "config:best-practices",
+    ":dependencyDashboard",
+    ":semanticCommits",
+  ],
+
+  timezone: "America/New_York",
+  // Batch into a weekly window so the repo isn't a stream of PRs midweek.
+  schedule: ["before 9am on monday"],
+  // OSV-driven security PRs ignore the schedule and land as soon as they exist.
+  vulnerabilityAlerts: { labels: ["security"], schedule: ["at any time"] },
+  osvVulnerabilityAlerts: true,
+
+  // Keep PR volume legible for a solo maintainer: cap concurrent open PRs, and
+  // require a green branch before a PR is even opened.
+  prConcurrentLimit: 6,
+  prHourlyLimit: 0,
+
+  packageRules: [
+    // --- Auto-merge posture: low-risk automatic, everything else manual. ---
+    // Minor/patch bumps, action SHA digests, and initial pins auto-merge once
+    // CI is green (the protect-main ruleset requires both checks + 0 approvals,
+    // so Renovate can merge its own PRs without admin bypass).
+    {
+      matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest", "lockFileMaintenance"],
+      automerge: true,
+    },
+    // Majors always wait for a human — they're the ones that break things.
+    {
+      matchUpdateTypes: ["major"],
+      automerge: false,
+      labels: ["dependencies", "major"],
+    },
+    // The runtime-critical pair moves together and is never auto-merged: the
+    // engine *is* gondolin + the agent, so every bump gets eyes regardless of
+    // semver level.
+    {
+      matchPackageNames: ["@earendil-works/gondolin", "@earendil-works/pi-coding-agent"],
+      groupName: "earendil runtime",
+      automerge: false,
+      labels: ["dependencies", "runtime-critical"],
+    },
+
+    // --- Grouping: collapse families into one PR each. ---
+    {
+      matchPackageNames: ["@types/**"],
+      groupName: "type definitions",
+    },
+    {
+      matchPackageNames: ["eslint", "@eslint/**", "typescript-eslint", "globals"],
+      groupName: "eslint toolchain",
+    },
+
+    // --- Scope control. ---
+    // The agent-project under test/e2e is a fixture; its dependency versions are
+    // part of the test surface, not something to keep current.
+    {
+      matchFileNames: ["test/e2e/agent-project/**"],
+      enabled: false,
+    },
+  ],
+}
