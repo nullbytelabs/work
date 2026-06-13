@@ -1,9 +1,5 @@
 # Product
 
-## Register
-
-product
-
 ## Users
 
 Developers and platform/infra engineers running workflows on their own machines.

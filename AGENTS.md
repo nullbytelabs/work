@@ -7,8 +7,8 @@ This file provides guidance to Pi (and compatible agents) when working with code
 A local workflow engine: GitHub-Actions-style YAML workflows (jobs → steps), each job
 isolated in a **gondolin** micro-VM, with durable crash-resumable execution and optional
 **AI agent steps** that run a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
-agent inside the sandbox. Published to npm as `@nullbytelabs/work` (the `work` command); the
-repo is private. There is **no host-execution mode** — every job runs in a micro-VM (`runs-on: gondolin`,
+agent inside the sandbox. Published to npm as `@nullbytelabs/work` (the `work` command).
+There is **no host-execution mode** — every job runs in a micro-VM (`runs-on: gondolin`,
 also the default), so QEMU is required to run anything for real.
 
 ## Commands
