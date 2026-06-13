@@ -17,6 +17,11 @@
   timezone: "America/New_York",
   // Batch into a weekly window so the repo isn't a stream of PRs midweek.
   schedule: ["before 9am on monday"],
+  // Keep open PRs rebased onto main automatically. When several PRs touch
+  // package.json and one merges, the rest go stale/conflicting — this makes
+  // Renovate rebase them itself on its next run instead of leaving conflicts
+  // for a human to resolve by hand.
+  rebaseWhen: "behind-base-branch",
   // OSV-driven security PRs ignore the schedule and land as soon as they exist.
   vulnerabilityAlerts: { labels: ["security"], schedule: ["at any time"] },
   osvVulnerabilityAlerts: true,
