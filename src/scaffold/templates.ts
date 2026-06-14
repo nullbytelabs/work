@@ -146,6 +146,19 @@ export function workflowPath(name: string): string {
 }
 
 /**
+ * Insert a top-level block (e.g. an `on:` trigger) right after a generated
+ * workflow's `name:` line. Operates on our OWN freshly-rendered template text —
+ * not user-authored YAML — so the `name:` line is always present and at the top;
+ * the caller re-validates the result through the real compiler before writing.
+ */
+export function injectAfterName(yamlText: string, block: string): string {
+  if (!/^name: .+$/m.test(yamlText)) {
+    throw new Error("internal: generated workflow has no `name:` line to anchor injection");
+  }
+  return yamlText.replace(/^(name: .+)$/m, `$1\n${block}`);
+}
+
+/**
  * The files a `create` would write, keyed by path relative to the project root.
  * Pure: no FS access, no clobber decisions — the writer applies those. The agent
  * template additionally emits its package and a starter config (an agent step is
@@ -223,7 +236,7 @@ jobs:
 A step has \`run\` **or** \`uses\`, never both. Typed \`inputs\` are validated at compile time.
 
 ## Commands
-- \`work create <name>\` — scaffold a new workflow (\`--template hello-world|agent-action\`).
+- \`work create workflow <name>\` — scaffold a new workflow (\`--template hello-world|agent-action\`; add \`--webhook\` to make it webhook-triggered).
 - \`work run <name>\` — run the workflow whose \`name:\` matches.
 - \`work <file>.yaml\` — run an ad-hoc file directly.
 - \`work graph <name>\` — print the job DAG (\`--format mermaid|dot|json|ascii\`).

@@ -56,7 +56,7 @@ runs:
         promptFile: .workflows/actions/summarize/prompt.md
 ```
 
-`work create <name> --template agent-action` scaffolds exactly this shape (the
+`work create workflow <name> --template agent-action` scaffolds exactly this shape (the
 workflow, the composite action, and a starter model config).
 
 ## How it runs

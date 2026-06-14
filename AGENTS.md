@@ -145,8 +145,12 @@ checks out the **project root** (parent) into each job; a standalone file checks
   `.workflows/db/`, gitignored). The server owns one shared engine.
 - **`src/graph/`** — `graph` subcommand: emit the compiled DAG as mermaid/dot/json/ascii instead of
   running.
-- **`src/scaffold/` + `src/init/`** — `create <name>` and `init` (templates: `hello-world`,
-  `agent-action`). **`src/doctor/`** — `doctor` preflight checks (QEMU, Node version, etc.).
+- **`src/scaffold/` + `src/init/`** — `create <noun> <name>` (`workflow` [+ `--webhook`],
+  `datasource`, `image`, `webhook`) and `init`. Workflow templates: `hello-world`,
+  `agent-action`. The `datasource`/`webhook` generators merge a keyed section into
+  `work.json` via the merge-writer (`config-merge.ts`); `image` scaffolds an
+  arch-agnostic `.workflows/images/<name>/build-config.json`. **`src/doctor/`** —
+  `doctor` preflight checks (QEMU, Node version, etc.).
 - **`src/errors.ts`** — `UserFacingError` is caught in `main()` and printed cleanly (no stack);
   anything else prints as an unexpected error with a stack.
 

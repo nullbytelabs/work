@@ -13,8 +13,8 @@ work init                 # writes .workflows/hello-world.yaml + a starter confi
 work run hello-world      # run the scaffolded workflow by its name
 ```
 
-`work create <name>` scaffolds an additional workflow any time, and
-`work create <name> --template agent-action` scaffolds a workflow plus a composite
+`work create workflow <name>` scaffolds an additional workflow any time, and
+`work create workflow <name> --template agent-action` scaffolds a workflow plus a composite
 [action](./actions) that wraps the built-in [`work/agent`](./agent-steps) step.
 Both validate the generated YAML before writing and never clobber existing files.
 

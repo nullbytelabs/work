@@ -82,7 +82,7 @@ come from the prompt, or from Pi's own discovery of a committed `.pi/` persona /
 When you want a named, reusable agent with a typed interface — the equivalent of a
 GitHub Action — wrap `work/agent` in a **[composite action](./composite-actions)**:
 a file-backed prompt and a declared output, called as `uses: action/<name>`.
-`work create <name> --template agent-action` scaffolds exactly that. See
+`work create workflow <name> --template agent-action` scaffolds exactly that. See
 [Composite actions](./composite-actions#packaging-an-agent) for the full shape.
 
 ## How it runs
