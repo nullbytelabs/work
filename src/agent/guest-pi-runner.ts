@@ -19,10 +19,13 @@
  *   3. read the result JSON back from the host side of the mount.
  *
  * The request file carries baseUrl + model id but **never the key**: the wrapper
- * reads it from `process.env[GUEST_MODEL_KEY_ENV]`, which Gondolin fills with a
- * placeholder and swaps into the Authorization header for the model host only.
+ * reads it from `process.env[<keyEnv>]`, where `keyEnv` is the per-model-host env
+ * var name (`modelKeyEnv`) that the egress resolver injected a placeholder under.
+ * Gondolin swaps that placeholder into the Authorization header for that host only
+ * (and blocks it if sent anywhere else), so a job that calls two providers reads a
+ * different, host-correct key per step.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { constants } from "node:fs";
 import { mkdir, readFile, writeFile, rm, copyFile } from "node:fs/promises";
@@ -30,9 +33,33 @@ import { join } from "node:path";
 import { UserFacingError } from "../errors.ts";
 import type { AgentRequest, AgentResult, AgentRunner } from "./index.ts";
 
-/** Env var the in-guest wrapper reads the (placeholder) model key from. The
- *  composition root injects the real key under this name via Gondolin secrets. */
+/** Prefix for the per-model-host key env vars (and the legacy fallback name the
+ *  guest wrapper reads when a request omits `keyEnv`). */
 export const GUEST_MODEL_KEY_ENV = "PI_WF_MODEL_KEY";
+
+/** The hostname a model `baseUrl` resolves to (port stripped), or undefined if it
+ *  doesn't parse. The unit Gondolin scopes an injected secret by. */
+export function modelHostOf(baseUrl: string): string | undefined {
+  try {
+    return new URL(baseUrl).hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The guest env-var name under which a given model host's API key is injected.
+ * Derived deterministically from the host so the host-side egress resolver and
+ * the in-guest runner compute the SAME name independently (no out-of-band
+ * coordination) — that agreement is what lets a multi-provider job read the
+ * right key per step. A readable host slug plus a short hash keeps it both
+ * debuggable and collision-safe (two distinct hosts never map to one name).
+ */
+export function modelKeyEnv(host: string): string {
+  const slug = host.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const hash = createHash("sha256").update(host).digest("hex").slice(0, 8);
+  return `${GUEST_MODEL_KEY_ENV}_${slug}_${hash}`;
+}
 
 /** Default guest path for Gondolin's MITM CA, so in-guest Node trusts the proxy. */
 const GUEST_CA_PATH = "/etc/gondolin/mitm/ca.crt";
@@ -72,6 +99,12 @@ export class GuestPiRunner implements AgentRunner {
         "agent step needs a model — provide a config (--config) with providers/models and a defaultModel, or set with.model",
       );
     }
+    // The host whose injected key this step will read. Must agree with the egress
+    // resolver's `modelKeyEnv(host)` so the placeholder for the right host is read.
+    const modelHost = modelHostOf(req.model.baseUrl);
+    if (!modelHost) {
+      throw new UserFacingError(`agent step model baseUrl is not a valid URL: ${req.model.baseUrl}`);
+    }
     const { exec, hostDir, guestDir, emit } = this.deps;
     const id = randomUUID().slice(0, 8);
     const hostStage = join(hostDir, STAGE_DIR);
@@ -95,7 +128,9 @@ export class GuestPiRunner implements AgentRunner {
       // wrapper applies no override and Pi's discovered persona/AGENTS.md stands.
       ...(req.system !== undefined ? { system: req.system } : {}),
       prompt: req.prompt,
-      keyEnv: GUEST_MODEL_KEY_ENV,
+      // Per-host key env: the egress resolver injected this model's key under the
+      // same name (derived from the host), scoped to that host only.
+      keyEnv: modelKeyEnv(modelHost),
       cwd: req.cwd ?? guestDir,
       model: {
         baseUrl: req.model.baseUrl,

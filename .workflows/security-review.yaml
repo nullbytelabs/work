@@ -1,0 +1,98 @@
+# security-review (focused, self-contained)
+# description: a focused, self-contained agent review of the agent/egress/config
+#              SECURITY surface. The first "focused review" slice extracted from the
+#              monolithic `review` workflow (see .pi/skills/work/SKILL.md): instead of
+#              one giant collect ingesting every subsystem's raw findings, each
+#              subsystem becomes a small reusable that does its OWN scan + verify +
+#              cap and emits already-distilled JSON. Two jobs: `scan` (the security
+#              reviewer, prompt in .workflows/prompts/review-agent-security.md, loaded
+#              via promptFile) fans into `collect` (an editor agent that VERIFIES each
+#              candidate against the checkout, drops anything in .review/accepted.md,
+#              caps to 4, and emits machine-readable JSON between LABELED sentinels —
+#              `===== REVIEW JSON [security] BEGIN/END =====`).
+#
+#              Two ways to use it, same definition:
+#                - standalone, for a fast focused loop:  `work run security-review`
+#                  (2 agent VMs, single narrow context — minutes, not the full ~10).
+#                - composed: `review` calls it via `uses: workflow/security-review`
+#                  and feeds its verified output into the final merge; `ci` calls
+#                  `review`. No change at the `ci` call site.
+#
+#              Diff-aware: if `.review/diff.patch` exists in the checkout (write it
+#              with `git diff > .review/diff.patch`), the scanner scopes to the change
+#              and returns [] when security is untouched. An empty findings list is a
+#              legitimate, expected outcome — the reviewer carries no quota.
+#
+#              Needs a model in work.json (the agent egress allowlists the model host
+#              and injects the key host-side). Sizing: agent-only → `machine: small`.
+---
+name: security-review
+
+on:
+  workflow_call:
+    outputs:
+      # The verified, capped review JSON (a single object — see the collect prompt).
+      review: ${{ jobs.collect.outputs.review }}
+
+jobs:
+  scan:
+    runs-on: work:base
+    machine: small
+    outputs:
+      findings: ${{ steps.r.outputs.output }}
+    steps:
+      - id: r
+        name: review agent + egress + config
+        uses: work/agent
+        with:
+          promptFile: .workflows/prompts/review-agent-security.md
+
+  collect:
+    runs-on: work:base
+    machine: small
+    needs: [scan]
+    outputs:
+      review: ${{ steps.editor.outputs.output }}
+    steps:
+      - id: editor
+        name: verify + cap the security findings
+        uses: work/agent
+        with:
+          prompt: |
+            You are the security-review editor with the full checkout in your
+            workspace. One reviewer reported candidate findings about the
+            agent/egress/config security surface (its raw output is below — ideally
+            a JSON array, but normalize whatever it sent). Produce ONE verified,
+            prioritized review of THIS surface only:
+
+            1. VERIFY before keeping: for each candidate, open the cited file and
+               confirm the issue is real at that location, with a concrete path by
+               which a key/secret reaches the guest or egress exceeds its grant.
+               Drop anything that doesn't hold up, is stylistic, or is speculative —
+               be skeptical; a few verified issues beat a long list. Record what you
+               checked in the finding's "evidence".
+            2. SUPPRESS known findings: if `.review/accepted.md` exists in your
+               workspace, read it and drop any candidate that matches an entry.
+            3. De-duplicate, rank by severity, keep at most 4.
+
+            Output a single JSON object ONLY — no prose before or after, no markdown
+            fences. Exact shape:
+            {"verdict": "clean" | "findings",
+             "summary": "2-3 sentences: state of the security surface, what you verified and dropped",
+             "findings": [
+               {"subsystem": "agent-security", "file": "src/...", "line": 123,
+                "severity": "critical|high|medium|low", "confidence": "high|medium|low",
+                "issue": "...", "fix": "...", "evidence": "what you confirmed in the code"}
+             ]}
+            "verdict": "clean" with an empty findings array is the correct output
+            when nothing survives verification.
+
+            === agent + egress + config (raw reviewer output) ===
+            ${{ needs.scan.outputs.findings }}
+      - name: show review
+        env:
+          REVIEW: ${{ steps.editor.outputs.output }}
+        run: |
+          printf '%s\n' "===== REVIEW JSON [security] BEGIN ====="
+          printf '%s\n' "$REVIEW"
+          printf '%s\n' "===== REVIEW JSON [security] END ====="

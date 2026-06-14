@@ -1,10 +1,14 @@
 # review (multi-agent)
 # description: reusable agent review — fan-out / fan-in. Five reviewers run in
-#              parallel, each in its own small gondolin VM: four review one source
-#              subsystem (prompts in .workflows/prompts/review-*.md, loaded via
-#              promptFile), and `scan-checks` reviews the project's own tooling
-#              output. A `collect` editor agent fans findings in: it VERIFIES each
-#              candidate against the checkout, drops anything listed in
+#              parallel: three inline scanners review one source subsystem each
+#              (compiler, runtime, web — prompts in .workflows/prompts/review-*.md,
+#              loaded via promptFile), `scan-checks` reviews the project's own
+#              tooling output, and the SECURITY surface is composed in via
+#              `uses: workflow/security-review` (a focused, self-contained reusable
+#              that does its own scan + verify + cap, and also runs standalone as
+#              `work run security-review` — the first slice of the focused-review
+#              decomposition). A `collect` editor agent fans findings in: it VERIFIES
+#              each candidate against the checkout, drops anything listed in
 #              .review/accepted.md, ranks, caps, and emits machine-readable JSON
 #              between REVIEW JSON sentinels (the contract the Pi feedback loop
 #              parses — see .pi/skills/work/SKILL.md).
@@ -83,17 +87,13 @@ jobs:
         with:
           promptFile: .workflows/prompts/review-web.md
 
-  scan-agent-security:
-    runs-on: work:base
-    machine: small
-    outputs:
-      findings: ${{ steps.r.outputs.output }}
-    steps:
-      - id: r
-        name: review agent + egress + config
-        uses: work/agent
-        with:
-          promptFile: .workflows/prompts/review-agent-security.md
+  # The agent/egress/config SECURITY surface is extracted as its own focused,
+  # self-contained reusable workflow (scan + verify + cap), so it also runs
+  # standalone as `work run security-review`. Composed here via `uses:`, its output
+  # is ALREADY verified + capped JSON (not a raw scanner dump) — the first slice of
+  # the focused-review decomposition (see .pi/skills/work/SKILL.md).
+  security:
+    uses: workflow/security-review
 
   # The tooling reviewer. It re-runs nothing: the captured tool output arrives
   # through this workflow's declared `inputs:`, which the caller (ci.yaml) fills
@@ -143,7 +143,7 @@ jobs:
   collect:
     runs-on: work:base
     machine: small
-    needs: [scan-compiler, scan-runtime, scan-web, scan-agent-security, scan-checks]
+    needs: [scan-compiler, scan-runtime, scan-web, security, scan-checks]
     outputs:
       review: ${{ steps.editor.outputs.output }}
     steps:
@@ -189,8 +189,8 @@ jobs:
             === web + persistence ===
             ${{ needs.scan-web.outputs.findings }}
 
-            === agent + egress + config ===
-            ${{ needs.scan-agent-security.outputs.findings }}
+            === agent + egress + config (already verified + capped) ===
+            ${{ needs.security.outputs.review }}
 
             === tooling (lint / typecheck / knip / fan-in / test) ===
             ${{ needs.scan-checks.outputs.findings }}
