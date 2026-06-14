@@ -29,11 +29,12 @@ jobs:
   unit:
     runs-on: work:nested
     machine: { cpus: 8, memory: "64G" }   # outer VM hosts the nested e2e VMs
-    # `steps.test.logs` is the engine's built-in capture of the step's combined
-    # output; `continue-on-error` keeps the job green on a test failure so the
-    # result still reaches `review`.
+    # `steps.test.outcome` is the engine's deterministic per-step verdict
+    # (success/failure/skipped); `continue-on-error` keeps the job green on a test
+    # failure so the outcome still reaches `review` (which leads with it). Failure
+    # detail stays in this step's output in the run — no agent re-narrates the log.
     outputs:
-      test: ${{ steps.test.logs }}
+      test: ${{ steps.test.outcome }}
     steps:
       - name: install
         run: npm ci

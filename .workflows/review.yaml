@@ -1,38 +1,31 @@
-# review (multi-agent)
-# description: reusable agent review — fan-out / fan-in. Five reviewers run in
-#              parallel: three inline scanners review one source subsystem each
-#              (compiler, runtime, web — prompts in .workflows/prompts/review-*.md,
-#              loaded via promptFile), `scan-checks` reviews the project's own
-#              tooling output, and the SECURITY surface is composed in via
-#              `uses: workflow/security-review` (a focused, self-contained reusable
-#              that does its own scan + verify + cap, and also runs standalone as
-#              `work run security-review` — the first slice of the focused-review
-#              decomposition). A `collect` editor agent fans findings in: it VERIFIES
-#              each candidate against the checkout, drops anything listed in
-#              .review/accepted.md, ranks, caps, and emits machine-readable JSON
-#              between REVIEW JSON sentinels (the contract the Pi feedback loop
-#              parses — see .pi/skills/work/SKILL.md).
+# review (multi-agent, composed)
+# description: reusable agent review — now PURE COMPOSITION of four focused,
+#              self-contained reusables (security / compiler / runtime / web), each
+#              composed via `uses: workflow/<x>-review`. Every focused review does
+#              its own scan + verify + cap and emits already-distilled JSON, so the
+#              final `collect` editor fans in PRE-VERIFIED reviews (small context)
+#              rather than raw scanner dumps. Each focused review also runs
+#              standalone (e.g. `work run compiler-review`) for fast, narrow-context
+#              feedback — same definition `review`/`ci` compose.
 #
-#              Inputs (explicit): the tooling output it reviews arrives through
-#              declared `inputs:` (lint/typecheck/knip/fanin/test), which the
-#              caller passes via `with:` from its checks/test job outputs — see
-#              ci.yaml. This workflow references ONLY `inputs.*`, never a caller's
-#              jobs; run standalone (`work run review`) the inputs default to empty
-#              and scan-checks reports there was no tooling feeding it.
+#              No tooling-reviewer agent. Lint/typecheck/knip/fan-in/test produce a
+#              DETERMINISTIC pass/fail signal — re-narrating that through an LLM is
+#              cost + a hallucination surface over an already-authoritative result.
+#              Instead the caller passes each tool's OUTCOME (success/failure/skipped)
+#              via declared `inputs:`; `collect` is handed that deterministic status
+#              and leads with any hard failure, and the `show` step prints a
+#              deterministic TOOLING banner regardless of what the agent says. Detail
+#              for a failure lives in the `checks`/`test` job output in the run.
 #
-#              Diff-aware: if `.review/diff.patch` exists in the checkout (write it
-#              with `git diff > .review/diff.patch` before running), reviewers scope
-#              to the change and its blast radius; scanners whose subsystem is
-#              untouched return []. Without a patch it's a broad subsystem review.
-#              An empty findings list is a legitimate, expected outcome — reviewers
-#              carry no quota.
+#              Each focused reviewer reads its subsystem's source in the checkout
+#              and reports real issues. An empty findings list is a legitimate,
+#              expected outcome — reviewers carry no quota.
 #
-#              Needs a model in work.json (the agent egress allowlists the model
-#              host and injects the key host-side). Called by `ci` via
-#              `uses: workflow/review`; also runnable: `work run review`.
-#
-#              Sizing: every reviewer is agent-only → `machine: small` (2G); five in
-#              parallel ≈ 10G peak.
+#              `collect` emits machine-readable JSON between the unlabeled REVIEW
+#              JSON sentinels (the aggregate contract the Pi feedback loop parses;
+#              focused reviews use scope-LABELED sentinels — see SKILL.md). Needs a
+#              model in work.json. Called by `ci` via `uses: workflow/review`; also
+#              runnable: `work run review`. Sizing: agent-only → `machine: small`.
 ---
 name: review
 
@@ -41,8 +34,10 @@ on:
     outputs:
       review: ${{ jobs.collect.outputs.review }}
 
-# Tooling output to review, passed in by the caller (ci.yaml) from its checks/test
-# job outputs. Defaults are empty so a standalone `work run review` is well-defined.
+# Deterministic tool OUTCOMES (success | failure | skipped), passed in by the caller
+# (ci.yaml) from its checks/test job step outcomes — NOT logs and NOT an agent's
+# reading of logs. Defaults are empty so a standalone `work run review` (no tooling
+# upstream) is well-defined: an empty status means "tooling did not run here".
 inputs:
   lint: { type: string, default: "" }
   typecheck: { type: string, default: "" }
@@ -51,153 +46,97 @@ inputs:
   test: { type: string, default: "" }
 
 jobs:
-  scan-compiler:
-    runs-on: work:base
-    machine: small
-    outputs:
-      findings: ${{ steps.r.outputs.output }}
-    steps:
-      - id: r
-        name: review compiler + spec
-        uses: work/agent
-        with:
-          promptFile: .workflows/prompts/review-compiler.md
-
-  scan-runtime:
-    runs-on: work:base
-    machine: small
-    outputs:
-      findings: ${{ steps.r.outputs.output }}
-    steps:
-      - id: r
-        name: review runtime + targets
-        uses: work/agent
-        with:
-          promptFile: .workflows/prompts/review-runtime.md
-
-  scan-web:
-    runs-on: work:base
-    machine: small
-    outputs:
-      findings: ${{ steps.r.outputs.output }}
-    steps:
-      - id: r
-        name: review web + persistence
-        uses: work/agent
-        with:
-          promptFile: .workflows/prompts/review-web.md
-
-  # The agent/egress/config SECURITY surface is extracted as its own focused,
-  # self-contained reusable workflow (scan + verify + cap), so it also runs
-  # standalone as `work run security-review`. Composed here via `uses:`, its output
-  # is ALREADY verified + capped JSON (not a raw scanner dump) — the first slice of
-  # the focused-review decomposition (see .pi/skills/work/SKILL.md).
+  # Each subsystem is a focused, self-contained reusable (scan + verify + cap),
+  # composed here via `uses:`. Outputs are ALREADY verified + capped JSON objects.
   security:
     uses: workflow/security-review
-
-  # The tooling reviewer. It re-runs nothing: the captured tool output arrives
-  # through this workflow's declared `inputs:`, which the caller (ci.yaml) fills
-  # from its checks/test job outputs. Standalone, the inputs default to empty and
-  # the agent reports there was no tooling feeding it. Inline prompt (a promptFile
-  # can't interpolate `${{ inputs.* }}`). Agent-only → small.
-  scan-checks:
-    runs-on: work:base
-    machine: small
-    outputs:
-      findings: ${{ steps.r.outputs.output }}
-    steps:
-      - id: r
-        name: review the captured tooling output
-        uses: work/agent
-        with:
-          prompt: |
-            Below is the captured output of this project's own tooling (each block
-            starts with its exit code). Report anything that warrants attention:
-            lint or type errors, knip dead-code / unused-export findings, failing
-            or flaky tests, or a fan-in distribution showing an over-relied-on
-            ("god") symbol. Do not invent problems the output doesn't show; clean
-            tools produce no finding. If the blocks are empty, there was no tooling
-            feeding this — output [] in that case too.
-
-            Output: a JSON array ONLY — no prose, no markdown fences. Each finding:
-            {"file": "<tool: lint|typecheck|knip|fan-in|test>", "line": null,
-             "severity": "critical|high|medium|low", "confidence": "high|medium|low",
-             "issue": "what the tool output shows", "fix": "one-line fix direction",
-             "evidence": "the relevant lines from the tool output"}
-
-            === lint ===
-            ${{ inputs.lint }}
-
-            === typecheck ===
-            ${{ inputs.typecheck }}
-
-            === knip ===
-            ${{ inputs.knip }}
-
-            === fan-in ===
-            ${{ inputs.fanin }}
-
-            === test (full suite) ===
-            ${{ inputs.test }}
+  compiler:
+    uses: workflow/compiler-review
+  runtime:
+    uses: workflow/runtime-review
+  web:
+    uses: workflow/web-review
 
   collect:
     runs-on: work:base
     machine: small
-    needs: [scan-compiler, scan-runtime, scan-web, security, scan-checks]
+    needs: [security, compiler, runtime, web]
     outputs:
       review: ${{ steps.editor.outputs.output }}
     steps:
       - id: editor
-        name: verify + prioritize the reviews
+        name: merge + prioritize the focused reviews
         uses: work/agent
         with:
           prompt: |
             You are the review editor with the full checkout in your workspace.
-            Five reviewers reported candidate findings (their raw output is below —
-            ideally JSON arrays, but normalize whatever they sent). Produce ONE
-            verified, prioritized review:
+            Four FOCUSED reviewers each produced a verified, capped review of their
+            own subsystem — each block below is a JSON object of the shape
+            {"verdict","summary","findings":[...]} (already verified against the
+            checkout and capped; normalize whatever they sent). Your job is to MERGE
+            them into one review — you do NOT need to re-verify, only fold together:
 
-            1. VERIFY before keeping: for each candidate, open the cited file and
-               confirm the issue is real at that location. Drop anything that
-               doesn't hold up, is stylistic, or is speculative — be skeptical; a
-               few verified issues beat a long list. Record what you checked in
-               the finding's "evidence".
-            2. SUPPRESS known findings: if `.review/accepted.md` exists in your
-               workspace, read it — it lists findings the maintainers have already
-               judged acceptable. Drop any candidate that matches an entry.
-            3. De-duplicate overlapping reports, rank by severity, keep at most 6.
+            1. Combine all findings, de-duplicate overlap across subsystems, rank by
+               severity, and keep at most 6.
+            2. TOOLING: the deterministic pass/fail status of this project's own
+               tooling is below (from the engine, not a guess). If any status is
+               "failure", LEAD your summary with that — a broken build/test outranks
+               code findings — and include it as a finding with subsystem "tooling"
+               (file = the tool name, the failure is the issue; detail lives in the
+               run's checks/test output). If a status is empty, tooling did not run
+               in this invocation; ignore it.
 
-            Output a single JSON object ONLY — no prose before or after, no
-            markdown fences. Exact shape:
+            Output a single JSON object ONLY — no prose before or after, no markdown
+            fences. Exact shape:
             {"verdict": "clean" | "findings",
-             "summary": "2-3 sentences: overall state, what you verified and dropped",
+             "summary": "2-3 sentences: overall state, leading with any tooling failure",
              "findings": [
                {"subsystem": "compiler|runtime|web|agent-security|tooling",
                 "file": "src/...", "line": 123, "severity": "critical|high|medium|low",
                 "confidence": "high|medium|low", "issue": "...", "fix": "...",
-                "evidence": "what you confirmed in the code"}
+                "evidence": "what the focused reviewer confirmed (or the tool status)"}
              ]}
-            "verdict": "clean" with an empty findings array is the correct output
-            when nothing survives verification.
+            "verdict": "clean" with an empty findings array is correct when nothing
+            survives and all tooling passed.
 
-            === compiler + spec ===
-            ${{ needs.scan-compiler.outputs.findings }}
+            === tooling status (deterministic — success | failure | skipped) ===
+            lint:      ${{ inputs.lint }}
+            typecheck: ${{ inputs.typecheck }}
+            knip:      ${{ inputs.knip }}
+            fan-in:    ${{ inputs.fanin }}
+            test:      ${{ inputs.test }}
 
-            === runtime + targets ===
-            ${{ needs.scan-runtime.outputs.findings }}
-
-            === web + persistence ===
-            ${{ needs.scan-web.outputs.findings }}
-
-            === agent + egress + config (already verified + capped) ===
+            === agent + egress + config (security) ===
             ${{ needs.security.outputs.review }}
 
-            === tooling (lint / typecheck / knip / fan-in / test) ===
-            ${{ needs.scan-checks.outputs.findings }}
+            === compiler + spec ===
+            ${{ needs.compiler.outputs.review }}
+
+            === runtime + targets ===
+            ${{ needs.runtime.outputs.review }}
+
+            === web + persistence ===
+            ${{ needs.web.outputs.review }}
       - name: show review
         env:
           REVIEW: ${{ steps.editor.outputs.output }}
+          LINT: ${{ inputs.lint }}
+          TYPECHECK: ${{ inputs.typecheck }}
+          KNIP: ${{ inputs.knip }}
+          FANIN: ${{ inputs.fanin }}
+          TEST: ${{ inputs.test }}
         run: |
+          # Deterministic tooling banner — computed from the engine's step outcomes,
+          # independent of anything the agent wrote. "Build broken" is surfaced here
+          # for certain, not left to the model's discretion.
+          failed=""
+          for pair in "lint:$LINT" "typecheck:$TYPECHECK" "knip:$KNIP" "fan-in:$FANIN" "test:$TEST"; do
+            name="${pair%%:*}"; outcome="${pair#*:}"
+            [ "$outcome" = "failure" ] && failed="$failed $name"
+          done
+          if [ -n "$failed" ]; then
+            printf '⚠ TOOLING FAILED (fix before code findings):%s\n' "$failed"
+          fi
           printf '%s\n' "===== REVIEW JSON BEGIN ====="
           printf '%s\n' "$REVIEW"
           printf '%s\n' "===== REVIEW JSON END ====="
