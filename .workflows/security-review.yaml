@@ -18,10 +18,9 @@
 #                  and feeds its verified output into the final merge; `ci` calls
 #                  `review`. No change at the `ci` call site.
 #
-#              Diff-aware: if `.review/diff.patch` exists in the checkout (write it
-#              with `git diff > .review/diff.patch`), the scanner scopes to the change
-#              and returns [] when security is untouched. An empty findings list is a
-#              legitimate, expected outcome — the reviewer carries no quota.
+#              The reviewer reads the agent/egress/config source in the checkout and
+#              reports real issues against the security invariants. An empty findings
+#              list is a legitimate, expected outcome — the reviewer carries no quota.
 #
 #              Needs a model in work.json (the agent egress allowlists the model host
 #              and injects the key host-side). Sizing: agent-only → `machine: small`.

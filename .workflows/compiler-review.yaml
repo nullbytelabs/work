@@ -1,0 +1,87 @@
+# compiler-review (focused, self-contained)
+# description: a focused, self-contained agent review of the COMPILER + spec
+#              subsystem (`src/compiler/`, `src/spec/`). One of the focused-review
+#              slices the monolithic `review` workflow decomposes into (see
+#              .pi/skills/work/SKILL.md): `scan` (the reviewer, prompt in
+#              .workflows/prompts/review-compiler.md via promptFile) fans into
+#              `collect` (an editor agent that VERIFIES each candidate against the
+#              checkout, drops anything in .review/accepted.md, caps to 4, and emits
+#              JSON between LABELED sentinels — `===== REVIEW JSON [compiler] BEGIN/END =====`).
+#
+#              Two ways to use it, same definition: standalone for a fast focused
+#              loop (`work run compiler-review`, 2 agent VMs), or composed by
+#              `review` (→ `ci`) via `uses: workflow/compiler-review`, whose output
+#              is already verified + capped JSON.
+#
+#              The reviewer reads the compiler/spec source in the checkout and
+#              reports real issues; an empty list is a fine answer. Needs a model in
+#              work.json. Sizing: agent-only → `machine: small`.
+---
+name: compiler-review
+
+on:
+  workflow_call:
+    outputs:
+      review: ${{ jobs.collect.outputs.review }}
+
+jobs:
+  scan:
+    runs-on: work:base
+    machine: small
+    outputs:
+      findings: ${{ steps.r.outputs.output }}
+    steps:
+      - id: r
+        name: review compiler + spec
+        uses: work/agent
+        with:
+          promptFile: .workflows/prompts/review-compiler.md
+
+  collect:
+    runs-on: work:base
+    machine: small
+    needs: [scan]
+    outputs:
+      review: ${{ steps.editor.outputs.output }}
+    steps:
+      - id: editor
+        name: verify + cap the compiler findings
+        uses: work/agent
+        with:
+          prompt: |
+            You are the compiler-review editor with the full checkout in your
+            workspace. One reviewer reported candidate findings about the
+            compiler + spec subsystem (its raw output is below — ideally a JSON
+            array, but normalize whatever it sent). Produce ONE verified,
+            prioritized review of THIS subsystem only:
+
+            1. VERIFY before keeping: for each candidate, open the cited file and
+               confirm the issue is real at that location, with a concrete failure
+               scenario. Drop anything that doesn't hold up, is stylistic, or is
+               speculative — be skeptical; a few verified issues beat a long list.
+               Record what you checked in the finding's "evidence".
+            2. SUPPRESS known findings: if `.review/accepted.md` exists in your
+               workspace, read it and drop any candidate that matches an entry.
+            3. De-duplicate, rank by severity, keep at most 4.
+
+            Output a single JSON object ONLY — no prose before or after, no markdown
+            fences. Exact shape:
+            {"verdict": "clean" | "findings",
+             "summary": "2-3 sentences: state of the subsystem, what you verified and dropped",
+             "findings": [
+               {"subsystem": "compiler", "file": "src/...", "line": 123,
+                "severity": "critical|high|medium|low", "confidence": "high|medium|low",
+                "issue": "...", "fix": "...", "evidence": "what you confirmed in the code"}
+             ]}
+            "verdict": "clean" with an empty findings array is the correct output
+            when nothing survives verification.
+
+            === compiler + spec (raw reviewer output) ===
+            ${{ needs.scan.outputs.findings }}
+      - name: show review
+        env:
+          REVIEW: ${{ steps.editor.outputs.output }}
+        run: |
+          printf '%s\n' "===== REVIEW JSON [compiler] BEGIN ====="
+          printf '%s\n' "$REVIEW"
+          printf '%s\n' "===== REVIEW JSON [compiler] END ====="

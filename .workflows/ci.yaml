@@ -2,17 +2,17 @@
 # description: dogfoods the engine on itself — composes three reusable workflows via
 #              job-level `uses:`. `checks` runs lint/typecheck/knip/fan-in in one VM;
 #              `test` then runs the non-QEMU test tier (needs checks → fail-fast).
-#              `review` runs a real work/agent code review last, and the tooling
-#              output from `checks`/`test` is passed into it EXPLICITLY through
-#              `with:` (mapping their job outputs onto review's declared inputs) —
-#              so the data flow is visible right here at the call site. The
+#              `review` runs a real work/agent code review last (four focused
+#              subsystem reusables fanned into one editor), and the deterministic
+#              tool OUTCOMES from `checks`/`test` are passed into it EXPLICITLY
+#              through `with:` (mapping their job outputs onto review's declared
+#              inputs) — so the data flow is visible right here at the call site. The
 #              e2e/VM-smoke tiers live in GitHub Actions (.github/workflows/ci.yml),
 #              where QEMU is available and nested virtualization isn't needed.
 # usage: work run ci   (review needs a model in work.json)
-#        For a change-scoped review, write the pending diff first:
-#          git diff > .review/diff.patch && work run ci
-#        The review's verified findings print between REVIEW JSON sentinels —
-#        the Pi feedback loop parses them (see .pi/skills/work/SKILL.md).
+#        The review reads the source in the checkout and prints its verified
+#        findings between REVIEW JSON sentinels — the Pi feedback loop parses
+#        them (see .pi/skills/work/SKILL.md).
 ---
 name: ci
 
@@ -27,9 +27,9 @@ jobs:
     uses: workflow/test # ./workflows/test.yaml, or ./workflows/reusable/test.yaml
 
   review:
-    needs: [checks, test] # both must finish first; their outputs feed review's inputs below
+    needs: [checks, test] # both must finish first; their outcomes feed review's inputs below
     uses: workflow/review # ./workflows/review.yaml, or ./workflows/reusable/review.yaml
-    with: # explicit data flow: map checks/test job outputs → review's declared inputs
+    with: # explicit data flow: map checks/test tool OUTCOMES → review's declared inputs
       lint: ${{ needs.checks.outputs.lint }}
       typecheck: ${{ needs.checks.outputs.typecheck }}
       knip: ${{ needs.checks.outputs.knip }}

@@ -2,13 +2,13 @@
 # description: reusable static-checks workflow — one gondolin VM, a single `npm ci`,
 #              then lint / typecheck / knip / fan-in each as its own step. Every tool
 #              step is `continue-on-error: true`, so a failing tool does NOT fail the
-#              job — the run carries on and each tool's output is forwarded to the
-#              `review` workflow's agent (pass or fail) via the built-in
-#              `steps.<id>.logs`. Each step's real outcome still shows in the run (a
-#              failed tool step reads as failed, the job stays green). The hard repo
-#              gate is GitHub Actions (.github/workflows/ci.yml), which runs these
-#              tools directly. Called by `ci` via `uses: workflow/checks`; also
-#              runnable: `work run checks`.
+#              job — the run carries on and each tool's deterministic OUTCOME
+#              (success/failure/skipped) is forwarded to `review` via
+#              `steps.<id>.outcome`. `review` leads with any failure; failure DETAIL
+#              stays in this job's step output in the run (no agent re-narrates the
+#              logs). The hard repo gate is GitHub Actions (.github/workflows/ci.yml),
+#              which runs these tools directly. Called by `ci` via
+#              `uses: workflow/checks`; also runnable: `work run checks`.
 ---
 name: checks
 
@@ -23,15 +23,16 @@ on:
 jobs:
   static:
     runs-on: work:base
-    # Forward each tool's combined output to `review`. `steps.<id>.logs` is the
-    # engine's built-in capture of a step's stdout+stderr — no `$WORK_OUTPUT`
-    # plumbing needed. `continue-on-error` (below) keeps the job green on a red
-    # tool so every result still reaches the reviewer.
+    # Forward each tool's deterministic OUTCOME to `review` (success/failure/skipped).
+    # `steps.<id>.outcome` is the engine's built-in per-step verdict — no logs, no
+    # `$WORK_OUTPUT` plumbing, no LLM in the loop for "did it pass". `continue-on-error`
+    # (below) keeps the job green on a red tool so every outcome still reaches review;
+    # the failed step's own output remains visible in the run for detail.
     outputs:
-      lint: ${{ steps.lint.logs }}
-      typecheck: ${{ steps.typecheck.logs }}
-      knip: ${{ steps.knip.logs }}
-      fanin: ${{ steps.fanin.logs }}
+      lint: ${{ steps.lint.outcome }}
+      typecheck: ${{ steps.typecheck.outcome }}
+      knip: ${{ steps.knip.outcome }}
+      fanin: ${{ steps.fanin.outcome }}
     steps:
       - name: install
         run: npm ci

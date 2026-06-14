@@ -18,6 +18,7 @@ import { compile, WorkflowCompileError, type ExecutionPlan } from "./compiler/in
 import { resolveConfigLayers, loadMergedConfig, PROJECT_CONFIG_FILENAME, type PiWorkflowsConfig } from "./config/index.ts";
 import { createAbsurdEngine } from "./runtime/index.ts";
 import { RunRepository, type RunRow, type RunStatus } from "./persistence/runs.ts";
+import { RunEventRepository, type StoredFrame } from "./persistence/run-events.ts";
 import { resolveWorkflowLayout, findWorkflowByName, resolveWorkflowRef, WORKFLOWS_DIR, type WorkflowLayout } from "./project.ts";
 import { startRun } from "./run.ts";
 import { startWebServer } from "./web/index.ts";
@@ -64,6 +65,8 @@ interface CliArgs {
   runStatus?: string;
   /** `resume <id>` / `rerun <id>`: recover a prior run by id (workflow + inputs from history). */
   recover?: { id: string; mode: "resume" | "rerun" };
+  /** `logs <id>`: replay a past run's persisted log instead of running a workflow. */
+  logs?: { id: string };
 }
 
 /** Mutable accumulator filled by the flag handlers, resolved into CliArgs after. */
@@ -204,6 +207,7 @@ function parseArgs(argv: string[]): CliArgs {
   if (s.status) fail("--status only applies to `runs`");
   if (s.positionals[0] === "resume") return resolveRecover(s, common, "resume");
   if (s.positionals[0] === "rerun") return resolveRecover(s, common, "rerun");
+  if (s.positionals[0] === "logs") return resolveLogs(s, common);
   if (s.web) return resolveWeb(s, common);
   if (s.port !== undefined) fail("--port only applies to `--web`");
   if (s.positionals[0] === "graph") return resolveGraph(s, common);
@@ -221,6 +225,18 @@ function resolveRecover(s: FlagState, common: CommonArgs, mode: "resume" | "reru
   if (s.resume) fail(`--resume can't be combined with the \`${mode}\` verb`);
   if (s.format || s.steps) fail("--format / --steps only apply to `graph`");
   return { recover: { id, mode }, ...common };
+}
+
+// `logs <id>` — replay a past run's persisted log (from the durable `run_events`
+// store). Accepts the short id `runs` displays (resolved by prefix). Read-only;
+// rejects the run/graph-only flags.
+function resolveLogs(s: FlagState, common: CommonArgs): CliArgs {
+  const id = s.positionals[1];
+  if (!id) fail("logs requires a run id, e.g. `logs <id>` (see `work runs`)");
+  if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
+  if (s.resume) fail("--resume can't be combined with the `logs` verb");
+  if (s.format || s.steps) fail("--format / --steps only apply to `graph`");
+  return { logs: { id }, ...common };
 }
 
 // `runs [--status <s>]` — list the workspace's run history (newest-first), no
@@ -291,6 +307,7 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] resume <id>   # continue an interrupted run (reuse finished jobs)\n` +
       `  ${prog} [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs\n` +
       `  ${prog} [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]\n` +
+      `  ${prog} [--workspace <dir>] logs <id>     # replay a past run's stored log (web-run logs)\n` +
       `  ${prog} [--workspace <dir>] --web [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
@@ -396,6 +413,115 @@ async function listRuns(args: CliArgs): Promise<void> {
   process.exit(0);
 }
 
+/** `logs <id>` — open the shared `.workflows/db` store and replay a past run's log.
+ *  The id may be the short prefix `runs` prints; it's resolved to the full run_id. */
+async function showLogs(args: CliArgs): Promise<void> {
+  const workspace = args.workspace ?? process.cwd();
+  const dataDir = join(workspace, WORKFLOWS_DIR, "db");
+  const prog = process.env["PI_WF_PROG"] ?? "work";
+  if (!existsSync(dataDir)) fail(`no run history yet (no ${dataDir}) — nothing to show`);
+  const wanted = args.logs!.id;
+  const engine = await createAbsurdEngine({ dataDir });
+  try {
+    const runs = new RunRepository(engine);
+    await runs.ensureSchema();
+    const events = new RunEventRepository(engine);
+    await events.ensureSchema();
+
+    // Resolve the (possibly short) id to a full run_id via the history list.
+    const matches = (await runs.list()).filter((r) => r.id === wanted || r.id.startsWith(wanted));
+    if (matches.length === 0) fail(`no run matching "${wanted}" in history (see \`${prog} runs\`)`);
+    if (matches.length > 1) {
+      fail(`"${wanted}" matches ${matches.length} runs — use a longer id: ${matches.map((m) => m.id.slice(0, 12)).join(", ")}`);
+    }
+    const run = matches[0]!;
+
+    const frames = await events.list(run.id);
+    if (frames.length === 0) {
+      // Metadata exists but no frames: only web-console runs persist their log.
+      process.stdout.write(
+        `run ${run.id.slice(0, 8)} (${run.name}, ${run.status}) has no stored log.\n` +
+          `Logs are persisted for runs started in the web console (\`${prog} --web\`); a plain ` +
+          `\`${prog} run\` streams to the terminal live but does not store frames.\n`,
+      );
+      process.exit(0);
+    }
+    renderRunLog(frames);
+  } finally {
+    await engine.close();
+  }
+  process.exit(0);
+}
+
+/** The grouped shape of a persisted run log, ready to render. */
+interface ParsedRunLog {
+  name: string;
+  runId: string;
+  endStatus: string;
+  endError: string;
+  /** Job ids in declared order (from `run-init`). */
+  order: string[];
+  /** Per-job frames, in emit order. */
+  byJob: Map<string, StoredFrame[]>;
+}
+
+/** Bucket a run's frames by job (jobs run in parallel, so the wire interleaves
+ *  them) and pull out the run-level header/footer. */
+function groupRunFrames(frames: StoredFrame[]): ParsedRunLog {
+  const p: ParsedRunLog = { name: "", runId: "", endStatus: "", endError: "", order: [], byJob: new Map() };
+  for (const f of frames) {
+    const d = f.data;
+    if (f.event === "run-init") {
+      p.name = String(d["name"] ?? "");
+      p.runId = String(d["runId"] ?? "");
+      if (Array.isArray(d["jobOrder"])) for (const j of d["jobOrder"]) p.order.push(String(j));
+    } else if (f.event === "run-end") {
+      p.endStatus = String(d["status"] ?? "");
+      p.endError = d["error"] ? String(d["error"]) : "";
+    } else if (typeof d["jobId"] === "string") {
+      const list = p.byJob.get(d["jobId"]) ?? [];
+      list.push(f);
+      p.byJob.set(d["jobId"], list);
+    }
+  }
+  return p;
+}
+
+/** Render one step frame (start / streamed output / end) as indented lines. */
+function renderStepFrame(out: NodeJS.WriteStream, f: StoredFrame): void {
+  const d = f.data;
+  if (f.event === "step-start") {
+    out.write(`  > ${String(d["title"] ?? d["stepName"] ?? "")}\n`);
+  } else if (f.event === "step-output") {
+    const pre = d["stream"] === "stderr" ? "    ! " : "    ";
+    let text = String(d["text"] ?? "");
+    if (text.endsWith("\n")) text = text.slice(0, -1);
+    if (text.length > 0) for (const line of text.split("\n")) out.write(`${pre}${line}\n`);
+  } else if (f.event === "step-end") {
+    out.write(`    (${String(d["status"] ?? "")}, exit ${String(d["exitCode"] ?? "?")})\n`);
+  }
+}
+
+/**
+ * Render a persisted run log (frames in `seq` order) as readable per-job blocks —
+ * the same grouping the web DAG shows, rather than a confusing interleaved stream.
+ */
+function renderRunLog(frames: StoredFrame[]): void {
+  const out = process.stdout;
+  const log = groupRunFrames(frames);
+  if (log.name) out.write(`workflow: ${log.name}\n`);
+  if (log.runId) out.write(`run: ${log.runId}\n`);
+  // jobOrder first, then any job not listed (defensive against a missing init).
+  const jobs = [...log.order, ...[...log.byJob.keys()].filter((j) => !log.order.includes(j))];
+  for (const jobId of jobs) {
+    const jf = log.byJob.get(jobId);
+    if (!jf) continue;
+    out.write(`\n[job: ${jobId}]\n`);
+    for (const f of jf) renderStepFrame(out, f);
+  }
+  out.write(`\nresult: ${log.endStatus || "unknown"}${log.endError ? ` — ${log.endError}` : ""}\n`);
+}
+
 /** Look up a past run's workflow + inputs from the shared store (for resume/rerun). */
 async function lookupRun(workspace: string, id: string): Promise<{ name: string; inputs?: Record<string, unknown> } | undefined> {
   const dataDir = join(workspace, WORKFLOWS_DIR, "db");
@@ -445,6 +571,12 @@ async function main(): Promise<void> {
   // `runs` — list the workspace's run history and exit (no workflow target).
   if (args.runs) {
     await listRuns(args);
+    return;
+  }
+
+  // `logs <id>` — replay a past run's stored log and exit (no workflow target).
+  if (args.logs) {
+    await showLogs(args);
     return;
   }
 

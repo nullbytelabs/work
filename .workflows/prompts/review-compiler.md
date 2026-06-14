@@ -4,18 +4,10 @@ subsystem: `src/compiler/` (parse-to-plan, `${{ }}` expressions, `if:`/`when:`
 conditions, matrix expansion, reusable-workflow inlining, machine sizing) and
 `src/spec/` (YAML → WorkflowSpec). Ignore everything else.
 
-Protocol — follow in order:
-
-1. Check whether `.review/diff.patch` exists in your workspace.
-2. If it EXISTS, this review is about a pending change. Read the patch.
-   - If no hunk touches your scope, output `[]` and stop.
-   - Otherwise review the changed code deeply: read the full files around each
-     hunk, trace callers and callees, and report problems the change
-     introduces or worsens (plus pre-existing bugs the change directly
-     exposes).
-3. If it does NOT exist, review your scope broadly for the most important
-   correctness or robustness issues — bad parsing, unsafe expansion, edge
-   cases that produce a wrong plan.
+Review your scope in the workspace: open the source files under `src/compiler/`
+and `src/spec/`, read them, trace callers and callees, and look for the most
+important correctness or robustness issues — bad parsing, unsafe expansion,
+edge cases that produce a wrong plan. Read the actual code; don't guess.
 
 What counts: real bugs with a concrete failure scenario — a workflow input or
 spec shape that compiles wrong, crashes, or silently misbehaves. Not style,
