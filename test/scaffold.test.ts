@@ -90,7 +90,7 @@ describe("runCreate (integration, real temp dir)", () => {
   });
 
   it("writes the hello-world scaffold and is idempotent on re-run with --force", async () => {
-    const code = await runCreate(["deploy"], proj);
+    const code = await runCreate(["workflow", "deploy"], proj);
     assert.equal(code, 0);
     assert.ok(existsSync(join(proj, ".workflows", "deploy.yaml")));
     // The written file is itself valid.
@@ -98,22 +98,22 @@ describe("runCreate (integration, real temp dir)", () => {
     assert.doesNotThrow(() => compile(parseWorkflow(yaml)));
 
     // --force re-run overwrites cleanly (exit 0).
-    assert.equal(await runCreate(["deploy", "--force"], proj), 0);
+    assert.equal(await runCreate(["workflow", "deploy", "--force"], proj), 0);
   });
 
   it("refuses a filename collision without --force", async () => {
-    await runCreate(["deploy"], proj);
-    await assert.rejects(() => runCreate(["deploy"], proj), (e) => e instanceof UserFacingError);
+    await runCreate(["workflow", "deploy"], proj);
+    await assert.rejects(() => runCreate(["workflow", "deploy"], proj), (e) => e instanceof UserFacingError);
   });
 
   it("refuses a duplicate name: declared in another file", async () => {
     await mkdir(join(proj, ".workflows"), { recursive: true });
     await writeFile(join(proj, ".workflows", "other.yaml"), "name: deploy\njobs:\n  a: { steps: [{ run: 'true' }] }\n");
-    await assert.rejects(() => runCreate(["deploy"], proj), (e) => e instanceof UserFacingError);
+    await assert.rejects(() => runCreate(["workflow", "deploy"], proj), (e) => e instanceof UserFacingError);
   });
 
   it("dry-run writes nothing", async () => {
-    const code = await runCreate(["deploy", "--dry-run"], proj);
+    const code = await runCreate(["workflow", "deploy", "--dry-run"], proj);
     assert.equal(code, 0);
     assert.equal(existsSync(join(proj, ".workflows", "deploy.yaml")), false);
   });
@@ -122,7 +122,19 @@ describe("runCreate (integration, real temp dir)", () => {
     const cfgPath = join(proj, CONFIG_FILENAME);
     const original = '{"providers":{},"models":{},"defaultModel":null,"_mine":true}';
     await writeFile(cfgPath, original);
-    await runCreate(["review", "--template", "agent-action", "--force"], proj);
+    await runCreate(["workflow", "review", "--template", "agent-action", "--force"], proj);
     assert.equal(await readFile(cfgPath, "utf-8"), original); // preserved
+  });
+
+  it("rejects the bare form (clean break): create <name> needs the workflow noun", async () => {
+    // `create deploy` is no longer a workflow shorthand — it's an unknown resource.
+    await assert.rejects(() => runCreate(["deploy"], proj), (e) => e instanceof UserFacingError);
+    // And the file is never written as a side effect.
+    assert.equal(existsSync(join(proj, ".workflows", "deploy.yaml")), false);
+  });
+
+  it("lets a workflow be named after a resource noun now that the grammar is explicit", async () => {
+    assert.equal(await runCreate(["workflow", "image"], proj), 0);
+    assert.ok(existsSync(join(proj, ".workflows", "image.yaml")));
   });
 });

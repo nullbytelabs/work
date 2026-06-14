@@ -16,7 +16,7 @@ my-project/
 
 ::: tip Scaffold it
 `work init` creates this layout (a starter workflow + config), and
-`work create <name>` adds another workflow — `--template agent-action` also writes
+`work create workflow <name>` adds another workflow — `--template agent-action` also writes
 an `actions/<name>/` composite action (wrapping [`work/agent`](./agent-steps)) like
 the one above. See the [CLI reference](../reference/cli#work-init).
 :::

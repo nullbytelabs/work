@@ -8,8 +8,15 @@ The package installs a single command, `work`. These docs use it throughout.
 # scaffold a project (a starter workflow + config), or a machine-wide config
 work init [--project | --global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]
 
-# scaffold a single new workflow
-work create <name> [--template hello-world|agent-action] [--force] [--dry-run]
+# scaffold a single new workflow (optionally webhook-triggered)
+work create workflow <name> [--template hello-world|agent-action] [--webhook [--source <id>]] [--datasources a,b] [--force] [--dry-run]
+
+# scaffold a datasource entry (merged into work.json) or a custom job image
+work create datasource <name> [--preset <id>] [--url <baseUrl>] [--force] [--dry-run]
+work create image <name> [--force] [--dry-run]
+
+# pair a webhook with an existing workflow (merges webhooks.<name> into work.json)
+work create webhook <name> --workflow <existing> [--source <id>] [--datasources a,b] [--force] [--dry-run]
 
 # run a workflow file directly
 work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--no-global] [--workdir <dir>] [--quiet]
@@ -69,10 +76,10 @@ at run time. See [Configuration discovery](#configuration-discovery).
 | `--force` | Overwrite the scaffold's own files (never the config). |
 | `--dry-run` | Print what would be written and exit without touching disk. |
 
-### `work create`
+### `work create workflow`
 
 ```bash
-work create <name> [--template hello-world|agent-action] [--force] [--dry-run]
+work create workflow <name> [--template hello-world|agent-action] [--webhook [--source <id>]] [--datasources a,b] [--force] [--dry-run]
 ```
 
 Scaffolds a **single new workflow** named `<name>` into `.workflows/<name>.yaml`.
@@ -81,8 +88,8 @@ The `agent-action` template additionally writes a composite action under
 config.
 
 ```bash
-work create deploy                         # .workflows/deploy.yaml
-work create review --template agent-action # workflow + composite action + config
+work create workflow deploy                         # .workflows/deploy.yaml
+work create workflow review --template agent-action # workflow + composite action + config
 ```
 
 The generated YAML is validated through the real compiler **before** it's written,
@@ -90,11 +97,176 @@ and `create` refuses to clobber an existing workflow file (or reuse a `name:`
 already declared elsewhere) unless you pass `--force`. On success it prints the
 exact next steps (`work run <name>`, `work graph <name>`).
 
+#### Webhook-triggered (greenfield)
+
+Pass `--webhook` to generate a workflow that's webhook-triggered from the start.
+The generated YAML carries an `on: webhook` block, and the matching
+[`webhooks.<name>`](./configuration#webhooks) entry is merged into `work.json` in
+the same pass. `--source` and `--datasources` both imply `--webhook`.
+
+```bash
+work create workflow triage --webhook --source alertmanager --datasources prometheus,loki
+```
+
+writes the workflow with:
+
+```yaml
+name: triage
+on:
+  webhook:
+    secret: triage
+    source: alertmanager
+```
+
+and merges the config half:
+
+```json
+"webhooks": { "triage": { "workflow": "triage", "auth": "bearer", "secret": "$TRIAGE_SECRET" } }
+```
+
+The secret is always emitted as a `$VAR` env-ref (`$TRIAGE_SECRET`), never a
+literal — `export TRIAGE_SECRET=...` to set it. `--source` picks the sender preset
+that supplies the auth scheme (and signature header where the sender signs
+deliveries); see [`work create webhook`](#work-create-webhook) for the preset
+table. `--datasources` scopes the egress the triggered run may use.
+
 | Option | Effect |
 |---|---|
 | `--template <name>` | `hello-world` (default) or `agent-action`. |
+| `--webhook` | Also generate the `on: webhook` block and merge the `webhooks.<name>` config. |
+| `--source <id>` | Sender preset for the webhook auth (`alertmanager`, `grafana`, `github`, `generic`). Implies `--webhook`. |
+| `--datasources <a,b>` | Datasource keys the webhook-triggered run may use. Implies `--webhook`. |
 | `--force` | Overwrite an existing workflow file of the same name (never the config). |
 | `--dry-run` | Print what would be written and exit without touching disk. |
+
+### `work create datasource`
+
+```bash
+work create datasource <name> [--preset <id>] [--url <baseUrl>] [--force] [--dry-run]
+```
+
+Scaffolds a [`datasources.<name>`](./configuration#datasources) entry, **merged
+into** the project's `work.json` (the rest of the file is preserved). A datasource
+is a named external HTTP service a plain `run:` step can reach with a
+header-injected token it never actually sees — egress is deny-by-default and the
+secret is swapped in host-side, scoped to the datasource's host.
+
+The generated entry is a safe skeleton, not a live connection:
+
+```json
+{
+  "datasources": {
+    "grafana": {
+      "baseUrl": "https://grafana.example.com/api",
+      "token": "$GRAFANA_TOKEN",
+      "tokenEnv": "GRAFANA_TOKEN"
+    }
+  }
+}
+```
+
+- `token` is always a `$VAR` env-ref, never a literal secret — set the real value
+  with `export GRAFANA_TOKEN=...`, never in workflow `env:`.
+- `tokenEnv` is emitted explicitly (derived as `<NAME>_TOKEN`) so you can see which
+  variable to export.
+- **Presets** supply only the *shape* of a product's base URL — edit `baseUrl` to
+  your real host. If `<name>` matches a preset id it's inferred; otherwise pass
+  `--preset` (or get the `generic` skeleton). Shipped presets: `kubernetes`,
+  `prometheus`, `grafana`, `loki`, `tempo`, `mimir`, `alertmanager`, `generic`.
+- For a host public DNS can't name (a loopback/kind service, an SSH tunnel, a
+  Tailscale peer), add `"resolve": "<ip>"` to the entry — the generator never
+  emits it because it's deployment-specific, and pinning also lifts the sandbox's
+  private-range block for that IP.
+
+```bash
+work create datasource grafana             # infers the grafana preset
+work create datasource metrics --preset prometheus
+work create datasource api --url https://internal.example.com/v1
+```
+
+| Option | Effect |
+|---|---|
+| `--preset <id>` | Use a known preset's base-URL shape (inferred from `<name>` if omitted). |
+| `--url <baseUrl>` | Override the preset's placeholder `baseUrl`. |
+| `--force` | Overwrite an existing `datasources.<name>` entry. |
+| `--dry-run` | Print the merged entry and exit without touching disk. |
+
+### `work create image`
+
+```bash
+work create image <name> [--force] [--dry-run]
+```
+
+Scaffolds a custom job image — an arch-agnostic [Gondolin
+build-config](../guide/custom-images) at
+`.workflows/images/<name>/build-config.json`, which a job then selects with
+`runs-on: work:<name>`. The `<name>` is slugged, so `work create image "My Image"`
+writes `.workflows/images/my-image/`.
+
+The generated config is the proven `work:base` shape — Alpine with a lean,
+bootable package floor (`bash`, `ca-certificates`, `curl`, `git`, `jq`, …) — and
+is deliberately **arch-agnostic**: it has no `arch` field, because the engine
+injects the host arch right before `gondolin build` (a committed config that pins
+an arch fails to build on a different host). Extend it by listing more apk
+packages in `alpine.rootfsPackages`, or by adding `postBuild.commands` for
+anything not in apk (`npm i -g …`, fetching a pinned tarball). The image builds
+lazily the first time a job references it; a user image overrides a bundled
+built-in of the same name. See [Custom images](../guide/custom-images).
+
+| Option | Effect |
+|---|---|
+| `--force` | Overwrite an existing `build-config.json` with a fresh skeleton. |
+| `--dry-run` | Print what would be written and exit without touching disk. |
+
+### `work create webhook`
+
+```bash
+work create webhook <name> --workflow <existing> [--source <id>] [--datasources a,b] [--force] [--dry-run]
+```
+
+Pairs a webhook with an **already existing** workflow. It merges only the
+[`webhooks.<name>`](./configuration#webhooks) config half into `work.json` (the
+rest of the file is preserved) and **prints the `on: webhook` snippet to paste
+in** — it never edits the workflow YAML. Use this to retrofit a workflow created
+without `--webhook`; for a fresh workflow, generate both halves at once with
+[`work create workflow --webhook`](#work-create-workflow).
+
+```bash
+work create webhook alerts --workflow triage --source grafana
+```
+
+merges the config half for the existing `triage` workflow and prints the block to
+add to `.workflows/triage.yaml`:
+
+```yaml
+on:
+  webhook:
+    secret: alerts
+    source: grafana
+```
+
+The hook is served by `work --web` at `POST /hooks/<name>`; a smoke-test
+endpoint lives at `POST /api/webhooks/<name>/test`. The `secret` is always emitted
+as a `$VAR` env-ref (`$ALERTS_SECRET`), never a literal — `export ALERTS_SECRET=...`
+to set it. `--datasources` scopes the egress the triggered run may use.
+
+`--source` selects the sender preset, which fixes the auth scheme (and the
+signature header for senders that sign their deliveries):
+
+| `--source` | `auth` | `signatureHeader` |
+|---|---|---|
+| `alertmanager` | `bearer` | — |
+| `grafana` | `hmac-sha256` | `X-Grafana-Alerting-Signature` |
+| `github` | `hmac-sha256` | `X-Hub-Signature-256` (default) |
+| `generic` | `bearer` | — |
+
+| Option | Effect |
+|---|---|
+| `--workflow <existing>` | **Required.** The existing workflow `name:` this hook triggers. |
+| `--source <id>` | Sender preset for the webhook auth (`alertmanager`, `grafana`, `github`, `generic`). |
+| `--datasources <a,b>` | Datasource keys the webhook-triggered run may use. |
+| `--force` | Overwrite an existing `webhooks.<name>` entry. |
+| `--dry-run` | Print the merged entry and `on:` snippet, and exit without touching disk. |
 
 ### Run a file
 

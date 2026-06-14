@@ -69,6 +69,10 @@ the rationale is the point.
 - [`init-doctor-scaffolding-research.md`](init-doctor-scaffolding-research.md) —
   `work init` / `create` / `doctor`: config layering, template strategy,
   doctor's read-only contract.
+- [`generator-expansion-research.md`](generator-expansion-research.md) — a
+  state-of-the-generators assessment: how useful `init`/`create` are today, the
+  docs-site coverage gaps, and the ranked unaccounted-for surfaces to scaffold
+  next (action packages, datasource/webhook config, template variety).
 
 Records for explored-but-rejected directions (multi-host queues, embedded
 tunnels, …) are removed once the decision is captured; they live in git
