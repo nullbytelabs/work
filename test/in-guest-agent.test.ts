@@ -13,7 +13,7 @@ import {
   type UsesHandler,
   type UsesContext,
 } from "../src/runtime/index.ts";
-import { GuestPiRunner, GUEST_MODEL_KEY_ENV, makeAgentEgressResolver } from "../src/agent/index.ts";
+import { GuestPiRunner, GUEST_MODEL_KEY_ENV, modelKeyEnv, makeAgentEgressResolver } from "../src/agent/index.ts";
 import { hostTargetFactory } from "./_support.ts";
 
 // --- The seam: a uses step runs through the job's target -----------------------
@@ -183,7 +183,7 @@ jobs:
     // The real API key stays scoped to the model host only — wildcarding egress
     // does NOT widen where the secret is injected.
     assert.deepEqual(net?.secrets, {
-      [GUEST_MODEL_KEY_ENV]: { hosts: ["api.model.test"], value: "the-real-key" },
+      [modelKeyEnv("api.model.test")]: { hosts: ["api.model.test"], value: "the-real-key" },
     });
   });
 

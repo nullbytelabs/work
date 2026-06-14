@@ -7,34 +7,27 @@
  * fetch from a git/download host. So a job containing **any** `work/*` or
  * `action/*` step is granted mediated allow-all egress.
  *
- * When a model is configured, the API key is also injected as a header-only secret
- * under `GUEST_MODEL_KEY_ENV`, scoped to the configured model host(s) — so the
- * **real key never enters the guest** (Gondolin swaps the placeholder into the
- * Authorization header for the model host only) and is harmless for a job that
- * never calls the model. A composite `action/<name>` may wrap `work/agent` without
- * the resolver being able to see inside it, so action steps get the key too.
+ * When a model is configured, each model host the job touches gets its own
+ * header-only secret, injected under a per-host env-var name (`modelKeyEnv`) and
+ * scoped to that one host — so the **real key never enters the guest** (Gondolin
+ * swaps the placeholder into the Authorization header for that host only, and
+ * blocks it if sent elsewhere) and is harmless for a job that never calls the
+ * model. A job with two `work/agent` steps on different providers therefore gets
+ * two distinct host-scoped keys, each read by the step that needs it. A composite
+ * `action/<name>` may wrap `work/agent` without the resolver being able to see
+ * inside it, so action steps get the default model's key too.
  *
  * Wired via `AbsurdRuntimeOptions.resolveJobNetwork`, so the durable core stays
  * agnostic — it only forwards the result to the target.
  */
 import type { PlannedJob } from "../compiler/index.ts";
 import { resolveModel, type PiWorkflowsConfig } from "../config/index.ts";
-import { GUEST_MODEL_KEY_ENV } from "./guest-pi-runner.ts";
+import { modelHostOf, modelKeyEnv } from "./guest-pi-runner.ts";
 
 /** Structural `JobNetwork` (kept local to avoid an agent→runtime import cycle). */
 export interface AgentJobNetwork {
   allowedHosts?: string[];
   secrets?: Record<string, { hosts: string[]; value: string }>;
-}
-
-// The sandbox scopes secrets by the request's *hostname* (port stripped), so a
-// model on a nonstandard port must contribute `hostname`, not `host`.
-function hostOf(baseUrl: string): string | undefined {
-  try {
-    return new URL(baseUrl).hostname;
-  } catch {
-    return undefined;
-  }
 }
 
 /** A non-`run` step that needs the sandbox's mediated egress. */
@@ -65,23 +58,23 @@ export function makeAgentEgressResolver(
 
     const net: AgentJobNetwork = { allowedHosts: ["*"] };
 
-    // Inject the model key (host-scoped) when a model is configured and the job
-    // has a step that might call the model. `work/agent` carries its own alias;
-    // an action that may wrap it can't be introspected, so use the default model.
+    // Inject one host-scoped model key PER distinct model host the job touches.
+    // Each model step contributes its own (host -> key); steps whose models share
+    // a host (same provider) collapse onto one entry. `work/agent` carries its own
+    // alias; an action that may wrap it can't be introspected, so use the default
+    // model. The in-guest runner derives the same `modelKeyEnv(host)` from each
+    // step's model, so a step always reads the placeholder for the host it calls.
     if (config) {
-      const hosts = new Set<string>();
-      let value: string | undefined;
-      job.steps.forEach((step, i) => {
-        if (!mightRunModel(step.uses)) return;
+      const secrets: Record<string, { hosts: string[]; value: string }> = {};
+      for (const [i, step] of job.steps.entries()) {
+        if (!mightRunModel(step.uses)) continue;
         const alias = step.uses === "work/agent" ? stepModelAlias(job, i) : undefined;
         const model = resolveModel(config, alias);
-        const h = hostOf(model.baseUrl);
-        if (h) hosts.add(h);
-        value ??= model.apiKey; // one key per job (first wins) — documented limitation
-      });
-      if (hosts.size > 0 && value !== undefined) {
-        net.secrets = { [GUEST_MODEL_KEY_ENV]: { hosts: [...hosts], value } };
+        const host = modelHostOf(model.baseUrl);
+        if (!host) continue;
+        secrets[modelKeyEnv(host)] = { hosts: [host], value: model.apiKey };
       }
+      if (Object.keys(secrets).length > 0) net.secrets = secrets;
     }
 
     return net;
