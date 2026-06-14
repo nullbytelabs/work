@@ -20,7 +20,7 @@ work.json
 # demand via headless Chrome); keep the markdown reports, drop the PNGs.
 .design-review/shots/
 
-# Review-loop scratch: the diff handed to the `review` workflow is ephemeral;
-# the accepted-findings baseline is curated and committed.
+# Review-loop: only the curated accepted-findings baseline is committed; anything
+# else under .review/ is local scratch.
 .review/*
 !.review/accepted.md

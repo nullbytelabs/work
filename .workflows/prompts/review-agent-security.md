@@ -13,17 +13,9 @@ The security invariants to hold this code against:
 - guest-runner staging must resist a hostile checkout (symlink pre-planting,
   path escape).
 
-Protocol — follow in order:
-
-1. Check whether `.review/diff.patch` exists in your workspace.
-2. If it EXISTS, this review is about a pending change. Read the patch.
-   - If no hunk touches your scope, output `[]` and stop.
-   - Otherwise review the changed code deeply: read the full files around each
-     hunk, trace callers and callees, and report problems the change
-     introduces or worsens (plus pre-existing bugs the change directly
-     exposes).
-3. If it does NOT exist, review your scope broadly against the invariants
-   above.
+Review your scope in the workspace: open the source files under `src/agent/`,
+`src/egress/`, and `src/config/`, read them, trace callers and callees, and
+hold the code against the invariants above. Read the actual code; don't guess.
 
 What counts: real bugs with a concrete failure scenario (for security: the
 path by which a key or secret reaches the guest, or egress exceeds its
