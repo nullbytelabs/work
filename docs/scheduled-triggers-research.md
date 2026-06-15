@@ -128,10 +128,38 @@ The most important finding for durability. Verified against `absurd-sdk@0.4.0`
 There is **no** native cron, recurring/periodic task, or `runAt`-at-spawn-time.
 `SpawnOptions` (`index.d.ts:22-29`) has only `maxAttempts`, `retryStrategy`,
 `headers`, `queue`, `cancellation`, `idempotencyKey` — **you cannot tell
-`spawn()` to fire at a future time.** The `pg_cron` references in
-`src/runtime/absurd/schema.sql` (e.g. `:2857`) are strictly for queue
-partition maintenance/cleanup — *not* for triggering user runs — and PGLite has
-no `pg_cron` anyway. VALIDATED.
+`spawn()` to fire at a future time.** VALIDATED.
+
+### 4a. No, there's no Postgres-extension scheduler we can borrow
+
+The natural follow-up — *does Absurd lean on a Postgres extension (`pg_cron`,
+`pgmq`, …) that gives stronger scheduling durability?* — is no, on two counts.
+
+- **`pg_cron` is used, but only for queue housekeeping.** `absurd.enable_cron`
+  (`schema.sql:2857`) is the sole extension-based scheduler, and it registers
+  exactly three jobs, all maintenance of the partitioned queue tables
+  (`schema.sql:2940-2994`): `absurd.ensure_partitions` (`'5 * * * *'`),
+  `absurd.cleanup_all_queues` (`'17 * * * *'`), and `absurd.schedule_detach_jobs`
+  (`'29 * * * *'`). **None enqueue or trigger a task run.** The only extension
+  Absurd actually *requires* is `uuid-ossp` (`schema.sql:33`). VALIDATED.
+- **It's guarded out under our DB anyway.** Every `pg_cron` call is wrapped in
+  `if to_regclass('cron.job') is not null` or raises
+  `'pg_cron is not available'` (e.g. `schema.sql:359, 2613, 2692, 2911`) —
+  *because* this engine runs on **PGLite** (in-process WASM Postgres), which
+  cannot load `pg_cron` at all. On the default deployment `enable_cron` is never
+  callable. VALIDATED.
+- **Even on real Postgres it wouldn't help.** `cron.schedule(name, expr, cmd)`
+  fires a **SQL string** server-side. To schedule a *workflow run* through it
+  you'd have to `INSERT` directly into Absurd's internal run/queue tables,
+  bypassing the SDK's `spawn()` + idempotency machinery and coupling our feature
+  to Absurd's private schema. A dead end. PROPOSED (rejected).
+
+So the durable-timing guarantee available to us is **only** `sleepUntil`
+journaled to PGLite (next subsection). The one thing `pg_cron` would add over it
+— autonomous wake-up with **no running worker** — is exactly the gap below, and
+PGLite can't provide it regardless. That is *why* §6 pins the scheduler to the
+always-polling `--web` engine: there is no extension shortcut around the
+"a worker must be alive" constraint.
 
 **How `sleepUntil` is durable** (`index.js:150-161`): it checkpoints the wake
 time (survives crash/replay — on resume it re-reads the *stored* `wakeAt`),
