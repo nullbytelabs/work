@@ -408,10 +408,14 @@ Sources: dagu [docs](https://docs.dagu.cloud/features/scheduling) · Temporal [s
 - **If** a single-instance guard is ever wanted, a dagu-style filesystem lock is
   the fitting shape (we have no concurrent DB to lock against, unlike
   Airflow/Windmill) — but it's an optional guardrail, not a requirement (§8).
-- **`systemctl list-timers` is the model for a status command** — a `work schedules`
-  subcommand listing each scheduled workflow with NEXT (`next_fire_at`) / LAST
-  (`last_fired_at`) read from the `work.schedules` table, plus the `--web` history
-  UI and the existing `work runs`/`work logs` for execution detail.
+- **`systemctl list-timers` is the model for the status *content*** (NEXT / LAST per
+  schedule) — but **not for a CLI command**. Scheduling exists only inside a running
+  `serve` host, and that host owns the workspace's `work.schedules` exclusively
+  (single-process, §8), so a separate `work schedules` process reading the DB would
+  be the double-open hazard, not a feature. The status surface is therefore a
+  **`GET /api/schedules` endpoint + a console panel** (NEXT/LAST), read *through* the
+  host like `/api/runs` already is — never a DB-opening CLI. Execution detail stays
+  in the console run history (and `work runs`/`work logs` when serve is down).
 
 ---
 
@@ -560,9 +564,12 @@ never for execution. Sources:
    `RunRepository`; `ensureSchema()` at the store-init site.
 8. **Trigger label** — `"schedule"` into `RunTrigger` (`run-manager.ts:33`,
    `runs.ts:22`) and the `--web` client UI.
-9. **Status surface (§9)** — a `work schedules` subcommand (NEXT/LAST per the
-   `systemctl list-timers` model) reading `work.schedules`; scheduled runs show
-   in `work runs`/`work logs` and the `--web` history for free once tagged.
+9. **Status surface (§9)** — a `GET /api/schedules` endpoint + a `serve` console
+   panel (NEXT/LAST per schedule, `systemctl list-timers` content), read through the
+   running host. **No CLI command** — scheduling is a serve-mode concept and the
+   host owns the DB exclusively (a separate reader is the double-open hazard, §8).
+   Scheduled runs already show in the console history (and `work runs`/`work logs`
+   when serve is down) for free once tagged.
 10. **Scaffolding (optional)** — a `create workflow --schedule "<cron>"` flag that
     injects an `on: schedule` block via `injectAfterName`
     (`scaffold/templates.ts:154`), parallel to `webhookTriggerBlock`.
