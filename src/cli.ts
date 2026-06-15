@@ -260,17 +260,21 @@ function resolveWeb(s: FlagState, common: CommonArgs): CliArgs {
   return { web: true, ...(s.port !== undefined ? { port: s.port } : {}), ...common };
 }
 
-// `graph <file|name>` — emit the DAG instead of running. By-name when
-// `--workspace` is given (like `run`), else treat the target as a file path.
+// `graph <file|name>` — emit the DAG instead of running. The target is treated
+// as a file path when it *looks like one* (a `.yaml`/`.yml` extension or a path
+// separator), else resolved by `name:` within the workspace's `.workflows/`
+// (defaulting to cwd, like `run`). `--workspace` scopes the by-name lookup but
+// is not required — `work graph ci` resolves from cwd just like `work run ci`.
 function resolveGraph(s: FlagState, common: CommonArgs): CliArgs {
   const target = s.positionals[1];
   if (!target) fail("graph requires a workflow file or name, e.g. `work graph ci.yaml`");
   if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
   if (s.resume) fail("--resume only applies to `run`, not `graph`");
   const fmt = s.format ?? "mermaid";
-  return s.workspace
-    ? { graph: true, format: fmt, steps: s.steps, name: target, ...common }
-    : { graph: true, format: fmt, steps: s.steps, file: target, ...common };
+  const looksLikeFile = /\.ya?ml$/i.test(target) || target.includes("/");
+  return looksLikeFile
+    ? { graph: true, format: fmt, steps: s.steps, file: target, ...common }
+    : { graph: true, format: fmt, steps: s.steps, name: target, ...common };
 }
 
 // `run <name>` — by-name workflow.
