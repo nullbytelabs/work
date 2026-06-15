@@ -175,15 +175,32 @@ execution flows through `spawn_task`"* (the SDK's own `spawn()` bottoms out here
 So the pass-1 claim that a SQL-side spawn means "bypassing the SDK into private
 tables" was **wrong**: this is a supported entry point built for exactly this.
 
-**Why it's still out for `work`:** PGLite (in-process WASM Postgres) cannot load
-`pg_cron`. Every `pg_cron` call in the schema is guarded by
-`if to_regclass('cron.job') is not null` (e.g. `:359, 2613, 2911`) precisely
-because the extension is absent; the `absurd.enable_cron` machinery that *does*
-ship (`:2857`) only wires three queue-maintenance jobs (`ensure_partitions` /
-`cleanup_all_queues` / `schedule_detach_jobs`, `:2940-2994`), never user runs.
-So of Absurd's two patterns, **only the application-side scheduler (§4 pattern 1)
-is available to us** — and §5 is the single design that follows from it.
-VALIDATED.
+**Why it's still out for `work` (primary sources, not just our schema guards):**
+`pg_cron` cannot run on PGLite, for three independent reasons —
+
+1. **It needs a background worker loaded via `shared_preload_libraries`, and
+   PGLite has neither.** pg_cron's README: `shared_preload_libraries = 'pg_cron'`
+   is *"required to load pg_cron background worker on start-up"*, and it "creates
+   a background worker" ([citusdata/pg_cron](https://github.com/citusdata/pg_cron)).
+   PGLite runs Postgres in **single-user mode** because Emscripten/WASM *"cannot
+   fork new processes"*, an architecture that *"eliminates the need for background
+   workers or the postmaster process"*
+   ([Electric — PGlite v0.4](https://electric.ax/blog/2026/03/25/announcing-pglite-v04)).
+2. **`shared_preload_libraries` is ignored in single-user mode** regardless — a
+   PostgreSQL property, not a PGLite quirk
+   ([pgsql-hackers](https://www.postgresql.org/message-id/4C69D57A.80101%40ak.jp.nec.com)) —
+   so pg_cron's one supported load path is a no-op in the mode PGLite uses.
+3. **PGLite only loads extensions statically compiled to WASM**, and pg_cron is
+   **not** in its catalog (pgvector, pg_uuidv7, PostGIS, AGE, … — no pg_cron); you
+   cannot `CREATE EXTENSION` an arbitrary native `.so`
+   ([PGlite extensions](https://pglite.dev/extensions/)).
+
+Our vendored schema already encodes this defensively: every `pg_cron` call is
+guarded by `if to_regclass('cron.job') is not null` (e.g. `:359, 2613, 2911`),
+and the `absurd.enable_cron` that ships (`:2857`) only wires three
+queue-maintenance jobs (`:2940-2994`), never user runs. So of Absurd's two
+patterns, **only the application-side scheduler (§4 pattern 1) is available to
+us** — and §5 is the single design that follows from it. VALIDATED / VERIFIED.
 
 ---
 
