@@ -146,6 +146,27 @@ export async function listWorkflows(workspace: string): Promise<{ name: string; 
 }
 
 /**
+ * Every `(workflow, cron)` pair declared via `on: { schedule: [{ cron }] }` across
+ * the workspace's `.workflows/*.yaml`. One entry per cron expression (a workflow
+ * with several crons yields several pairs). Powers the `serve` scheduler's tick —
+ * re-read each tick so edits land without a restart. A file that fails to parse is
+ * skipped (the scheduler can't fire what it can't compile).
+ */
+export async function listScheduledWorkflows(workspace: string): Promise<{ workflow: string; cron: string }[]> {
+  const out: { workflow: string; cron: string }[] = [];
+  for (const { name, file } of await listWorkflows(workspace)) {
+    let spec;
+    try {
+      spec = parseWorkflow(await readFile(file, "utf-8"));
+    } catch {
+      continue;
+    }
+    for (const entry of spec.on?.schedule ?? []) out.push({ workflow: name, cron: entry.cron });
+  }
+  return out;
+}
+
+/**
  * Resolve a reusable-workflow `uses:` reference to its parsed callee. Injected
  * into the compiler (`CompileOptions.resolveWorkflow`) so the compiler itself
  * stays filesystem-pure; the resolution — and all I/O — lives here.

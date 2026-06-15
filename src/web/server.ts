@@ -21,7 +21,7 @@ import { readFile, mkdir } from "node:fs/promises";
 import { parseWorkflow, WorkflowParseError } from "../spec/index.ts";
 import { compile, WorkflowCompileError, type CompileOptions } from "../compiler/index.ts";
 import { emitGraph } from "../graph/index.ts";
-import { listWorkflows, findWorkflowByName, resolveWorkflowRef, type WorkflowLayout } from "../project.ts";
+import { listWorkflows, listScheduledWorkflows, findWorkflowByName, resolveWorkflowRef, type WorkflowLayout } from "../project.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "../runtime/index.ts";
 import type { TargetFactory } from "../targets/index.ts";
 import { expandEnv, type PiWorkflowsConfig, type WebhookConfig } from "../config/index.ts";
@@ -29,7 +29,9 @@ import { UserFacingError } from "../errors.ts";
 import { RunRepository } from "../persistence/runs.ts";
 import { RunEventRepository } from "../persistence/run-events.ts";
 import { DeliveryRepository, type DeliveryResult, type DeliveryRow } from "../persistence/deliveries.ts";
+import { ScheduleRepository } from "../persistence/schedules.ts";
 import { RunManager, type DispatchOptions, type DispatchResult } from "./run-manager.ts";
+import { tick, seedBaselines, type SchedulerDeps, type ScheduleStore } from "../scheduler/index.ts";
 import { renderShell } from "./client.ts";
 
 /**
@@ -47,6 +49,8 @@ function reusableOpts(layout: WorkflowLayout): Pick<CompileOptions, "resolveWork
 const DEFAULT_PORT = 4280;
 const PORT_RETRIES = 8;
 const HEARTBEAT_MS = 15_000;
+/** How often the scheduler evaluates due cron slots (§5). Sub-slot latency is fine — cron has no guaranteed timing. */
+const SCHEDULER_TICK_MS = 30_000;
 /** Hard cap on a webhook body before buffering — abort larger payloads (webhook §4 L2). */
 const MAX_HOOK_BODY_BYTES = 256 * 1024;
 /** Hard cap on a JSON API request body (`POST /api/runs`), same rationale. */
@@ -119,6 +123,15 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     await deliveryRepo.ensureSchema();
   }
 
+  // Scheduler baseline store (`work.schedules`), durable like run history. Gates the
+  // `on: schedule` ticker below — without a persistent engine there's nothing to
+  // schedule against.
+  let scheduleStore: ScheduleRepository | undefined;
+  if (ownsEngine && opts.dataDir) {
+    scheduleStore = new ScheduleRepository(engine);
+    await scheduleStore.ensureSchema();
+  }
+
   const runManager = new RunManager({
     engine,
     config: opts.config,
@@ -138,6 +151,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   // otherwise block `server.close()` indefinitely.
   const sseResponses = new Set<ServerResponse>();
   const heartbeats = new Set<ReturnType<typeof setInterval>>();
+  let schedulerTimer: ReturnType<typeof setInterval> | undefined;
 
   // Webhook delivery dedupe (webhook §4 "Mandatory" / §7 step 2). Senders retry
   // on 5xx and re-send a still-firing group, and runs are non-idempotent, so an
@@ -221,6 +235,17 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   // process left non-terminal (re-dispatched with their original run id, so the
   // durable journal picks them back up) instead of leaving zombie `running` rows.
   if (runStore) await reconcileInterruptedRuns({ runStore, workspace: opts.workspace, dispatch: (o) => runManager.dispatch(o) });
+
+  // Time-based triggers: the scheduler ticks inside this one host (no separate
+  // daemon), dispatching due slots down the same path a webhook fire takes.
+  if (scheduleStore) {
+    schedulerTimer = await startScheduler({
+      store: scheduleStore,
+      workspace: opts.workspace,
+      resolveLayout,
+      dispatch: (o) => runManager.dispatch(o),
+    });
+  }
 
   // The valid Host header values for the bound port (loopback only).
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -783,6 +808,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       // End every live SSE response first, else `server.close()` hangs on the
       // long-lived sockets.
       for (const beat of heartbeats) clearInterval(beat);
+      if (schedulerTimer) clearInterval(schedulerTimer); // stop enqueuing before the drain below
       for (const res of sseResponses) res.end();
       sseResponses.clear();
       await new Promise<void>((resolve, reject) => {
@@ -840,6 +866,50 @@ async function reconcileInterruptedRuns(deps: {
     // Same runId → the durable journal resumes rather than starting a fresh run.
     deps.dispatch({ name: r.name, layout: layoutFields(layout), plan, runId: r.id, trigger: r.trigger });
   }
+}
+
+/**
+ * Boot the `on: schedule` ticker for `serve`: re-seed baselines (dropping any slots
+ * missed while down — no catch-up by default), then tick every SCHEDULER_TICK_MS,
+ * dispatching each due slot via `dispatch` with a slot-derived idempotency runId.
+ * Returns the interval handle so `close()` can stop it before the drain.
+ */
+async function startScheduler(deps: {
+  store: ScheduleStore;
+  workspace: string;
+  resolveLayout: (name: string) => Promise<WorkflowLayout | undefined>;
+  dispatch: (opts: DispatchOptions) => DispatchResult;
+}): Promise<ReturnType<typeof setInterval>> {
+  const schedulerDeps: SchedulerDeps = {
+    listScheduled: () => listScheduledWorkflows(deps.workspace),
+    store: deps.store,
+    clock: { now: () => Date.now() },
+    dispatch: async ({ workflow, runId }) => {
+      const layout = await deps.resolveLayout(workflow);
+      if (!layout) return; // workflow vanished since discovery
+      let plan;
+      try {
+        const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
+        plan = compile(spec, reusableOpts(layout));
+      } catch {
+        return; // a schedule whose workflow no longer parses/compiles is skipped this slot
+      }
+      deps.dispatch({ name: workflow, layout: layoutFields(layout), plan, runId, trigger: "schedule" });
+    },
+  };
+  await seedBaselines(schedulerDeps);
+  let ticking = false;
+  const timer = setInterval(() => {
+    if (ticking) return; // never overlap ticks
+    ticking = true;
+    void tick(schedulerDeps)
+      .catch(() => {})
+      .finally(() => {
+        ticking = false;
+      });
+  }, SCHEDULER_TICK_MS);
+  timer.unref?.();
+  return timer;
 }
 
 /** The dispatch `layout` fields, dropping undefined ones (one spot, four call sites). */
