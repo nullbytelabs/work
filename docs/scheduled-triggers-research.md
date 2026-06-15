@@ -19,15 +19,17 @@
 > Written pre-implementation (2026-06-15). **Pass 1** consolidated four parallel
 > investigations (trigger/spec surface, Absurd timing primitives, web-server
 > lifecycle/persistence, cron syntax + library prior-art). **Pass 2 (§§7-10)**
-> added the *hosting* question — how to run the scheduler without diverging the
-> web/CLI/daemon cores — from another fan-out: the shared-core extraction seam,
-> the PGLite single-process constraint, a prior-art survey of how comparable
-> schedulers run (cron, anacron, systemd timers, dagu, n8n, GitHub Actions
-> runner, Airflow, Windmill, Temporal, pm2), and a catch-up/overlap policy.
+> added the *hosting* question, and **Pass 3** validated every load-bearing claim
+> against the code (Appendices A-F) and **reframed §7**: the scheduler is a module
+> inside one long-lived host, **`work serve`** (an API server + console client) —
+> there is no separate daemon and no `RunService` subsystem extraction. The
+> prior-art survey (cron, anacron, systemd timers, dagu, n8n, GitHub Actions
+> runner, Airflow, Windmill, Temporal, pm2) and catch-up/overlap analysis stand.
 >
 > Tags used throughout: **VALIDATED** (grounded in our code, file:line) /
 > **VERIFIED** (cited external standard/vendor doc) / **PROPOSED** (a design
-> choice) / **NEEDS-BUILDING** (net-new engine work).
+> choice) / **NEEDS-BUILDING** (net-new engine work). Appendices A-F record the
+> Pass-3 validation (local experiments + source checks).
 >
 > **Status: research only — nothing built yet.** This note maps the seams and
 > recommends a design; no spec, scheduler, or dependency has landed.
@@ -182,10 +184,11 @@ tables" was **wrong**: this is a supported entry point built for exactly this.
    PGLite has neither.** pg_cron's README: `shared_preload_libraries = 'pg_cron'`
    is *"required to load pg_cron background worker on start-up"*, and it "creates
    a background worker" ([citusdata/pg_cron](https://github.com/citusdata/pg_cron)).
-   PGLite runs Postgres in **single-user mode** because Emscripten/WASM *"cannot
-   fork new processes"*, an architecture that *"eliminates the need for background
-   workers or the postmaster process"*
-   ([Electric — PGlite v0.4](https://electric.ax/blog/2026/03/25/announcing-pglite-v04)).
+   PGLite *"runs in Postgres single-user mode, which means a single connection"*
+   ([Electric — PGlite v0.4](https://electric.ax/blog/2026/03/25/announcing-pglite-v04)),
+   an architecture it adopts because Emscripten-compiled programs cannot fork new
+   processes — so there is no postmaster to spawn background workers
+   ([PGlite — How it works](https://pglite.dev/docs/about#how-it-works)).
 2. **`shared_preload_libraries` is ignored in single-user mode** regardless — a
    PostgreSQL property, not a PGLite quirk
    ([pgsql-hackers](https://www.postgresql.org/message-id/4C69D57A.80101%40ak.jp.nec.com)) —
@@ -208,11 +211,11 @@ us** — and §5 is the single design that follows from it. VALIDATED / VERIFIED
 
 There is exactly one option consistent with Absurd's built-in functionality
 (§4 pattern 1; pattern 2 is ruled out by §4a): a recurring **driver inside our
-long-lived host** (the `RunService` of §7) that, each tick, computes which cron
+long-lived host** (the `serve` process of §7) that, each tick, computes which cron
 slots are due and dispatches them with a **slot-derived idempotency key**.
 
 ```
-// in RunService, every ~30s while the host runs:
+// in the scheduler module serve boots, every ~30s while the host runs:
 for (const { workflow, expr } of scheduledWorkflows()) {
   const slot = dueSlot(expr);                   // null if nothing due this tick
   if (!slot) continue;
@@ -231,9 +234,9 @@ adapted to `work`'s `dispatch → startRun → runtime.run` path instead of a ra
 `runId` already exists, so the run-record bookkeeping doesn't double-count (the
 underlying Absurd spawn is idempotent regardless). NEEDS-BUILDING.
 
-- **Driver placement:** the ticker lives in `RunService` (§7), so **both**
-  `--web` and `work daemon` get it; it runs only while the host is up — which is
-  exactly when a worker is polling. There is **no** `sleepUntil`, no
+- **Driver placement:** the ticker is the standalone scheduler module `serve`
+  boots (§7); it runs only while the host is up — which is exactly when a worker
+  is polling. There is **no** `sleepUntil`, no
   self-rescheduling task chain: the slot key, not a journaled wait, is what makes
   it safe. (Pass 1's `sleepUntil` ticker was a non-documented construction and is
   dropped.)
@@ -247,18 +250,18 @@ underlying Absurd spawn is idempotent regardless). NEEDS-BUILDING.
 
 ---
 
-## 6. Where the scheduler lives — web-server lifecycle & persistence
+## 6. Where the scheduler lives — `serve` lifecycle & persistence
 
-The web server is the **only** long-lived process; there is no daemon
-subcommand (CLI surface confirmed: `run`, `graph`, `resume`, `rerun`, `logs`,
-`doctor`, `create`, `init`, `--web`; only `--web` stays alive — `cli.ts:331-360`,
-`:590-593`). Today that makes `startWebServer` the only place a scheduler *could*
-live. But welding the scheduler to the HTTP server would force anyone who wants
-scheduled runs to also run a web console — so **§7 argues for extracting a shared
-host (`RunService`) that both `--web` and a new headless daemon wrap**, and the
-scheduler hangs off that host, not off the HTTP layer. The lifecycle seams below
-are where that host plugs into the *current* server; §7 generalizes them.
-VALIDATED.
+There is exactly one long-lived process, and it's the HTTP host: today's
+`work --web`, which §7 reframes as **`work serve`** (an API server + console
+client). The other commands are one-shot (`run`, `graph`, `resume`, `rerun`,
+`logs`, `doctor`, `create`, `init` — CLI surface confirmed at `cli.ts:331-360`,
+`:590-593`; only `--web` stays alive, and there is **no** `daemon`/`serve`/
+`schedule` subcommand today — net-new). The scheduler **boots inside `serve`** as
+a standalone module wired to `runManager.dispatch` — it does not get its own
+process and does not need the HTTP layer to function (it's the §5 internal
+ticker). The lifecycle seams below are exactly where the server already boots its
+other long-lived machinery, so the scheduler slots in beside them. VALIDATED.
 
 **Lifecycle seams** (`src/web/server.ts`):
 
@@ -294,119 +297,80 @@ VALIDATED / PROPOSED.
 
 ---
 
-## 7. Hosting without divergence — the `RunService` extraction
+## 7. One host: `work serve` (API server + console client)
 
-The guiding constraint from the maintainer: **web, CLI, and any daemon must share
-one core run path; they must not drift into parallel implementations.** The good
-news is the core is *already* shared — the work is to stop the web server from
-being the sole owner of the lifecycle around it.
+> **Reframed (2026-06-15).** An earlier draft proposed extracting a transport-free
+> `RunService` so that `--web` and a *separate headless daemon* could share a core
+> without diverging. Fact-finding (Appendix F) collapsed that: there is no second
+> long-lived host. The single-process constraint (§8) means a long-lived host must
+> expose an API anyway to be inspectable, so the one honest model is **`work
+> serve`** — the existing web server, doing double duty as API + webhook receiver
+> + console + scheduler. With one host there is **nothing to diverge from**, so the
+> large `RunService` subsystem extraction is **retired**; what remains is a small
+> standalone scheduler module.
 
-**What is already shared core** (VALIDATED):
-- `startRun()` (`src/run.ts:82`) is genuinely the one place a compiled plan
-  becomes a result. Both the CLI (`cli.ts:698`) and the web `RunManager`
-  (`run-manager.ts:202`) call it with the same option shape. It owns work-root
-  lifecycle, `uses:` handler composition, egress composition, and
-  `AbsurdRuntime` construction — and **borrows** presentation entirely via
-  `opts.hooks` (`run.ts:170`) and the engine conditionally
-  (`ownsEngine = opts.engine === undefined`, `run.ts:119`).
-- The **hooks contract** (`RunHooks`, `src/runtime/types.ts:43-50`) is the
-  universal presentation seam. Four independent consumers already implement the
-  same `Presenter` interface over identical hooks: `NullPresenter`,
-  `BufferedPresenter`, `LayeredPresenter` (`src/tui/presenter.ts`), and
-  `WebPresenter` (`src/web/web-presenter.ts:49`, "a third Presenter alongside
-  the TUI's"). Presentation is already fully pluggable.
+The mental model is three layers, and the middle one is an *API*, not a UI:
 
-**What is web-only and must NOT be duplicated into a daemon** (VALIDATED): the
-`node:http` server + routing + `listen()` (`server.ts:210-288`), CSRF/Host
-loopback guards (`:226,:249-260`), SSE plumbing + heartbeats (`:401-432`), the
-webhook receiver (`:489-948`), and the `client.ts` UI.
+1. **Run core** — `startRun()` (`src/run.ts:82`) is the one place a compiled plan
+   becomes a result; the CLI (`cli.ts:698`) and the web `RunManager`
+   (`run-manager.ts:202`) already call it identically, borrowing presentation via
+   `opts.hooks` (`run.ts:170`) and the engine conditionally
+   (`ownsEngine`, `run.ts:119`). No network. The scheduler feeds this path like
+   any other trigger.
+2. **HTTP API** (`work serve`) — the inbound surface: run query/control + status
+   (`/api/*`, JSON + SSE) **and** the webhook receiver (`/hooks/*`). Two trust
+   zones on one loopback listener (Appendix F / §8): `/api/*` is loopback +
+   CSRF-gated; `/hooks/*` is exempt and authenticates cryptographically, reached
+   from outside via a tunnel. Both already exist.
+3. **Console** — `client.ts` is a static SPA served at `/`, a pure *client* of the
+   API (Appendix F). Optional (`--no-console` if ever wanted); not a separate mode.
 
-**The ambiguous middle — and the extraction seam** (PROPOSED): `RunManager`
-(`src/web/run-manager.ts:111`) is ~80% generic run orchestration a daemon also
-wants — the concurrency cap + FIFO queue + load-shedding, the `inFlight` set +
-`whenIdle()` graceful drain (`:243`, which exists precisely to avoid orphaning
-Absurd workers against an ended pool), and durable history at dispatch/terminal.
-Its only web coupling is the SSE subscriber fan-out (`RunRecord.subscribers:
-Set<ServerResponse>`, `broadcast`/`subscribe`, `:274-303`) and the hard-coded
-`new WebPresenter(...)` in `dispatch` (`:177`). Likewise `startWebServer`'s
-prologue (`server.ts:95-130`, `:223`, `:782-798`) is mostly generic: engine boot
-+ ownership flag, durable-store `ensureSchema`, `RunManager` construction,
-`reconcileInterruptedRuns` (`:815-843`, the crash-resume-on-startup logic a
-daemon absolutely needs and which is already dependency-injected), and the
-`whenIdle()` → `engine.close()` teardown.
+**What `serve` is, concretely:** today's `startWebServer` (`server.ts`) plus the
+§5 scheduler, renamed. Its prologue already does everything a long-lived host
+needs — engine boot + ownership, durable-store `ensureSchema`, `RunManager`
+construction, `reconcileInterruptedRuns` (`server.ts:815-843`, crash-resume on
+startup, already dependency-injected), and the `whenIdle()` → `engine.close()`
+drain. The `RunManager` (`run-manager.ts:111`) — concurrency cap + FIFO queue +
+load-shed, `inFlight` + `whenIdle()` drain, durable history — stays exactly as is;
+its SSE fan-out and `WebPresenter` are simply part of `serve`, not something to be
+abstracted away for a second consumer that no longer exists.
 
-So the recommended refactor is a transport-free **`RunService`** (a.k.a.
-`EngineHost`) in a new `src/service/` subsystem that owns
-`{ engine + durable stores + RunManager + scheduler }` and exposes
-`dispatch(...)` + `close()`:
-
-1. **Make `RunManager` presenter-pluggable** — replace the hard-coded
-   `new WebPresenter` (`run-manager.ts:177`) with an injected
-   `presenterFor(runId, emit) => Presenter` factory; move the SSE
-   subscriber/`broadcast`/`subscribe` methods (`:274-303`) into a web-side
-   `SseHub` that registers as the `emit` sink. `RunManager` becomes HTTP-free;
-   everything else stays.
-2. **Extract the prologue** (engine + stores + `RunManager` +
-   `reconcileInterruptedRuns` + the scheduler member) out of `server.ts` into
-   `RunService`.
-3. **`--web` becomes a thin adapter** that wraps a `RunService`, adds the HTTP
-   server + guards + `SseHub` + webhook receiver, and passes a `WebPresenter`
-   factory. **`work daemon`/`work schedule`** wraps the *same* `RunService` with
-   a `Buffered`/`Null`/`Jsonl` presenter factory and **no HTTP at all**.
-
-Net effect: the daemon and the web server share `RunService` (engine, stores,
-`RunManager`, reconcile, scheduler, drain/close) and the untouched `startRun`
-core. The scheduler is just a third trigger source feeding the *already-shared*
-`dispatch → startRun` path — exactly as the webhook receiver is today. The only
-thing the daemon drops is everything under `src/web/` that is HTTP/SSE/CSRF/UI.
-NEEDS-BUILDING.
+**The only new structuring** (NEEDS-BUILDING, small): the scheduler is a
+**standalone module** the `serve` prologue constructs and starts (per the §6
+lifecycle seams), taking `runManager.dispatch` injected as a function. That keeps
+it unit-testable without booting HTTP and tangles it into no route handler — the
+clean seam, without a new `src/service/` subsystem, a presenter-pluggable
+`RunManager`, or an `SseHub` split. The scheduler is just one more trigger source
+feeding the already-shared `dispatch → startRun` path, exactly as the webhook
+receiver is today.
 
 ---
 
-## 8. The PGLite constraint forces *one runner per workspace*
+## 8. One owner per workspace — the scheduler lives in the engine-owning process
 
-Why a multi-process split (a standalone scheduler daemon *alongside* `--web`) is
-off the table — and why that actually helps the anti-divergence goal.
+`work` is single-process per workspace: one host owns a workspace's
+`.workflows/db` engine at a time, and `--web` and the CLI (or two hosts) don't run
+against the same workspace concurrently. This is a **settled, accepted operating
+assumption** of the project — not a constraint to solve here.
 
-**PGLite is single-process-exclusive on its data directory**, not merely
-single-connection. The engine pins `pg.Pool({ max: 1 })` and
-`PGLiteSocketServer({ maxConnections: 1 })` on a **random, never-advertised
-loopback port chosen fresh per boot** (`engine.ts:69-81, 100-101`) — so the
-socket is *not* a reusable cross-process service. Worse, opening the same
-`.workflows/db/` from two processes raises **no error — silent last-writer-wins
-corruption** (`docs/pglite-wasm-postgres-database.md:104`, VERIFIED-LOCALLY; the
-sole-owner invariant is restated at `run.ts:63`, `server.ts:70,94`). There is
-**no lockfile or single-instance guard anywhere in `src/` today** — the codebase
-treats sole ownership as an unenforced invariant. VALIDATED.
+The only design consequence that matters for scheduling: the scheduler **lives
+inside that single engine-owning process** — `work serve` (§7) — alongside the
+RunManager and the other triggers, exactly where the server already puts them. This
+is the *combined single-process* model local schedulers ship for dev use (dagu
+`start-all`, Airflow `standalone`, Temporal `start-dev`, Windmill `MODE=standalone`);
+tools that split a standalone scheduler from their server can only do so because
+they sit on a concurrent database, which we don't. So the constraint is actually
+**clarifying**: there is one long-lived host (`serve`), and the scheduler is a
+module inside it — no second process, no parallel scheduler/server implementations
+to keep from diverging. A further consequence (§7): because a long-lived host must
+expose an API to be inspectable under single-process, `serve` *is* the API server —
+which is why there's no separate headless daemon.
 
-**Consequence:** `work --web` and a separate `work daemon` **cannot** run against
-the same workspace. The scheduler must live inside the *single* process that owns
-the engine. This is the sharpest divergence from the prior-art tools that split a
-standalone scheduler from their web server (Airflow, dagu, Temporal, Windmill) —
-**they can split only because they sit on a real concurrent database** and
-coordinate via row-level locks (`SELECT … FOR UPDATE [SKIP LOCKED]` in Airflow
-and Windmill). We have no such substrate. So our model is necessarily the
-*combined single process* those same tools also ship for local/dev use —
-dagu `start-all`, Airflow `standalone`, Temporal `start-dev`, Windmill
-`MODE=standalone` — which is exactly what `--web` already is (engine + RunManager
-+ triggers in one process). This is *good* for "don't diverge": the constraint
-**forces** the single shared `RunService` rather than permitting parallel
-scheduler/server implementations.
-
-**Two things this requires** (NEEDS-BUILDING):
-- A **single-instance lock per workspace**, acquired *before* `createAbsurdEngine`
-  (since PGLite itself won't error on double-open). The cleanest precedent is
-  dagu's directory lock: an `O_EXCL` lock dir / lockfile under `.workflows/db/`
-  holding `host-pid-token`, refreshed as a heartbeat, reclaimed after a stale
-  threshold (dagu uses 30s). This makes today's silent-corruption failure mode
-  *loud*, and it's needed for **both** `--web` and the daemon regardless of
-  scheduling. (A PGLite advisory lock can't serve here — it presupposes the very
-  connection we're trying to guard.)
-- **`--web` and `work daemon` are mutually exclusive per workspace**, and should
-  say so clearly (the lock turns the second launch into a clean error, not
-  corruption). A user who wants both the console *and* scheduling runs `--web`
-  (which hosts the scheduler too); a user who wants headless scheduling without
-  the HTTP surface runs `work daemon`.
+*Optional guardrail (not a prerequisite):* a dagu-style filesystem lock under
+`.workflows/db/` acquired before the engine opens would turn an accidental
+double-launch into a clean error instead of letting it through. It's a small,
+late, take-it-or-leave-it add — never a gate on the scheduler work, and orthogonal
+to it.
 
 ---
 
@@ -432,16 +396,18 @@ Sources: dagu [docs](https://docs.dagu.cloud/features/scheduling) · Temporal [s
 
 **Takeaways that shape `work`'s design:**
 - **Foreground + external supervisor is universal.** No modern tool self-daemonizes;
-  they run in the foreground and lean on systemd/launchd/Docker/pm2. → `work daemon`
-  should run in the foreground and document systemd/pm2/launchd for backgrounding —
-  not implement its own double-fork. `work`'s existing SIGINT/SIGTERM → `close()` →
-  `whenIdle()` drain (`cli.ts:355-359`, `server.ts:782-797`) already matches the
-  SIGTERM + ~30s-drain convention (n8n 30s, dagu 30s).
+  they run in the foreground and lean on systemd/launchd/Docker/pm2. → `work serve`
+  runs in the foreground and documents systemd/pm2/launchd for backgrounding — not
+  its own double-fork. `work`'s existing SIGINT/SIGTERM → `close()` → `whenIdle()`
+  drain (`cli.ts:355-359`, `server.ts:782-797`) already matches the SIGTERM +
+  ~30s-drain convention (n8n 30s, dagu 30s).
 - **A combined single-process mode is the local norm** (`start-all`/`standalone`/
-  `start-dev`). `--web` is already ours; a headless `work daemon` is the
-  no-HTTP variant — both over the one `RunService`.
-- **Single-instance via filesystem lock** (dagu) is the right fit since we have no
-  concurrent DB to lock against (unlike Airflow/Windmill).
+  `start-dev`). `work serve` is exactly that: engine + RunManager + scheduler +
+  webhook receiver + console in one foreground process. There is no separate
+  headless daemon (§7).
+- **If** a single-instance guard is ever wanted, a dagu-style filesystem lock is
+  the fitting shape (we have no concurrent DB to lock against, unlike
+  Airflow/Windmill) — but it's an optional guardrail, not a requirement (§8).
 - **`systemctl list-timers` is the model for a status command** — a `work schedules`
   subcommand listing each scheduled workflow with NEXT (`next_fire_at`) / LAST
   (`last_fired_at`) read from the `work.schedules` table, plus the `--web` history
@@ -571,22 +537,25 @@ never for execution. Sources:
    fields (§10), e.g. `{ cron, tz?, catchUp? }`.
 2. **Dependency** — add `croner` to `dependencies` (no build-script change;
    `packages:"external"` handles it).
-3. **`RunService` extraction (§7)** — new `src/service/`: lift engine + stores +
-   `RunManager` + `reconcileInterruptedRuns` out of `startWebServer`; make
-   `RunManager` presenter-pluggable (`run-manager.ts:177`) and move SSE fan-out
-   to a web-side `SseHub`. `startRun` untouched. This is the anti-divergence
-   spine — do it before the daemon so both hosts share one core.
+3. **Rename `--web` → `work serve`, scheduler as a module (§7)** — promote the
+   long-lived server to a `serve` subcommand (keep `--web` as an alias if wanted)
+   and have its prologue construct + start a **standalone scheduler module**
+   taking `runManager.dispatch` injected. No `src/service/` subsystem, no
+   `RunManager` presenter-refactor, no `SseHub` split — the full `RunService`
+   extraction is retired (one host, nothing to diverge from). `startRun`,
+   `RunManager`, and the HTTP layer are untouched.
 4. **Scheduler** — the §5 app-side ticker (slot-keyed idempotent `dispatch`),
-   owned by `RunService` (so both `--web` and the daemon get it); honors the
-   §10 catch-up/overlap policy.
-5. **Single-instance lock (§8)** — acquire a `.workflows/db/` lock (dagu-style
-   dir/`O_EXCL` lockfile + heartbeat + stale-reclaim) *before* `createAbsurdEngine`,
-   for **both** `--web` and the daemon; turns double-open from silent corruption
-   into a clean error.
-6. **`work daemon`/`work schedule` subcommand (§7-9)** — a headless host wrapping
-   `RunService` with a `Buffered`/`Jsonl` presenter, no HTTP; foreground, SIGTERM
-   drain via existing `whenIdle()`. Document systemd/pm2/launchd for backgrounding.
-   Mutually exclusive with `--web` per workspace.
+   the module from step 3; honors the §10 catch-up/overlap policy. Unit-testable
+   with a fake `dispatch`, no HTTP needed.
+5. **Single-instance lock (§8, optional / not a gate)** — a `.workflows/db/` lock
+   acquired before the engine opens would turn an accidental double-launch into a
+   clean error. Single-instance is already an accepted operating assumption, so
+   this is a take-it-or-leave-it guardrail, independent of and not blocking the
+   scheduler work.
+6. **`work serve` ergonomics (§7-9)** — foreground, SIGTERM drain via existing
+   `whenIdle()`; document systemd/pm2/launchd for backgrounding. Stays
+   loopback-bound (`server.ts:869`); webhooks reach it via a tunnel, not a
+   `--host` flag (Appendix F). Optional `--no-console` to skip serving the SPA.
 7. **Persistence** — `src/persistence/schedules.ts` (`work.schedules`) mirroring
    `RunRepository`; `ensureSchema()` at the store-init site.
 8. **Trigger label** — `"schedule"` into `RunTrigger` (`run-manager.ts:33`,
@@ -599,11 +568,285 @@ never for execution. Sources:
     (`scaffold/templates.ts:154`), parallel to `webhookTriggerBlock`.
 11. **e2e** — a `test/e2e/` scheduled-workflow example + parse/scheduler unit
     tests (cron validation, next-fire math, catch-up/overlap policy, idempotent
-    fire, single-instance lock).
-12. **Docs-site** — user-facing `on: schedule` + `work daemon` reference pages
+    fire).
+12. **Docs-site** — user-facing `on: schedule` + `work serve` reference pages
     (this doc is the maintainer record only).
 
 The downstream `dispatch → startRun → Runtime.run` path is unchanged; the work is
-the spec opt-in, the `RunService` extraction, the §5 app-side ticker, the
-single-instance lock, and persistence/UI labeling — all converging on **one
-shared host** so web/CLI/daemon never diverge.
+the spec opt-in, the `--web` → `work serve` rename with a scheduler module, the §5
+app-side ticker, and persistence/UI labeling — all inside **one host** (`serve`),
+so there are no parallel implementations to keep from diverging.
+
+---
+
+## Appendix A — §7 validation (local, 2026-06-15)
+
+Three parallel readers checked every file:line in §7 against the branch. **All
+line references are exact (no drift); every structural claim holds.** Material
+findings:
+
+> *Note (Pass 3):* this appendix validated the original `RunService`-extraction
+> framing. §7 was later reframed to the lighter `serve` model (Appendix F), which
+> **retires** the extraction. The underlying *facts* below are unchanged and still
+> load-bearing — they're now the reason the rename is cheap rather than the reason
+> an extraction is safe. Mentions of "the extraction seam"/"§7 step 1" read as the
+> historical motivation.
+
+- **`startRun` is genuinely the sole plan→result path** (CONFIRMED). Defined
+  `run.ts:82`; CLI call `cli.ts:698`; web `RunManager.launch` call
+  `run-manager.ts:202`. It owns work-root lifecycle (`run.ts:86-89`, cleanup
+  `:178`), `uses:` handler composition (`:100-113`), egress composition
+  (`:148-151`), `AbsurdRuntime` construction (`:145-163`), borrows presentation
+  via `opts.hooks` (`:170`), and conditionally owns the engine
+  (`ownsEngine = opts.engine === undefined`, `:119`).
+- **Nuance on "same option shape"** (PARTIALLY-VALID → sharpened): the two call
+  sites share the core fields (`plan`, `workspaceSource`, `workflowDir`, `config`,
+  `runId`, `datasources`, `hooks`) but diverge exactly on the **engine-ownership
+  seam** — CLI passes `dataDir`/`workdir` (owns + persists its own engine), web
+  passes `engine`/`makeTarget` (borrows the shared one). This *reinforces* the
+  §7 design: `RunService` is precisely the missing owner of that seam.
+- **Presenter/hooks seam is fully pluggable** (CONFIRMED). `RunHooks`
+  (`runtime/types.ts:43-50`) is a pure interface; the runtime imports no
+  presenter. `Presenter` interface at `tui/presenter.ts:20-25`; four impls —
+  `NullPresenter`/`BufferedPresenter`/`LayeredPresenter` (`tui/presenter.ts`) and
+  `WebPresenter` (`web/web-presenter.ts:49-116`). Dependency flow is strictly
+  one-way (presenters → runtime); the **only** presenter coupling in the run path
+  is the hard-coded `new WebPresenter(...)` at `run-manager.ts:177` — exactly the
+  seam §7 step 1 targets.
+- **`RunManager` web coupling is as narrow as claimed** (CONFIRMED). Class at
+  `run-manager.ts:111`. Generic core: concurrency cap + load-shed
+  (`:157-160`; defaults **maxConcurrent 4** `:108`, **maxQueued 100** `:109`),
+  FIFO queue (`:125`, drain `:262-268`), `inFlight` set (`:135`) + `whenIdle()`
+  drain (`:243-248`). A grep for `ServerResponse`/`http`/`res.` found **only two**
+  web couplings: `RunRecord.subscribers: Set<ServerResponse>` + `broadcast`/
+  `subscribe` (`:274-303`), and the `WebPresenter` instantiation (`:177`). Both
+  are the seams §7 step 1 already names — no hidden third coupling.
+- **`reconcileInterruptedRuns` is already dependency-injected** (CONFIRMED,
+  `server.ts:815-843`): it takes `{ runStore, workspace, dispatch }` and is wired
+  at `:223` with `dispatch: (o) => runManager.dispatch(o)`. It lifts into
+  `RunService` unchanged — and is the direct structural analog of the §5/§10
+  catch-up-on-boot logic.
+- **Supporting material for §5**: `dispatch(opts: DispatchOptions)` (`:154`)
+  **already accepts a caller-supplied `runId`** — `DispatchOptions.runId?` with
+  the comment *"Caller-supplied run id (tests pin it); minted when omitted,"*
+  consumed as `opts.runId ?? randomUUID()` (`:155`). The §5 slot-keyed-`runId`
+  dispatch needs **no signature change** to `dispatch`. `RunTrigger =
+  "dispatch" | "webhook"` confirmed at both `run-manager.ts:33` and
+  `persistence/runs.ts:22` (the §11 `"schedule"` addition is a two-line change).
+
+**Verdict:** §7 is sound as written. The extraction is real refactoring work, but
+every seam it relies on (shared `startRun`, pluggable hooks, narrow `RunManager`
+coupling, injected reconcile, caller-supplied `runId`) exists today as claimed.
+
+---
+
+## Appendix B — §5 validation (local, 2026-06-15)
+
+Two readers + **one live experiment** (booting the project's own in-memory Absurd
+engine — PGLite, no QEMU) checked the slot-keyed exactly-once mechanism. **The
+core dedup is empirically proven; the threading claims are exact; the one gap §5
+flags is real and correctly scoped.**
+
+- **Threading is exactly as claimed** (CONFIRMED). `RunContext.runId`
+  (`runtime/types.ts:76`, *"web layer mints this up front… defaults to a random
+  UUID… the CLI path"*) → extracted at `runtime/absurd/runtime.ts:194`
+  (`const runId = ctx.runId ?? randomUUID()`) → spawned at `runtime.ts:249`:
+  `app.spawn(orchTaskName, {}, { queue: QUEUE, idempotencyKey: runId })`. Exact
+  line, exact shape.
+- **Dedup proven empirically** (CONFIRMED — live run). Three spawns, two distinct
+  idempotency keys, against `createAbsurdEngine`:
+
+  ```
+  spawn A (key=slot0): { taskID: …038b, created: true  }
+  spawn B (key=slot0): { taskID: …038b, created: false }   ← identical taskID
+  spawn C (key=slot1): { taskID: …06c5, created: true  }
+  A.taskID === B.taskID → true ;  A.taskID === C.taskID → false
+  absurd.t_default: 2 rows total for 3 spawns (1 per distinct key)
+  ```
+
+  So overlapping ticks / crash-restart within one slot collapse to a single task,
+  exactly as §5 needs. Dedup happens **at `spawn` (the insert), not at
+  claim/execute** — no worker need run. Mechanism confirmed in source too:
+  `SpawnResult.created:boolean` (`absurd-sdk/dist/index.d.ts:82`); the per-queue
+  insert returns `false` + the **existing** taskID on conflict (`schema.sql:776`);
+  and `runtime.ts:250-251` already branches on `!spawned.created`.
+- **Watch-out surfaced by the experiment** (NEW): on a duplicate key the second
+  spawn's **payload is discarded** — the original task's params win. Harmless for
+  cron (the payload is just `scheduledFor`, derivable from the slot), but worth
+  stating so no one later relies on per-fire payload variation through the same
+  slot key.
+- **`SpawnOptions` has no scheduling field** (CONFIRMED): the full set is
+  `maxAttempts, retryStrategy, headers, queue, cancellation, idempotencyKey`
+  (`index.d.ts:22-29`) — no `runAt`/`scheduleAt`, no recurring API. `ctx.sleepUntil`
+  exists (`index.d.ts:247`) but is a `TaskContext` suspend primitive, unrelated to
+  spawn dedup — §5 correctly drops it.
+- **The `RunManager` short-circuit gap is real, and sharper than stated**
+  (CONFIRMED NEEDS-BUILDING, with nuance). The durable layer is *already*
+  idempotent on `runId`: `work.runs.run_id` is a PRIMARY KEY and
+  `RunRepository.insert` uses `on conflict (run_id) do nothing`
+  (`persistence/runs.ts:61,85`) — so **history will not double-count**. The gap is
+  purely **in-memory**: `dispatch` unconditionally does `this.runs.set(id, record)`
+  + `this.order.push(id)` (`run-manager.ts:172-173`) with no existing-id check, so
+  a re-dispatch of a live slot id duplicates the `order` entry and can fire a
+  second `launch()` that races the first on `record.status`/`ring`. Absurd's spawn
+  still collapses the *actual* run to one task — but the bookkeeping needs the
+  short-circuit §5 calls for. Net: the claim is accurate; the fix is a one-line
+  `if (this.runs.has(id)) return …` guard in `dispatch`, not a structural change.
+
+**Verdict:** §5's design rests on a mechanism that **works as described and is now
+demonstrated**, not just cited. The single NEEDS-BUILDING item (RunManager
+short-circuit) is confirmed real and is a small, well-localized guard.
+
+---
+
+## Appendix C — §8 validation (local, 2026-06-15)
+
+Single-instance is an accepted given (see §8); the only thing worth confirming is
+the *design consequence*. The socket server is genuinely process-local — its
+loopback port is `49152 + Math.floor(Math.random() * 16000)` chosen fresh per boot
+(`engine.ts:71`) and never exported/persisted — so a second process could never
+share the engine, which is *why* there is exactly one long-lived host (`work
+serve`, §7) with the scheduler as a module inside it. The optional guardrail lock
+is unbuilt and remains optional. No further litigation of the single-process model
+is needed.
+
+---
+
+## Appendix D — §3 validation (local, 2026-06-15)
+
+A reader + **a live parse run** (`parseWorkflow` over three real YAML strings)
+checked the spec-surface asymmetry. **Every claim is exact — including the
+predicted error string — and the two-path behavior reproduces precisely.**
+
+- **`OnSpec` has only `webhook?` / `workflow_call?`** (CONFIRMED, `types.ts:183-186`)
+  — no `schedule`; no `parseSchedule` exists anywhere in `src/` (grep-empty).
+- **The asymmetry reproduces exactly** (CONFIRMED — live `parseWorkflow`):
+  - **Bare `on: schedule` → throws.** `WorkflowParseError`, message
+    `on: unknown trigger "schedule" (supported triggers are "webhook",
+    "workflow_call")` — matches the doc's predicted text verbatim
+    (`parse.ts:226`).
+  - **Mapping `on: { schedule: [{ cron: '…' }] }` → parses, silently dropped.**
+    Result is `spec.on = {}`; the `schedule` key and `cron` value never appear
+    anywhere in the spec. No error.
+  - Baseline (no `on:`) control → `spec.on === undefined`, harness sane.
+- **The mechanism is deliberate** (CONFIRMED): `parseOn` (`parse.ts:219-239`)
+  handles the two forms differently by design — the string branch enumerates the
+  two known names and throws otherwise (`:226`); the mapping branch is explicitly
+  *"Be liberal: pass through unknown trigger keys untouched"* (`:233-238`), copying
+  only `webhook`/`workflow_call` and never inspecting other keys. So **both paths
+  need updating** as §3 says: add `schedule` to the string allow-list *and* the
+  mapping dispatch; the mapping form is the real target.
+- **The `on` doc comment is exactly as flagged** (CONFIRMED, `types.ts:192`):
+  *"Trigger declaration (`on:`). Validated but not acted on by the engine; the
+  webhook receiver reads it."* — §3 correctly notes this must change for
+  `schedule` (which *is* consumed by execution machinery).
+
+**Verdict:** §3 is precise to the error message. The "additive hook points" framing
+holds, with one sharpened point: the silent-drop is not an oversight to route
+around but an intentional liberal-passthrough that the `schedule` work must
+explicitly close for this one key (validating cron at parse time, per §3).
+
+---
+
+## Appendix E — §4/§4a validation (local + sources, 2026-06-15)
+
+A schema reader + **a live `CREATE EXTENSION pg_cron` probe** + an external
+citation fact-check verified the "Absurd has no scheduler; pg_cron is unavailable"
+argument. (The `SpawnOptions`/`created:false` half is covered in Appendix B.)
+**The thesis holds and the schema claims are exact; one external citation was
+mis-attributed and has been corrected in §4a.**
+
+- **`spawn_task` schema claims exact** (CONFIRMED). `absurd.spawn_task(p_queue_name,
+  p_task_name, p_params, p_options)` returning `(task_id, run_id, attempt, created)`
+  at `schema.sql:682`; header comment *"Task execution flows through `spawn_task`"*
+  at `:19`. So §4a's correction of pass 1 (a SQL-side spawn is a *supported* entry
+  point, not a private-table bypass) is right.
+- **pg_cron is used only for guarded maintenance** (CONFIRMED, *stronger* than
+  stated). Every `cron.` reference is behind a `to_regclass('cron.job')` check —
+  and there are **more guards than §4a cited** (`:359, 2613, 2634, 2642, 2692,
+  2911, 3039`). `enable_cron` (`:2857`) schedules exactly three jobs (`:2985-2995`)
+  — partition maintenance, queue cleanup, detach planning — and **zero user task
+  runs**. No unguarded `cron.` call exists.
+- **pg_cron genuinely cannot load on our PGLite** (CONFIRMED — live probe, v0.5.1):
+
+  ```
+  pg_cron in pg_available_extensions: []
+  CREATE EXTENSION pg_cron  →  ERROR: extension "pg_cron" is not available
+  to_regclass('cron.job')   →  null
+  available extensions      →  plpgsql
+  ```
+
+  So the guards are inert on our engine, exactly as claimed. **Precision finding**:
+  the *operative* blocker is §4a reason 3 (PGLite ships only WASM-compiled
+  extensions; pg_cron isn't one) — the extension is rejected as "not available"
+  *before* the background-worker / `shared_preload_libraries` concerns (reasons 1-2)
+  are ever reached. All three reasons are true, but they are not sequential gates:
+  reason 3 fires first. The three-reason structure is still sound as defense in
+  depth.
+- **External citations: 3 of 4 accurate, 1 corrected** (sources fetched).
+  Reason-1 (pg_cron README: *"creates a background worker"* + `shared_preload_libraries`
+  *"required to load pg_cron background worker on start-up"*) — accurate verbatim.
+  Reason-2's *PostgreSQL* property (`shared_preload_libraries` ignored under
+  `--single`: PostgresMain bypasses `process_shared_preload_libraries()`) — accurate
+  to the pgsql-hackers message, and the unresolved thread *strengthens* the point.
+  Reason-3 catalog (pglite.dev lists pgvector/pg_uuidv7/PostGIS/AGE, **not** pg_cron)
+  — accurate (42-extension catalog, pg_cron absent). **Defect found & fixed**: the
+  v0.4 blog was quoted as saying Emscripten/WASM *"cannot fork new processes"* and
+  *"eliminates the need for background workers or the postmaster process"* — those
+  phrases are **not** in that blog (it supports only *"single-user mode … a single
+  connection"*). The fork/no-postmaster explanation lives in PGlite's
+  *How it works* docs. §4a now cites the blog for single-connection and PGlite's
+  architecture docs for the fork rationale; the underlying fact was always true,
+  only mis-sourced.
+
+**Verdict:** §4's core — Absurd ships no scheduler, the only available pattern is
+app-side `spawn` + slot idempotency, and pg_cron is off the table on PGLite — is
+correct and now empirically demonstrated end to end. The lone issue was a quotation
+mis-attribution in §4a, corrected in place.
+
+---
+
+## Appendix F — the `serve` reframe (local, 2026-06-15)
+
+Three readers checked the existing web server to decide whether an API-first
+single-host model (`work serve`) is sound, and the findings **reframed §7** —
+retiring the `RunService` extraction. The shift is mostly a rename; the structure
+is already there.
+
+- **The server is already an API + static client** (CONFIRMED, agent A). Route
+  table at `server.ts:275-288`: `/api/*` returns JSON (`sendJson`), `/api/runs/:id/
+  events` is SSE, `/` serves one static `client.ts` SPA shell with a stateless CSRF
+  token — no server-side rendering, no sessions. The console is a pure HTTP client
+  of the API. Recasting "web layer" → "API server + console client" is a **rename,
+  not a refactor**.
+- **The two trust zones already exist** (CONFIRMED, agent B — the load-bearing
+  one). The loopback `Host`-header check and CSRF gate both test `!isHook`
+  (`server.ts:249-260`), so `/hooks/*` is **deliberately exempt** and authenticates
+  cryptographically instead — HMAC-SHA256 (`verifyHmacSha256`, `:941-948`,
+  `timingSafeEqual`) or bearer (`constantTimeEqual`), fail-closed, with an explicit
+  design comment at `:241-246`. So "webhooks reachable from outside while run
+  control + console stay loopback" is **built, not net-new**. (Note: only `/hooks/*`
+  should be externally reachable; do **not** widen `isHook` to `/api/*`.)
+- **Bind is loopback-only by design; webhooks arrive via a tunnel** (CONFIRMED,
+  agent C). `server.listen(port, "127.0.0.1", …)` is hard-coded (`server.ts:869`)
+  for DNS-rebinding protection; `--port` exists (`cli.ts:103-110`, default 4280),
+  `--host` does **not**. The webhook receiver expects a *public* `Host` from a
+  tunnel domain — i.e. external reach comes from a tunnel forwarding to loopback,
+  **not** from binding `0.0.0.0`. So `serve` keeps the loopback bind; there is no
+  `--host` to add. (Better for a minimal attack surface.)
+- **No `serve`/`daemon`/`schedule` scaffolding exists** (CONFIRMED, agent C) — net
+  new, but small: a subcommand wrapping the existing server + the scheduler module.
+
+**Consequence — why §7's extraction is retired:** the extraction's whole purpose
+was to keep `--web` and a *separate* headless daemon from diverging. But the
+single-process constraint (§8) means any long-lived host must expose an API to be
+inspectable (you can't run `work runs` against a workspace another process owns) —
+so the one honest model is a single API-serving host, `work serve`. With no second
+host, there is nothing to diverge from, and the `src/service/` subsystem +
+presenter-pluggable `RunManager` + `SseHub` split are over-engineering. What's left
+is a standalone scheduler module the `serve` prologue boots — a small seam, not a
+spine. The collapse *reduces* surface: one new long-lived verb, not two hosts.
+
+**Verdict:** the API-first `serve` model is sound and largely pre-built. The CLI
+becomes `work run` (one-shot) + `work serve` (long-lived: API + webhooks +
+scheduler + console). §§6-9, 14 updated to match.
