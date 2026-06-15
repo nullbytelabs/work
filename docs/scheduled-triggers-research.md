@@ -9,9 +9,12 @@
 > and [`web-ui-research.md`](web-ui-research.md): the scheduler is an *extension
 > of the same long-lived `--web` server* (RunManager, the `parse→compile→Runtime.run`
 > dispatch path, the `.workflows/db` PGLite history), not a new stack. It also
-> builds on [`absurd-durable-workflows.md`](absurd-durable-workflows.md) §10 and
-> [`durable-orchestrator.md`](durable-orchestrator.md) — durability rides Absurd's
-> `sleepUntil` primitive, not an external `pg_cron`.
+> builds on [`absurd-durable-workflows.md`](absurd-durable-workflows.md) §10,
+> [`durable-orchestrator.md`](durable-orchestrator.md), and Absurd's official
+> [cron pattern](https://earendil-works.github.io/absurd/patterns/cron/) — which
+> states plainly that **Absurd ships no built-in scheduler**, so the recurring
+> driver is application-side (its `pg_cron` → `absurd.spawn_task` alternative
+> needs an extension PGLite can't load — see §4a).
 >
 > Written pre-implementation (2026-06-15). **Pass 1** consolidated four parallel
 > investigations (trigger/spec surface, Absurd timing primitives, web-server
@@ -120,120 +123,110 @@ Note on the `on` doc comment (`types.ts:192`): update it — unlike `webhook`,
 
 ---
 
-## 4. Absurd can schedule its own wake-ups — via `sleepUntil`, nothing else
+## 4. Absurd has no built-in scheduler — the pattern is app-side `spawn` + idempotency keys
 
-The most important finding for durability. Verified against `absurd-sdk@0.4.0`
-(`dist/index.d.ts`/`index.js`) and our vendored schema.
+Absurd's own [cron pattern doc](https://earendil-works.github.io/absurd/patterns/cron/)
+is explicit: *"Absurd does not include a built-in scheduler, but scheduling is
+straightforward."* It documents **two** supported patterns — and that is the
+whole menu. (Verified against that doc and `absurd-sdk@0.4.0` `dist/`.)
 
-**Absurd has exactly one durable-timing primitive:**
+1. **Application-side scheduler + idempotency keys.** A small process evaluates
+   cron expressions and calls `app.spawn(taskName, payload, { idempotencyKey })`,
+   the key derived from `taskName | expr | UTC-minute-slot`:
 
-- `ctx.sleepUntil(stepName, wakeAt: Date)` (`index.d.ts:247`) and
-  `ctx.sleepFor(stepName, seconds)` (`index.d.ts:241`).
+   ```ts
+   function dedupKey(taskName, expr, nextAt) {
+     const slot = nextAt.toISOString().slice(0, 16);   // minute precision, UTC
+     return `cron:${sha256(`${taskName}|${expr}|${slot}`).slice(0, 24)}`;
+   }
+   await app.spawn(taskName, { scheduledFor }, { idempotencyKey: dedupKey(...) });
+   ```
 
-There is **no** native cron, recurring/periodic task, or `runAt`-at-spawn-time.
-`SpawnOptions` (`index.d.ts:22-29`) has only `maxAttempts`, `retryStrategy`,
-`headers`, `queue`, `cancellation`, `idempotencyKey` — **you cannot tell
-`spawn()` to fire at a future time.** VALIDATED.
+   The slot-keyed idempotency is the load-bearing trick: per the doc, *"duplicate
+   scheduler runs (deploy overlap, crash restart, multiple replicas) collapse into
+   a single Absurd task."* So the driver can be a naive ticker and still fire each
+   slot exactly once. This is the basis of §5.
 
-### 4a. No, there's no Postgres-extension scheduler we can borrow
+2. **DB-side `pg_cron` → `absurd.spawn_task`** — see §4a; unavailable to us.
 
-The natural follow-up — *does Absurd lean on a Postgres extension (`pg_cron`,
-`pgmq`, …) that gives stronger scheduling durability?* — is no, on two counts.
+`SpawnOptions` (`index.d.ts:22-29`) carries only `maxAttempts`, `retryStrategy`,
+`headers`, `queue`, `cancellation`, `idempotencyKey` — there is **no**
+`runAt`/`scheduleAt` and no recurring-task API. The recurring *driver* is yours
+to run; Absurd's contribution is the idempotent `spawn`. (Absurd does expose a
+durable `ctx.sleepUntil` wait primitive, `index.d.ts:247`, but it is **not** part
+of the cron pattern and plays no role in scheduling — so it is out of scope here.)
+VALIDATED / VERIFIED.
 
-- **`pg_cron` is used, but only for queue housekeeping.** `absurd.enable_cron`
-  (`schema.sql:2857`) is the sole extension-based scheduler, and it registers
-  exactly three jobs, all maintenance of the partitioned queue tables
-  (`schema.sql:2940-2994`): `absurd.ensure_partitions` (`'5 * * * *'`),
-  `absurd.cleanup_all_queues` (`'17 * * * *'`), and `absurd.schedule_detach_jobs`
-  (`'29 * * * *'`). **None enqueue or trigger a task run.** The only extension
-  Absurd actually *requires* is `uuid-ossp` (`schema.sql:33`). VALIDATED.
-- **It's guarded out under our DB anyway.** Every `pg_cron` call is wrapped in
-  `if to_regclass('cron.job') is not null` or raises
-  `'pg_cron is not available'` (e.g. `schema.sql:359, 2613, 2692, 2911`) —
-  *because* this engine runs on **PGLite** (in-process WASM Postgres), which
-  cannot load `pg_cron` at all. On the default deployment `enable_cron` is never
-  callable. VALIDATED.
-- **Even on real Postgres it wouldn't help.** `cron.schedule(name, expr, cmd)`
-  fires a **SQL string** server-side. To schedule a *workflow run* through it
-  you'd have to `INSERT` directly into Absurd's internal run/queue tables,
-  bypassing the SDK's `spawn()` + idempotency machinery and coupling our feature
-  to Absurd's private schema. A dead end. PROPOSED (rejected).
+### 4a. The `pg_cron` option is real — but PGLite can't load it
 
-So the durable-timing guarantee available to us is **only** `sleepUntil`
-journaled to PGLite (next subsection). The one thing `pg_cron` would add over it
-— autonomous wake-up with **no running worker** — is exactly the gap below, and
-PGLite can't provide it regardless. That is *why* §6 pins the scheduler to the
-always-polling `--web` engine: there is no extension shortcut around the
-"a worker must be alive" constraint.
+*(Corrected from pass 1, which dismissed `pg_cron` too quickly.)* Absurd's second
+documented pattern schedules `absurd.spawn_task` directly from `pg_cron`:
 
-**How `sleepUntil` is durable** (`index.js:150-161`): it checkpoints the wake
-time (survives crash/replay — on resume it re-reads the *stored* `wakeAt`),
-calls `absurd.schedule_run` which sets the run to `state='sleeping'`,
-`available_at = wakeAt` (`schema.sql:1059-1103`), then throws `SuspendTask` to
-unwind the handler. The worker claim query picks up runs
-`where state in ('pending','sleeping') and available_at <= now()`
-(`schema.sql:932-942`), so a sleeping run becomes claimable **automatically the
-moment its wake time passes** — re-running the handler from the top, where
-completed steps replay from cache and `sleepUntil` now returns immediately.
+```sql
+select cron.schedule('absurd-send-report-every-5m', '*/5 * * * *', $$
+  select absurd.spawn_task('default', 'send-report',
+    jsonb_build_object('scheduled_for', now()));
+$$);
+```
 
-**The one genuine limitation:** wake-up is driven solely by the **worker poll
-loop** (`index.js:665-694`; this repo polls at 0.05s, `runtime.ts:239-240`).
-There is no timer thread — *a sleep only fires while a worker is polling its
-queue.* So a scheduler must live where a worker is persistently alive: the
-**web server's shared engine**, not the per-run ephemeral runtime, which closes
-its workers when the run ends (`runtime.ts:261-262`). VALIDATED.
+`absurd.spawn_task` is a **first-class public SQL function** — it's in our
+vendored schema at `schema.sql:682`, and the header comment (`:19`) notes *"Task
+execution flows through `spawn_task`"* (the SDK's own `spawn()` bottoms out here).
+So the pass-1 claim that a SQL-side spawn means "bypassing the SDK into private
+tables" was **wrong**: this is a supported entry point built for exactly this.
+
+**Why it's still out for `work`:** PGLite (in-process WASM Postgres) cannot load
+`pg_cron`. Every `pg_cron` call in the schema is guarded by
+`if to_regclass('cron.job') is not null` (e.g. `:359, 2613, 2911`) precisely
+because the extension is absent; the `absurd.enable_cron` machinery that *does*
+ship (`:2857`) only wires three queue-maintenance jobs (`ensure_partitions` /
+`cleanup_all_queues` / `schedule_detach_jobs`, `:2940-2994`), never user runs.
+So of Absurd's two patterns, **only the application-side scheduler (§4 pattern 1)
+is available to us** — and §5 is the single design that follows from it.
+VALIDATED.
 
 ---
 
-## 5. Two viable designs
+## 5. The design — an app-side ticker driving `dispatch`, keyed by slot
 
-### Option A (recommended) — a self-rescheduling durable "ticker" task
-
-Model each schedule as a short durable task that computes the next fire, sleeps
-to it, fires the run, then tail-spawns the next tick:
+There is exactly one option consistent with Absurd's built-in functionality
+(§4 pattern 1; pattern 2 is ruled out by §4a): a recurring **driver inside our
+long-lived host** (the `RunService` of §7) that, each tick, computes which cron
+slots are due and dispatches them with a **slot-derived idempotency key**.
 
 ```
-registerTask("cron:<workflow>", async (params, ctx) => {
-  const nextAt = await ctx.step("compute-next",
-    () => nextCronTime(params.expr, params.fromISO));   // our cron math
-  await ctx.sleepUntil("wait", new Date(nextAt));        // durable suspend
-  await ctx.step("fire",
-    () => dispatchRun(workflow, { idempotencyKey: `cron:<wf>:${nextAt}` }));
-  await ctx.step("reschedule",
-    () => app.spawn("cron:<wf>", { expr, fromISO: nextAt },
-                    { idempotencyKey: `cron:<wf>:tick:${nextAt}` }));
-});
+// in RunService, every ~30s while the host runs:
+for (const { workflow, expr } of scheduledWorkflows()) {
+  const slot = dueSlot(expr);                   // null if nothing due this tick
+  if (!slot) continue;
+  const runId = `cron:${workflow}:${slot}`;     // = the idempotency key
+  runManager.dispatch({ name: workflow, plan, trigger: "schedule", runId });
+}
 ```
 
-- **Durable across restarts:** the wake time is journaled; a re-claim resumes the
-  suspended tick and fires on time (or immediately, if the time already passed
-  while down — `nextCronTime` decides catch-up vs. skip-missed).
-- **Exactly-once:** `idempotencyKey` keyed on the fire timestamp dedups both the
-  fire and the chaining across crashes/replays (`spawn` returns `created:false`
-  for a dup).
-- **Bounded journals:** tail-spawning a fresh tick per fire keeps each task's
-  journal small. A single `while(true){ sleepUntil; ... }` loop also works but
-  accumulates unbounded `sleepUntil#N` checkpoints in one run — avoid for an
-  indefinitely-recurring schedule.
-- **Queue placement:** the ticker lives on the `default` (or its own) queue with
-  a persistently-running worker at server boot — *not* the per-run
-  orchestrator/jobs queues that come and go.
+**Why a slot-keyed `runId` is exactly-once for free:** the orchestrator task is
+spawned with `idempotencyKey = runId` (`runtime.ts:249`). Setting
+`runId = cron:<wf>:<slot>` means two overlapping ticks, a restart within the same
+minute, or any duplicate dispatch all collapse to one run — `spawn` returns
+`created:false` for the dup. This is exactly Absurd's documented dedup trick (§4),
+adapted to `work`'s `dispatch → startRun → runtime.run` path instead of a raw
+`app.spawn`. `RunManager` should additionally short-circuit a dispatch whose
+`runId` already exists, so the run-record bookkeeping doesn't double-count (the
+underlying Absurd spawn is idempotent regardless). NEEDS-BUILDING.
 
-This is the only way to get Absurd to "schedule the next fire itself," and it
-needs no external services — it fits the long-lived web-server model exactly.
-NEEDS-BUILDING.
-
-### Option B — an external in-process ticker
-
-A `setInterval` in the web server that, on each tick, checks which schedules are
-due and calls `RunManager.dispatch`. Simpler to write and reuses the existing
-trigger machinery, but **the schedule itself is not durable** — a window missed
-while the process is down is just gone, with no journaled record of intended
-fires. Acceptable only if "best-effort while the server is up" is the bar.
-
-**Recommendation:** Option A for durability, but note both share the same
-*discovery* and *dispatch* seams below — Option B is a strict subset, so an
-incremental path could ship B first and journal it into A.
+- **Driver placement:** the ticker lives in `RunService` (§7), so **both**
+  `--web` and `work daemon` get it; it runs only while the host is up — which is
+  exactly when a worker is polling. There is **no** `sleepUntil`, no
+  self-rescheduling task chain: the slot key, not a journaled wait, is what makes
+  it safe. (Pass 1's `sleepUntil` ticker was a non-documented construction and is
+  dropped.)
+- **Cron math:** "is a slot due this tick?" is computed from the expression with
+  the parser of §12. Persist `last_fired_at` / `next_fire_at` in `work.schedules`
+  (§6) for the catch-up policy (§10) and the status surface (§9).
+- **Not self-durable across downtime** — like cron and like Absurd's own pattern,
+  a slot that elapses while the host is down is simply not dispatched. Catch-up is
+  the explicit, opt-in policy of §10 (on startup, check `last_fired_at` and fire a
+  single coalesced make-up within the window), *not* an Absurd primitive.
 
 ---
 
@@ -277,9 +270,10 @@ same shared engine, same idempotent `ensureSchema()` call site
 string → read via `Number(...)`). Suggested columns
 `(workflow text, cron text, last_fired_at bigint, next_fire_at bigint, enabled bool)`.
 On boot, `last_fired_at`/`next_fire_at` decide whether a fire was missed during
-downtime. With Option A, this table is largely a *projection* for the UI — the
-durable truth is the sleeping Absurd task — but it's still wanted for operator
-visibility. VALIDATED / PROPOSED.
+downtime. Under the §5 design this table **is** the schedule's source of truth
+(there is no sleeping Absurd task holding state): the ticker reads it to compute
+due slots and the catch-up window, and writes `last_fired_at` on each dispatch.
+VALIDATED / PROPOSED.
 
 ---
 
@@ -461,7 +455,7 @@ schedule.** Rationale:
   use case — a *local* tool on a laptop/dev box that is **not** running 24/7, so
   "I closed the laptop over the weekend and my Monday-morning report never ran" is
   the expected complaint. Temporal's `catchupWindow` is the cleanest model and
-  maps directly onto our Absurd ticker: persist `last_fired_at`; on wake, if the
+  maps directly onto the §5 ticker: persist `last_fired_at`; on startup, if the
   most recent missed fire is within the window, fire **once** (coalesce, don't
   replay every interval); otherwise skip to the next future occurrence. A bounded
   window + coalesce-to-one is the safe middle between "lose it silently" and
@@ -475,9 +469,9 @@ the next fire is due. Default to **skip** (Temporal's and dagu's default:
 `SCHEDULE_OVERLAP_POLICY_SKIP` / `OverlapPolicy: skip`) via a per-workflow
 in-flight guard, with the `RunManager` concurrency cap + queue (`run-manager.ts:157-160`)
 as the backstop. Leave richer policies (buffer-one, allow-all) as future work;
-skip is the right safe default for VM-backed runs. The Absurd ticker's
-idempotency key already prevents *duplicate* fires of the same tick; overlap is
-the orthogonal "previous run still going" case.
+skip is the right safe default for VM-backed runs. The §5 slot-keyed `runId`
+already prevents *duplicate* fires of the same slot; overlap is the orthogonal
+"previous run still going" case.
 
 ---
 
@@ -513,8 +507,10 @@ from `node_modules` in a published package — bundle size is irrelevant;
 **Recommend `croner`** (VERIFIED): zero dependencies, first-class ESM + TS,
 MIT, actively maintained (v10.0.1, Feb 2026). Crucially it exposes pure
 `nextRun(from)` / `nextRuns(n)` / `msToNext()` that work **without** starting its
-internal scheduler — exactly the "compute next fire, drive our own durable timer"
-model Option A wants. Built-in IANA timezone support covers a future `tz:`.
+internal scheduler — exactly the "compute the due slot, drive our own ticker"
+shape §5 needs. Built-in IANA timezone support covers a future `tz:`. (Absurd's
+own cron example uses `cron-parser`; either works — croner just avoids the Luxon
+dependency `cron-parser` pulls in.)
 
 | Library | Role | Deps | Note |
 |---|---|---|---|
@@ -539,7 +535,7 @@ never for execution. Sources:
 - **Catch-up policy after downtime & overlap policy** — see §10 (the full
   cross-tool analysis and recommendation): default **skip**, opt-in bounded
   catch-up window (coalesce-to-one), overlap default **skip**. `last_fired_at`
-  detects the gap; this is what `nextCronTime` (§5) encodes.
+  (the `work.schedules` source of truth, §5/§6) detects the gap.
 - **Timezone / DST.** UTC default (matches GHA). If `tz:` is added: a wall-clock
   time in the DST "spring-forward" gap may not exist (skip) and in "fall-back"
   may occur twice (dedupe) — croner does the math, but we pick the semantics.
@@ -563,8 +559,8 @@ never for execution. Sources:
    `RunManager` presenter-pluggable (`run-manager.ts:177`) and move SSE fan-out
    to a web-side `SseHub`. `startRun` untouched. This is the anti-divergence
    spine — do it before the daemon so both hosts share one core.
-4. **Scheduler** — the §5 Option-A ticker task, owned by `RunService` (so both
-   `--web` and the daemon get it), on a persistently-worked queue; honors the
+4. **Scheduler** — the §5 app-side ticker (slot-keyed idempotent `dispatch`),
+   owned by `RunService` (so both `--web` and the daemon get it); honors the
    §10 catch-up/overlap policy.
 5. **Single-instance lock (§8)** — acquire a `.workflows/db/` lock (dagu-style
    dir/`O_EXCL` lockfile + heartbeat + stale-reclaim) *before* `createAbsurdEngine`,
@@ -591,6 +587,6 @@ never for execution. Sources:
     (this doc is the maintainer record only).
 
 The downstream `dispatch → startRun → Runtime.run` path is unchanged; the work is
-the spec opt-in, the `RunService` extraction, the durable ticker, the
+the spec opt-in, the `RunService` extraction, the §5 app-side ticker, the
 single-instance lock, and persistence/UI labeling — all converging on **one
 shared host** so web/CLI/daemon never diverge.
