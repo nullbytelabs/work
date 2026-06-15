@@ -341,8 +341,11 @@ work graph <workflow.yaml|name> [--format <fmt>] [--steps]
 ```
 
 Compiles the workflow and emits its job DAG **instead of running it** — useful for
-review and for embedding in docs. As with running, pass `--workspace` to resolve a
-target by name.
+review and for embedding in docs. The target is a **file path** when it looks like
+one (a `.yaml`/`.yml` extension or a `/`), otherwise it's resolved **by name** —
+the `.workflows/*.yaml` in the workspace whose `name:` matches, exactly like
+[`work run`](#work-run). So `work graph ci` works from a project root with no extra
+flags; `--workspace` sets the project root (default: current directory).
 
 | Option | Effect |
 |---|---|
@@ -350,7 +353,8 @@ target by name.
 | `--steps` | Expand each job into its ordered steps. |
 
 ```bash
-work graph report.yaml --format ascii --steps
+work graph ci                                 # by name, from the current project
+work graph report.yaml --format ascii --steps # by file path
 work --workspace my-project graph report --format mermaid
 ```
 
