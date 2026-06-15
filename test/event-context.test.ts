@@ -192,6 +192,64 @@ jobs:
   });
 });
 
+describe("parseOn — on: schedule trigger forms", () => {
+  const wrap = (on: string) => `
+name: w
+on:
+${on}
+jobs:
+  a:
+    steps:
+      - run: "true"
+`;
+
+  it("accepts a single-entry schedule list", () => {
+    const spec = parseWorkflow(wrap("  schedule:\n    - cron: '0 0 * * *'"));
+    assert.deepEqual(spec.on, { schedule: [{ cron: "0 0 * * *" }] });
+  });
+
+  it("accepts multiple cron entries in order", () => {
+    const spec = parseWorkflow(wrap("  schedule:\n    - cron: '30 5 * * 1-5'\n    - cron: '0 0 * * *'"));
+    assert.deepEqual(spec.on, { schedule: [{ cron: "30 5 * * 1-5" }, { cron: "0 0 * * *" }] });
+  });
+
+  it("coexists with other triggers", () => {
+    const spec = parseWorkflow(wrap("  webhook: true\n  schedule:\n    - cron: '0 0 * * *'"));
+    assert.deepEqual(spec.on, { webhook: true, schedule: [{ cron: "0 0 * * *" }] });
+  });
+
+  it("rejects the bare string `on: schedule` with a form hint", () => {
+    assert.throws(
+      () => parseWorkflow("name: w\non: schedule\njobs:\n  a:\n    steps:\n      - run: \"true\"\n"),
+      /list of cron entries/,
+    );
+  });
+
+  it("rejects a non-list schedule", () => {
+    assert.throws(() => parseWorkflow(wrap("  schedule: '0 0 * * *'")), WorkflowParseError);
+  });
+
+  it("rejects an empty schedule list", () => {
+    assert.throws(() => parseWorkflow(wrap("  schedule: []")), WorkflowParseError);
+  });
+
+  it("rejects an entry without a cron field", () => {
+    assert.throws(() => parseWorkflow(wrap("  schedule:\n    - tz: UTC")), WorkflowParseError);
+  });
+
+  it("rejects a non-string / empty cron", () => {
+    assert.throws(() => parseWorkflow(wrap("  schedule:\n    - cron: 5")), WorkflowParseError);
+    assert.throws(() => parseWorkflow(wrap("  schedule:\n    - cron: ''")), WorkflowParseError);
+  });
+
+  it("rejects an invalid cron expression at parse time", () => {
+    assert.throws(
+      () => parseWorkflow(wrap("  schedule:\n    - cron: 'not a cron'")),
+      /invalid cron expression/,
+    );
+  });
+});
+
 describe("compile(spec, { event }) — bakes event into the plan", () => {
   it("resolves event.* in run / env / with / outputs at compile time", () => {
     const spec = parseWorkflow(`

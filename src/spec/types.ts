@@ -172,17 +172,26 @@ export interface WorkflowCallSpec {
   outputs?: Record<string, string>;
 }
 
+/** One cron-scheduled trigger. Mirrors GitHub Actions' `schedule: [{ cron }]` list form. */
+export interface ScheduleTrigger {
+  /** A cron expression (POSIX 5-field `minute hour day-of-month month day-of-week`), validated at parse time. */
+  cron: string;
+}
+
 /**
  * The typed `on:` trigger block. `webhook` gates remote triggering; `workflow_call`
- * gates reusable-workflow callability. `true` is the opt-in with no options; a
- * mapping carries each trigger's details.
+ * gates reusable-workflow callability; `schedule` declares cron triggers. `true` is
+ * the opt-in with no options; a mapping carries each trigger's details.
  *
  * NOTE: `webhook` is **not load-bearing for execution** (the receiver reads it).
  * `workflow_call`, by contrast, IS read by the compiler (opt-in assert + outputs).
+ * `schedule` carries cron expressions, validated here at parse time.
  */
 export interface OnSpec {
   webhook?: WebhookTrigger | boolean;
   workflow_call?: WorkflowCallSpec | boolean;
+  /** Zero or more cron expressions for time-based triggering (`on: { schedule: [{ cron }] }`). */
+  schedule?: ScheduleTrigger[];
 }
 
 /** A whole workflow file. */

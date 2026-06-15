@@ -5,8 +5,9 @@
  * (e.g. `jobs.build.steps[0]`) so authoring mistakes are easy to locate. The
  * parser does NOT execute anything — it only produces a validated spec object.
  */
+import { Cron } from "croner";
 import { parse as parseYaml } from "yaml";
-import type { EnvMap, InputSpec, JobSpec, MachineSpec, MatrixSpec, MatrixValue, OnSpec, StepSpec, StrategySpec, WebhookTrigger, WorkflowCallSpec, WorkflowSpec } from "./types.ts";
+import type { EnvMap, InputSpec, JobSpec, MachineSpec, MatrixSpec, MatrixValue, OnSpec, ScheduleTrigger, StepSpec, StrategySpec, WebhookTrigger, WorkflowCallSpec, WorkflowSpec } from "./types.ts";
 
 /** Thrown when a workflow file is structurally invalid. */
 export class WorkflowParseError extends Error {
@@ -223,7 +224,11 @@ function parseOn(raw: unknown, path: string): OnSpec | undefined {
   if (typeof raw === "string") {
     if (raw === "webhook") return { webhook: true };
     if (raw === "workflow_call") return { workflow_call: true };
-    throw new WorkflowParseError(`unknown trigger "${raw}" (supported triggers are "webhook", "workflow_call")`, path);
+    // `schedule` carries cron entries, so it has no bare form — point at the mapping.
+    if (raw === "schedule") {
+      throw new WorkflowParseError("schedule must be a list of cron entries (e.g. `schedule:` then `- cron: '0 0 * * *'`), not a bare `on: schedule`", path);
+    }
+    throw new WorkflowParseError(`unknown trigger "${raw}" (supported triggers are "webhook", "workflow_call", "schedule")`, path);
   }
 
   if (!isPlainObject(raw)) {
@@ -235,6 +240,7 @@ function parseOn(raw: unknown, path: string): OnSpec | undefined {
   const on: OnSpec = {};
   if (raw.webhook !== undefined) on.webhook = parseWebhook(raw.webhook, `${path}.webhook`);
   if (raw.workflow_call !== undefined) on.workflow_call = parseWorkflowCall(raw.workflow_call, `${path}.workflow_call`);
+  if (raw.schedule !== undefined) on.schedule = parseSchedule(raw.schedule, `${path}.schedule`);
   return on;
 }
 
@@ -286,6 +292,36 @@ function parseWorkflowCall(wc: unknown, wp: string): WorkflowCallSpec | boolean 
     spec.outputs = outputs;
   }
   return spec;
+}
+
+/**
+ * Parse the `schedule` trigger: a non-empty list of `{ cron }` entries, mirroring
+ * GitHub Actions' `schedule: [{ cron: '...' }]`. Each cron expression is validated
+ * at parse time (constructed via croner, which throws on a bad pattern) so a typo
+ * fails fast in `parse`/`graph` rather than silently at fire time.
+ */
+function parseSchedule(raw: unknown, sp: string): ScheduleTrigger[] {
+  if (!Array.isArray(raw)) {
+    throw new WorkflowParseError("schedule must be a list of cron entries, e.g. `- cron: '0 0 * * *'`", sp);
+  }
+  if (raw.length === 0) {
+    throw new WorkflowParseError("schedule must list at least one cron entry", sp);
+  }
+  return raw.map((entry, i) => {
+    const ep = `${sp}[${i}]`;
+    if (!isPlainObject(entry)) {
+      throw new WorkflowParseError("each schedule entry must be a mapping with a `cron` field", ep);
+    }
+    if (typeof entry.cron !== "string" || entry.cron.trim() === "") {
+      throw new WorkflowParseError("cron must be a non-empty string", `${ep}.cron`);
+    }
+    try {
+      new Cron(entry.cron);
+    } catch (e) {
+      throw new WorkflowParseError(`invalid cron expression "${entry.cron}": ${e instanceof Error ? e.message : String(e)}`, `${ep}.cron`);
+    }
+    return { cron: entry.cron };
+  });
 }
 
 function parseStep(raw: unknown, path: string): StepSpec {
