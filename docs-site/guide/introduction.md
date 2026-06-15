@@ -85,7 +85,6 @@ Everything in this guide is built and runs end to end:
 No control plane, no external services, no account — a single CLI on your machine.
 
 ::: tip Where to go next
-New here? Start with [Requirements](./requirements), then [Installation](./installation)
-and the [Quickstart](./quickstart). Ready to write a real workflow? Jump to
-[Writing a workflow](./writing-workflows).
+New here? Start with [Installation](./installation) and the [Quickstart](./quickstart).
+Ready to write a real workflow? Jump to [Writing a workflow](./writing-workflows).
 :::

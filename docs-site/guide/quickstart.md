@@ -1,8 +1,8 @@
 # Quickstart
 
 This page takes you from an empty directory to a workflow running inside a
-micro-VM. It assumes you've met the [Requirements](./requirements) and
-[installed](./installation) `work`.
+micro-VM. It assumes you've [installed](./installation) `work` — run `work doctor`
+if you want to confirm your machine is ready first.
 
 ## Scaffold or hand-write
 

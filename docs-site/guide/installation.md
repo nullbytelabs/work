@@ -3,11 +3,6 @@
 work ships as the npm package [`@nullbytelabs/work`](https://www.npmjs.com/package/@nullbytelabs/work).
 There's no clone and no build step.
 
-::: warning Before you start
-You still need **Node ≥ 23.6** and **QEMU** on your machine — see
-[Requirements](./requirements). Installing the package doesn't install those.
-:::
-
 ## With npx (no install)
 
 Run it once without installing anything; npm fetches it on first use:
