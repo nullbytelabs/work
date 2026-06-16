@@ -1,11 +1,10 @@
 # Composite actions
 
 A **composite action** is an [action](./actions) whose body is a list of `steps:` —
-each a `run:` command, a `uses: work/agent`, or a `uses:` of another action. It's
-the step-level sibling of a [reusable workflow](./reusable-workflows): a named,
-reusable bundle of steps with a typed interface. It's also the canonical way to
-**package an agent** — wrap [`work/agent`](./agent-steps) with file-backed prompts
-and a declared output.
+each a `run:` command, a `uses: work/agent`, or a `uses:` of another action. Where a
+JavaScript action is custom code, a composite action is a **bundle of steps** with the
+same typed interface — and the canonical way to **package an agent**: wrap
+[`work/agent`](./agent-steps) with a file-backed prompt and a declared output.
 
 ## Shape
 
@@ -61,12 +60,12 @@ workflow, the composite action, and a starter model config).
 
 ## How it runs
 
-The whole action runs as the caller's **single** durable step, in the job's
-micro-VM. A composite step's `with:` is resolved at **run time**, so an inner step
-can take a previous step's output as an input — the same step-to-step data flow
-GitHub composite actions support. Inner `run:` steps capture `$WORK_OUTPUT`; inner
-`uses:` steps dispatch to their handler (`work/agent`, a nested action). Like every
-`uses:` step, the job gets mediated egress.
+The whole action runs as the caller's **single** durable step. A composite step's
+`with:` is resolved at **run time**, so an inner step can take a previous step's output
+as an input — the same step-to-step data flow GitHub composite actions support. Inner
+`run:` steps capture `$WORK_OUTPUT`; inner `uses:` steps dispatch to their handler
+(`work/agent`, a nested action). It executes in the job's micro-VM with mediated egress,
+[like any action](./actions#how-a-js-action-runs).
 
 ::: tip Runnable example
 [`test/e2e/composite-action`](https://github.com/nullbytelabs/work/tree/main/test/e2e/composite-action)

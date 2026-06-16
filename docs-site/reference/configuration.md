@@ -166,11 +166,41 @@ in, a matching hook exists, and the request authenticates. Deliveries are de-dup
 the console shows never stores the payload or the secret. See the
 [serve host guide](../guide/web-ui#webhook-triggers) for the end-to-end flow.
 
+## `observability`
+
+Opt-in [OpenTelemetry](../guide/observability) traces + metrics for your runs, pushed
+over OTLP to any collector (a local one, or a hosted backend). Absent or `enabled: false`
+⇒ off, and nothing about OTel is even loaded.
+
+```json
+{
+  "observability": {
+    "enabled": true,
+    "otlpEndpoint": "http://localhost:4318",
+    "headers": { "Authorization": "Bearer $OTEL_EXPORTER_TOKEN" },
+    "metricExportIntervalMs": 15000
+  }
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `enabled` | boolean | Turn it on. Defaults off — but the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var also enables it. |
+| `otlpEndpoint` | string | OTLP/HTTP base, e.g. `http://localhost:4318`. The exporters append `/v1/traces` and `/v1/metrics`. Defaults to `http://localhost:4318`. |
+| `headers` | object | Headers added to every OTLP export — typically auth for a hosted collector. Values support `$VAR` / `${VAR}` (so the token stays in the environment). Takes precedence over `OTEL_EXPORTER_OTLP_HEADERS`. |
+| `metricExportIntervalMs` | number | How often metrics are pushed. Default `15000`. |
+| `traces` / `metrics` | `{ enabled?: boolean }` | Toggle either signal independently. Both on by default. |
+
+The standard `OTEL_*` environment variables (`OTEL_EXPORTER_OTLP_ENDPOINT`,
+`OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME`, …) are honored too, so you can run
+fully config-free; explicit config wins where both are set. See the
+[Observability guide](../guide/observability) for what lands and how to view it.
+
 ## Secrets and env expansion
 
-`apiKey`, datasource `token`, and webhook `secret` values support `$VAR` and
-`${VAR}` expansion against the host environment, so the file itself need not hold
-any secret:
+`apiKey`, datasource `token`, webhook `secret`, and `observability` header values
+support `$VAR` and `${VAR}` expansion against the host environment, so the file itself
+need not hold any secret:
 
 ```json
 { "apiKey": "$FIREWORKS_API_KEY" }
