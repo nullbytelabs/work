@@ -31,7 +31,7 @@ import { RunEventRepository } from "../persistence/run-events.ts";
 import { DeliveryRepository, type DeliveryResult, type DeliveryRow } from "../persistence/deliveries.ts";
 import { ScheduleRepository } from "../persistence/schedules.ts";
 import { RunManager, type DispatchOptions, type DispatchResult } from "./run-manager.ts";
-import { tick, seedBaselines, type SchedulerDeps, type ScheduleStore } from "../scheduler/index.ts";
+import { tick, seedBaselines, nextFire, type SchedulerDeps, type ScheduleStore } from "../scheduler/index.ts";
 import { renderShell } from "./client.ts";
 
 /**
@@ -308,6 +308,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     { method: "GET", pattern: /^\/api\/webhooks\/([^/]+)\/deliveries$/, handler: getDeliveries },
     { method: "POST", pattern: /^\/api\/webhooks\/([^/]+)\/test$/, handler: (req, res, p) => handleWebhookTest(p[0]!, req, res) },
     { method: "GET", pattern: /^\/api\/runs$/, handler: getRuns },
+    { method: "GET", pattern: /^\/api\/schedules$/, handler: getSchedules },
     { method: "GET", pattern: /^\/api\/runs\/([^/]+)\/events$/, handler: getEvents },
     { method: "POST", pattern: /^\/api\/runs\/([^/]+)\/rerun$/, handler: postRerun },
   ];
@@ -420,6 +421,26 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   // GET /api/runs → history (newest-first).
   async function getRuns(_req: IncomingMessage, res: ServerResponse): Promise<void> {
     sendJson(res, 200, await runManager.list());
+  }
+
+  // GET /api/schedules → the `on: schedule` triggers this host is driving, each
+  // with its persisted baseline (`lastFired`) and the next slot it will fire
+  // (`nextFire`). This is the status surface for time-based triggers — read
+  // through the running host, never a separate process opening the DB. When the
+  // scheduler isn't active (no persistent `dataDir`), `active` is false and
+  // `lastFired` is null, but the declared schedules still list (so the UI can
+  // say "these would run, but this host isn't persisting/scheduling").
+  async function getSchedules(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const active = scheduleStore !== undefined;
+    const now = Date.now();
+    const items = await listScheduledWorkflows(opts.workspace);
+    const out = await Promise.all(
+      items.map(async ({ workflow, cron }) => {
+        const lastFired = scheduleStore ? await scheduleStore.lastFired(workflow, cron) : null;
+        return { workflow, cron, lastFired, nextFire: nextFire(cron, lastFired ?? now) };
+      }),
+    );
+    sendJson(res, 200, { active, schedules: out });
   }
 
   // GET /api/runs/:id/events → SSE stream (live tail, else replay a past run).
