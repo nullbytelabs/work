@@ -31,6 +31,7 @@ import { RunEventRepository } from "../persistence/run-events.ts";
 import { DeliveryRepository, type DeliveryResult, type DeliveryRow } from "../persistence/deliveries.ts";
 import { ScheduleRepository } from "../persistence/schedules.ts";
 import { RunManager, type DispatchOptions, type DispatchResult } from "./run-manager.ts";
+import { startTelemetry } from "../observability/index.ts";
 import { tick, seedBaselines, nextFire, type SchedulerDeps, type ScheduleStore } from "../scheduler/index.ts";
 import { renderShell } from "./client.ts";
 
@@ -92,6 +93,32 @@ export interface WebServerHandle {
 }
 
 /** Boot the server. Resolves once it's listening; rejects if no port is free. */
+/** Build the durable stores when the server owns a persistent engine; all undefined
+ *  otherwise (the in-memory / injected-engine path). One `persist` branch instead of
+ *  four scattered through `startWebServer`. */
+async function initStores(
+  engine: AbsurdEngine,
+  persist: boolean,
+): Promise<{
+  runStore?: RunRepository;
+  eventStore?: RunEventRepository;
+  deliveryRepo?: DeliveryRepository;
+  scheduleStore?: ScheduleRepository;
+}> {
+  if (!persist) return {};
+  const runStore = new RunRepository(engine);
+  await runStore.ensureSchema();
+  // Per-run log persistence rides the same engine, so a restarted server can replay a
+  // finished run's SSE stream, not just list it.
+  const eventStore = new RunEventRepository(engine);
+  await eventStore.ensureSchema();
+  const deliveryRepo = new DeliveryRepository(engine);
+  await deliveryRepo.ensureSchema();
+  const scheduleStore = new ScheduleRepository(engine);
+  await scheduleStore.ensureSchema();
+  return { runStore, eventStore, deliveryRepo, scheduleStore };
+}
+
 export async function startWebServer(opts: StartWebServerOptions): Promise<WebServerHandle> {
   // Own the engine only when we booted it — an injected (shared/test) engine is
   // the caller's to close. A `dataDir` is honored only when we boot it (the server
@@ -100,41 +127,21 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   if (ownsEngine && opts.dataDir) await mkdir(opts.dataDir, { recursive: true });
   const engine = opts.engine ?? (await createAbsurdEngine(ownsEngine && opts.dataDir ? { dataDir: opts.dataDir } : {}));
 
-  // Durable run history when (and only when) we own a persistent engine; otherwise
-  // history is the in-memory, session-scoped registry.
-  let runStore: RunRepository | undefined;
-  let eventStore: RunEventRepository | undefined;
-  if (ownsEngine && opts.dataDir) {
-    runStore = new RunRepository(engine);
-    await runStore.ensureSchema();
-    // Per-run log persistence (Phase 2) rides the same durable engine, so a
-    // restarted server can replay a finished run's SSE stream, not just list it.
-    eventStore = new RunEventRepository(engine);
-    await eventStore.ensureSchema();
-  }
+  // The durable stores (run history + per-run event/SSE log + webhook delivery audit +
+  // schedule baseline) exist only when we own a persistent engine; otherwise history is
+  // the in-memory, session-scoped registry and deliveries ride the in-memory ring below.
+  const { runStore, eventStore, deliveryRepo, scheduleStore } = await initStores(engine, ownsEngine && opts.dataDir !== undefined);
 
-  // Webhook delivery audit log. Durable when we own a persistent engine (so the
-  // UI's "Recent deliveries" survives a restart); always also mirrored to a
-  // bounded in-memory ring below, so deliveries are visible even without a
-  // `dataDir` (the injected-engine / no-persistence path).
-  let deliveryRepo: DeliveryRepository | undefined;
-  if (ownsEngine && opts.dataDir) {
-    deliveryRepo = new DeliveryRepository(engine);
-    await deliveryRepo.ensureSchema();
-  }
-
-  // Scheduler baseline store (`work.schedules`), durable like run history. Gates the
-  // `on: schedule` ticker below — without a persistent engine there's nothing to
-  // schedule against.
-  let scheduleStore: ScheduleRepository | undefined;
-  if (ownsEngine && opts.dataDir) {
-    scheduleStore = new ScheduleRepository(engine);
-    await scheduleStore.ensureSchema();
-  }
+  // Telemetry is a PROCESS concern: start the OTel SDK once here (not per run) and
+  // inject the shared handle into every run, so a long-lived server registers the SDK a
+  // single time. Each run still builds its own emitter (isolated span state). Shut down
+  // in `close()`. Off unless `observability` is enabled.
+  const telemetry = await startTelemetry(opts.config?.observability, process.env["npm_package_version"] ?? "dev");
 
   const runManager = new RunManager({
     engine,
     config: opts.config,
+    ...(telemetry ? { telemetry } : {}),
     ...(opts.makeTarget ? { makeTarget: opts.makeTarget } : {}),
     ...(opts.maxConcurrentRuns !== undefined ? { maxConcurrentRuns: opts.maxConcurrentRuns } : {}),
     ...(opts.maxQueuedRuns !== undefined ? { maxQueuedRuns: opts.maxQueuedRuns } : {}),
@@ -474,6 +481,9 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     // and ends the stream. On a miss it touches nothing, so we can still send a
     // clean JSON 404 (preserving the legacy no-store behavior).
     if (await runManager.replayHistorical(runId, res)) return;
+    // No frames (a run recorded before event persistence): fall back to its stored
+    // terminal status so the detail view shows the outcome, not a perpetual "Running".
+    if (await runManager.replayStoredStatus(runId, res)) return;
     sendJson(res, 404, { error: `no run "${runId}"` });
   }
 
@@ -840,6 +850,9 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       // polling. Closing the engine under a live worker orphans it against an
       // ended pool ("Cannot use a pool after calling end on the pool").
       await runManager.whenIdle();
+      // Flush + stop the shared SDK once, after all runs have settled (so their spans
+      // are recorded) and before the engine goes.
+      if (telemetry) await telemetry.shutdown();
       if (ownsEngine) await engine.close();
     },
   };

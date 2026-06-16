@@ -16,7 +16,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { interpolate, type ExprContext, type OutputBag, type ResolvedInputs } from "../compiler/index.ts";
 import { parseOutputFile } from "../runtime/index.ts";
-import type { UsesContext, UsesResult } from "../runtime/types.ts";
+import type { UsesContext, UsesResult, StepAgentInfo } from "../runtime/types.ts";
 import type { CompositeStep, LoadedAction } from "./load.ts";
 
 /** Run a `uses:` sub-step by routing to the registered handler for its scheme. */
@@ -43,6 +43,11 @@ export async function runComposite(
   const baseEnv = inputEnv(inputs);
 
   let n = 0;
+  // Agent telemetry from inner `work/agent` sub-steps, bubbled up so a composite that
+  // wraps an agent (the common reusable shape) still reports model + token usage. A
+  // composite is one step at the hook seam → one `chat` span, so usage is summed
+  // across inner agent calls (model from the first).
+  let agent: StepAgentInfo | undefined;
   for (const step of action.steps ?? []) {
     n++;
     const label = step.name ?? step.run ?? step.uses ?? `step ${n}`;
@@ -51,6 +56,7 @@ export async function runComposite(
       : await runCompositeUses(ctx, step, exprCtx(), dispatch);
 
     if (step.id) stepOutputs[step.id] = { outputs: bag.outputs };
+    agent = mergeAgent(agent, bag.agent);
     if (!bag.ok) {
       return { status: "failure", stdout: bag.stdout, stderr: bag.stderr || `composite step "${label}" failed` };
     }
@@ -61,7 +67,7 @@ export async function runComposite(
   for (const [k, expr] of Object.entries(action.outputValues ?? {})) {
     outputs[k] = interpolate(expr, exprCtx());
   }
-  return { status: "success", outputs };
+  return { status: "success", outputs, ...(agent ? { agent } : {}) };
 }
 
 interface StepBag {
@@ -69,6 +75,31 @@ interface StepBag {
   stdout: string;
   stderr: string;
   outputs: Record<string, string>;
+  /** Agent telemetry, when the sub-step was a `work/agent` (or wrapped one). */
+  agent?: StepAgentInfo;
+}
+
+/** Combine agent telemetry across a composite's inner agent steps: sum the token
+ *  usage, keep the first model. (Most composites wrap a single agent.) */
+function mergeAgent(acc: StepAgentInfo | undefined, next: StepAgentInfo | undefined): StepAgentInfo | undefined {
+  if (!next) return acc;
+  if (!acc) return next;
+  const au = acc.usage;
+  const nu = next.usage;
+  let usage = acc.usage ?? next.usage;
+  if (au && nu) {
+    const cacheRead = (au.cacheReadTokens ?? 0) + (nu.cacheReadTokens ?? 0);
+    const cacheCreation = (au.cacheCreationTokens ?? 0) + (nu.cacheCreationTokens ?? 0);
+    const requests = (au.requests ?? 0) + (nu.requests ?? 0);
+    usage = {
+      inputTokens: au.inputTokens + nu.inputTokens,
+      outputTokens: au.outputTokens + nu.outputTokens,
+      ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
+      ...(cacheCreation ? { cacheCreationTokens: cacheCreation } : {}),
+      ...(requests ? { requests } : {}),
+    };
+  }
+  return { model: acc.model, ...(acc.provider ? { provider: acc.provider } : {}), ...(usage ? { usage } : {}) };
 }
 
 /** A composite `run:` step: interpolate, exec in-guest, capture `$WORK_OUTPUT`. */
@@ -110,5 +141,6 @@ async function runCompositeUses(
     stdout: res.stdout ?? "",
     stderr: res.stderr ?? "",
     outputs: res.outputs ?? {},
+    ...(res.agent ? { agent: res.agent } : {}),
   };
 }

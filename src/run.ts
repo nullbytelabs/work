@@ -22,7 +22,10 @@ import { createActionUsesHandler, type SubUsesDispatch } from "./actions/index.t
 import type { UsesHandler } from "./runtime/index.ts";
 import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.ts";
 import { RunRepository } from "./persistence/runs.ts";
+import { RunEventRepository } from "./persistence/run-events.ts";
+import { WebPresenter } from "./web/web-presenter.ts";
 import type { PiWorkflowsConfig } from "./config/index.ts";
+import { startTelemetry, createTelemetryHooks, combineRunHooks, type TelemetryHandle } from "./observability/index.ts";
 
 export interface StartRunOptions {
   /** The compiled plan to run. */
@@ -71,6 +74,13 @@ export interface StartRunOptions {
   engine?: AbsurdEngine;
   /** Override the runs-on → ExecutionTarget factory (tests inject a host double). */
   makeTarget?: TargetFactory;
+  /**
+   * Injected telemetry handle (tests pass an in-memory-backed one). When omitted,
+   * `startRun` builds one from `config.observability` — off unless enabled, so the
+   * default path is unchanged. An injected handle is NOT owned: the caller flushes,
+   * inspects, and shuts it down (mirrors the `engine` ownership rule).
+   */
+  telemetry?: TelemetryHandle;
 }
 
 /**
@@ -125,22 +135,18 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
   // all key on the same id (and a `--resume` reuses it).
   const runId = opts.runId ?? randomUUID();
 
-  // Record the run in the shared history (`work.runs`) when we own a persistent
-  // engine — the same table the web UI lists, so a CLI run is a first-class run.
-  // `insert` is idempotent (on conflict do nothing), so resuming re-uses the row.
-  let runStore: RunRepository | undefined;
-  if (persistent) {
-    runStore = new RunRepository(engine);
-    await runStore.ensureSchema();
-    await runStore.insert({
-      id: runId,
-      name: opts.plan.name,
-      status: "running",
-      trigger: "dispatch",
-      startedAt: Date.now(),
-      ...(opts.plan.inputs ? { inputs: opts.plan.inputs } : {}),
-    });
-  }
+  // Telemetry hooks (caller's presenter + the emitter); flush is a no-op for an
+  // injected handle.
+  const { hooks: telemetryHooks, flush } = await composeTelemetry(opts);
+
+  // Fire-and-forget event appends, drained before the engine closes so the final
+  // `run-end` write isn't lost to `engine.close()`.
+  const eventWrites: Promise<unknown>[] = [];
+  const { runStore, recorder } = await setupDurableRecord(persistent, engine, runId, opts.plan, eventWrites);
+
+  // Fan run events to the caller's presenter, the telemetry emitter, AND the durable
+  // event recorder (when persistent).
+  const hooks = combineRunHooks(telemetryHooks, recorder?.hooks);
 
   const runtime = new AbsurdRuntime({
     engine,
@@ -167,14 +173,87 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
       workRoot,
       ...(opts.workspaceSource !== undefined ? { workspaceSource: opts.workspaceSource } : {}),
       ...(opts.workflowDir !== undefined ? { workflowDir: opts.workflowDir } : {}),
-      ...(opts.hooks ? { hooks: opts.hooks } : {}),
+      hooks,
       runId,
     });
     if (runStore) await runStore.setStatus(runId, result.status, { finishedAt: Date.now() });
+    recorder?.finish(result); // the `run-end` frame (terminal status)
     return result;
+  } catch (err) {
+    // The runtime normally returns interrupted/failure rather than throwing; on a real
+    // throw still write a terminal record + `run-end` so history/replay never strand the
+    // run as perpetually "running".
+    const message = err instanceof Error ? err.message : String(err);
+    if (runStore) await runStore.setStatus(runId, "failure", { finishedAt: Date.now(), error: message }).catch(() => {});
+    recorder?.finish({ name: opts.plan.name, status: "failure", jobs: [] });
+    throw err;
   } finally {
+    await flush(); // flush spans/metrics before exit (no-op for an injected handle)
     await runtime.close(); // no-op for the injected (web) engine
+    await Promise.allSettled(eventWrites); // ensure the event log (incl. run-end) landed before close
     if (ownsEngine) await engine.close();
     if (ownsWorkRoot) await rm(workRoot, { recursive: true, force: true });
   }
+}
+
+/**
+ * The durable record for a run we own a persistent engine for: the `work.runs` history
+ * row AND the per-run event stream (`work.run_events`) — exactly what the web
+ * `RunManager` writes for a web-triggered run, so a run's `.workflows/db` record is
+ * identical regardless of front-end and the web detail view can replay a CLI run in
+ * full. (A *web* run reaches `startRun` with an injected engine, so `persistent` is
+ * false here and the server owns these writes — no double-write.) `WebPresenter` is a
+ * pure hooks→frame adapter (no server deps); seq is minted synchronously so frame order
+ * is stable even if the async appends settle out of order. Returns empty when not
+ * persistent.
+ */
+async function setupDurableRecord(
+  persistent: boolean,
+  engine: AbsurdEngine,
+  runId: string,
+  plan: ExecutionPlan,
+  eventWrites: Promise<unknown>[],
+): Promise<{ runStore?: RunRepository; recorder?: WebPresenter }> {
+  if (!persistent) return {};
+  const runStore = new RunRepository(engine);
+  await runStore.ensureSchema();
+  // `insert` is idempotent (on conflict do nothing), so resuming re-uses the row.
+  await runStore.insert({
+    id: runId,
+    name: plan.name,
+    status: "running",
+    trigger: "dispatch",
+    startedAt: Date.now(),
+    ...(plan.inputs ? { inputs: plan.inputs } : {}),
+  });
+  const eventStore = new RunEventRepository(engine);
+  await eventStore.ensureSchema();
+  let seq = 0;
+  const recorder = new WebPresenter(runId, (frame) => {
+    eventWrites.push(eventStore.append(runId, seq++, frame).catch(() => {}));
+  });
+  recorder.start(plan); // the `run-init` frame (the DAG)
+  return { runStore, recorder };
+}
+
+/**
+ * Resolve the run's telemetry: an injected handle (tests) or one built from
+ * `config.observability` (off unless enabled). Returns the hooks to pass the runtime —
+ * the caller's presenter fanned out with the emitter when telemetry is on — and a
+ * `flush` for `finally` that shuts an OWNED handle down (so a CLI run exports before
+ * exit) but no-ops for an injected handle (the caller closes it).
+ */
+async function composeTelemetry(opts: StartRunOptions): Promise<{ hooks?: RunHooks; flush: () => Promise<void> }> {
+  // An injected handle is shared (the web/serve process started it once); we own one we
+  // start ourselves (a one-shot CLI run). Either way the emitter is built FRESH here so
+  // its per-run span state is isolated — critical when a shared handle drives several
+  // concurrent runs. The shared tracer/meter are concurrency-safe; instruments aggregate.
+  const owns = opts.telemetry === undefined;
+  const telemetry = opts.telemetry ?? (await startTelemetry(opts.config?.observability, process.env["npm_package_version"] ?? "dev"));
+  if (!telemetry) return { ...(opts.hooks ? { hooks: opts.hooks } : {}), flush: () => Promise.resolve() };
+  const emitter = createTelemetryHooks({ tracer: telemetry.tracer, meter: telemetry.meter });
+  return {
+    hooks: combineRunHooks(opts.hooks, emitter),
+    flush: owns ? () => telemetry.shutdown() : () => Promise.resolve(),
+  };
 }

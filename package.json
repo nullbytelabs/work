@@ -40,6 +40,7 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.5.1",
     "@electric-sql/pglite-socket": "^0.2.1",
+    "@opentelemetry/api": "^1.9.1",
     "absurd-sdk": "0.4.0",
     "croner": "^10.0.1",
     "pg": "^8.21.0",
@@ -47,7 +48,14 @@
   },
   "optionalDependencies": {
     "@earendil-works/gondolin": "^0.12.0",
-    "@earendil-works/pi-coding-agent": "^0.79.1"
+    "@earendil-works/pi-coding-agent": "^0.79.1",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.219.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.219.0",
+    "@opentelemetry/resources": "^2.8.0",
+    "@opentelemetry/sdk-metrics": "^2.8.0",
+    "@opentelemetry/sdk-node": "^0.219.0",
+    "@opentelemetry/sdk-trace-base": "^2.8.0",
+    "@opentelemetry/semantic-conventions": "^1.41.1"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

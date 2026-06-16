@@ -12,7 +12,9 @@
  * Contract (kept dead simple so the host side is testable without a VM):
  *   argv[2] = path to a request JSON  { system, prompt, cwd, model: { baseUrl,
  *             model, maxTokens?, temperature? }, keyEnv }
- *   argv[3] = path to write a result JSON { text, finishReason } | { error }
+ *   argv[3] = path to write a result JSON { text, finishReason?, usage? } | { error }
+ *             where usage = { inputTokens, outputTokens, cacheReadTokens?,
+ *             cacheCreationTokens?, requests? } — cumulative over the whole loop.
  * The model API key is NEVER in the request file: it is read from `process.env[keyEnv]`,
  * which Gondolin populates with a placeholder and swaps into the outbound
  * Authorization header host-side (the real key never enters the guest).
@@ -119,9 +121,27 @@ async function main() {
     .map((b) => b.text)
     .join("");
   const finishReason = lastAssistant.stopReason;
+
+  // Cumulative token usage across the whole loop — Pi's session aggregates every
+  // model call. Optional-chained so an older Pi without getSessionStats degrades to
+  // "no usage" instead of crashing. Read before dispose (it reads session state).
+  const stats = session.getSessionStats?.();
+  const tokens = stats?.tokens;
+  const usage = tokens
+    ? {
+        inputTokens: tokens.input,
+        outputTokens: tokens.output,
+        ...(tokens.cacheRead ? { cacheReadTokens: tokens.cacheRead } : {}),
+        ...(tokens.cacheWrite ? { cacheCreationTokens: tokens.cacheWrite } : {}),
+        ...(typeof stats.assistantMessages === "number" ? { requests: stats.assistantMessages } : {}),
+      }
+    : undefined;
   session.dispose?.();
 
-  await writeFile(resultPath, JSON.stringify(finishReason ? { text, finishReason } : { text }));
+  const result = { text };
+  if (finishReason) result.finishReason = finishReason;
+  if (usage) result.usage = usage;
+  await writeFile(resultPath, JSON.stringify(result));
 }
 
 main().catch(async (err) => {

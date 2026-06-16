@@ -183,15 +183,19 @@ export class GuestPiRunner implements AgentRunner {
     await rm(hostRes, { force: true });
 
     if (resultText) {
-      let parsed: { text?: string; finishReason?: string; error?: string };
+      let parsed: { text?: string; finishReason?: string; usage?: AgentResult["usage"]; error?: string };
       try {
-        parsed = JSON.parse(resultText) as { text?: string; finishReason?: string; error?: string };
+        parsed = JSON.parse(resultText) as typeof parsed;
       } catch {
         throw new UserFacingError(`in-guest agent returned malformed result JSON (exit ${run.exitCode})`);
       }
       if (parsed.error) throw new UserFacingError(`in-guest agent failed: ${parsed.error}`);
       if (typeof parsed.text === "string") {
-        return parsed.finishReason ? { text: parsed.text, finishReason: parsed.finishReason } : { text: parsed.text };
+        return {
+          text: parsed.text,
+          ...(parsed.finishReason ? { finishReason: parsed.finishReason } : {}),
+          ...(parsed.usage ? { usage: parsed.usage } : {}),
+        };
       }
     }
     throw new UserFacingError(

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseConfig, resolveModel } from "../src/config/index.ts";
+import { parseConfig, resolveModel, mergeConfig } from "../src/config/index.ts";
 import { UserFacingError } from "../src/errors.ts";
 
 const sample = {
@@ -71,5 +71,46 @@ describe("config", () => {
     const c = parseConfig(sample);
     assert.equal(c.datasources, undefined);
     assert.equal(c.webhooks, undefined);
+  });
+});
+
+describe("config — observability", () => {
+  // Regression: parse/merge whitelisted known keys, silently dropping `observability`
+  // so config-native telemetry never enabled (only OTEL_* env did). Keep it surviving.
+  it("parses and preserves the observability block (incl. $VAR headers)", () => {
+    const c = parseConfig({
+      ...sample,
+      observability: {
+        enabled: true,
+        otlpEndpoint: "https://otlp.example/otlp",
+        headers: { Authorization: "Basic $GRAFANA_CLOUD_OTLP_TOKEN" },
+        metricExportIntervalMs: 5000,
+        traces: { enabled: true },
+        metrics: { enabled: false },
+      },
+    });
+    assert.equal(c.observability?.enabled, true);
+    assert.equal(c.observability?.otlpEndpoint, "https://otlp.example/otlp");
+    assert.equal(c.observability?.headers?.["Authorization"], "Basic $GRAFANA_CLOUD_OTLP_TOKEN");
+    assert.equal(c.observability?.metricExportIntervalMs, 5000);
+    assert.equal(c.observability?.metrics?.enabled, false);
+  });
+
+  it("survives a layer merge (project overrides global wholesale)", () => {
+    const merged = mergeConfig(
+      parseConfig({ ...sample, observability: { enabled: false, otlpEndpoint: "https://global/otlp" } }),
+      parseConfig({ ...sample, observability: { enabled: true, otlpEndpoint: "https://project/otlp" } }),
+    );
+    assert.equal(merged.observability?.enabled, true);
+    assert.equal(merged.observability?.otlpEndpoint, "https://project/otlp");
+  });
+
+  it("rejects a malformed observability block", () => {
+    assert.throws(() => parseConfig({ ...sample, observability: { enabled: "yes" } }), UserFacingError);
+    assert.throws(() => parseConfig({ ...sample, observability: { headers: { X: 5 } } }), UserFacingError);
+  });
+
+  it("leaves observability undefined when absent", () => {
+    assert.equal(parseConfig(sample).observability, undefined);
   });
 });

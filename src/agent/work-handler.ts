@@ -81,6 +81,10 @@ async function runWorkAgent(ctx: UsesContext, opts: WorkHandlerOptions): Promise
 
   const modelAlias = typeof ctx.with.model === "string" ? ctx.with.model : undefined;
   const model = opts.config ? resolveModel(opts.config, modelAlias) : undefined;
+  // The configured provider key (e.g. "fireworks", "anthropic") — the gen_ai.provider.name
+  // for telemetry. Honest about the real provider rather than guessing in the emitter.
+  const resolvedAlias = modelAlias ?? opts.config?.defaultModel;
+  const provider = resolvedAlias ? opts.config?.models[resolvedAlias]?.provider : undefined;
 
   // No system prompt is set — Pi's own discovery (a checked-in `.pi/` persona,
   // `AGENTS.md`) supplies any standing role; the prompt carries the task.
@@ -93,8 +97,15 @@ async function runWorkAgent(ctx: UsesContext, opts: WorkHandlerOptions): Promise
   const warning = res.finishReason === "length" ? TRUNCATION_WARNING : "";
   if (warning) ctx.emit({ stream: "stderr", text: warning });
   // One output: the final assistant message. No JSON-splitting — structured
-  // fields are a user-space action's job, not the engine's.
-  return { status: "success", stdout: res.text, stderr: warning, outputs: { output: res.text } };
+  // fields are a user-space action's job, not the engine's. When a model resolved,
+  // carry agent telemetry (model + the loop's cumulative token usage) for observability.
+  return {
+    status: "success",
+    stdout: res.text,
+    stderr: warning,
+    outputs: { output: res.text },
+    ...(model ? { agent: { model: model.model, ...(provider ? { provider } : {}), ...(res.usage ? { usage: res.usage } : {}) } } : {}),
+  };
 }
 
 /** Build the `uses: work/<builtin>` handler. */
