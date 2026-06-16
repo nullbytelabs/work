@@ -10,7 +10,7 @@ import { Cron } from "croner";
  * Bound the forward walk when a long gap has elapsed (e.g. the host was down for a
  * week with an every-minute cron). Skip-by-default means we only ever fire the
  * *latest* due slot, so a cap just means convergence takes a few extra ticks on a
- * pathological gap — never a backfill flood. (Catch-up is a separate, opt-in policy.)
+ * pathological gap — never a backfill flood. Missed slots are skipped, never caught up.
  */
 const MAX_COALESCE = 1000;
 

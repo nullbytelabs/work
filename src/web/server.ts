@@ -891,7 +891,7 @@ async function reconcileInterruptedRuns(deps: {
 
 /**
  * Boot the `on: schedule` ticker for `serve`: re-seed baselines (dropping any slots
- * missed while down — no catch-up by default), then tick every SCHEDULER_TICK_MS,
+ * missed while down — missed slots are skipped, never caught up), then tick every SCHEDULER_TICK_MS,
  * dispatching each due slot via `dispatch` with a slot-derived idempotency runId.
  * Returns the interval handle so `close()` can stop it before the drain.
  */

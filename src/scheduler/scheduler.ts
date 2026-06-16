@@ -61,8 +61,8 @@ export async function tick(deps: SchedulerDeps): Promise<void> {
 
 /**
  * Reset every schedule's baseline to `now` without firing — drops any slots that
- * elapsed while the host was down (no catch-up by default; catch-up is a separate
- * opt-in policy). Call once on boot, before starting the ticker.
+ * elapsed while the host was down. Missed slots are skipped, never caught up. Call
+ * once on boot, before starting the ticker.
  */
 export async function seedBaselines(deps: SchedulerDeps): Promise<void> {
   const now = deps.clock.now();

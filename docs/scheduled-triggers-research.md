@@ -241,12 +241,12 @@ underlying Absurd spawn is idempotent regardless). NEEDS-BUILDING.
   it safe. (Pass 1's `sleepUntil` ticker was a non-documented construction and is
   dropped.)
 - **Cron math:** "is a slot due this tick?" is computed from the expression with
-  the parser of §12. Persist `last_fired_at` / `next_fire_at` in `work.schedules`
-  (§6) for the catch-up policy (§10) and the status surface (§9).
+  the parser of §12. Persist `last_fired_at` in `work.schedules` (§6); the status
+  surface (§9) computes next-fire from the cron on demand.
 - **Not self-durable across downtime** — like cron and like Absurd's own pattern,
-  a slot that elapses while the host is down is simply not dispatched. Catch-up is
-  the explicit, opt-in policy of §10 (on startup, check `last_fired_at` and fire a
-  single coalesced make-up within the window), *not* an Absurd primitive.
+  a slot that elapses while the host is down is simply not dispatched. There is no
+  catch-up (§10): on restart `seedBaselines` re-baselines to "now" and the schedule
+  resumes at the next future slot.
 
 ---
 
@@ -270,8 +270,8 @@ other long-lived machinery, so the scheduler slots in beside them. VALIDATED.
   (`:101-120`), since PGLite is single-process and only the owned-engine path
   persists.
 - **Start** after `listen` + the existing `reconcileInterruptedRuns` boot step
-  (`:223`) — the scheduler's "catch up on missed fires" logic is the direct
-  analog of that reconciliation.
+  (`:223`) — the scheduler's boot re-baselining (`seedBaselines`) sits alongside
+  that reconciliation as the other boot-time fixup.
 - **Stop** in the returned `close()` (`:782-797`) — `scheduler.stop()` *before*
   `runManager.whenIdle()` so it stops enqueuing during drain. The heartbeat
   Set + clear-all-in-`close()` + `.unref()` pattern (`:140`, `:415`, `:785`) is
@@ -287,13 +287,12 @@ and collects those with `spec.on?.schedule` — the same read-parse-opt-in dance
 table, following `RunRepository` (`src/persistence/runs.ts:57-100`) verbatim —
 same shared engine, same idempotent `ensureSchema()` call site
 (`server.ts:103-110`), same bigint-epoch-ms convention (PG returns bigint as a
-string → read via `Number(...)`). Suggested columns
-`(workflow text, cron text, last_fired_at bigint, next_fire_at bigint, enabled bool)`.
-On boot, `last_fired_at`/`next_fire_at` decide whether a fire was missed during
-downtime. Under the §5 design this table **is** the schedule's source of truth
-(there is no sleeping Absurd task holding state): the ticker reads it to compute
-due slots and the catch-up window, and writes `last_fired_at` on each dispatch.
-VALIDATED / PROPOSED.
+string → read via `Number(...)`). Columns `(workflow text, cron text,
+last_fired_at bigint)`. On boot, `seedBaselines` resets `last_fired_at` to "now",
+so slots missed during downtime are dropped (no catch-up, §10). Under the §5 design
+this table **is** the schedule's source of truth (there is no sleeping Absurd task
+holding state): the ticker reads it to compute due slots and writes `last_fired_at`
+on each dispatch. VALIDATED.
 
 ---
 
@@ -419,7 +418,7 @@ Sources: dagu [docs](https://docs.dagu.cloud/features/scheduling) · Temporal [s
 
 ---
 
-## 10. Catch-up after downtime & overlap — skip by default, opt-in bounded window
+## 10. Catch-up after downtime & overlap — skip, no catch-up
 
 The single most divergent design axis across the prior art, so it warrants an
 explicit decision rather than an accident of implementation.
@@ -432,24 +431,15 @@ floods burned people**); catch-up by design — anacron (its entire reason to
 exist, for machines not on 24/7) and **Temporal `catchupWindow` (default 1 year,
 min 10s)**.
 
-**Recommendation (PROPOSED): default to skip; offer opt-in, bounded catch-up per
-schedule.** Rationale:
-- **Default skip** matches the modern consensus (Airflow's deliberate 3.x flip;
-  cron/n8n/Windmill) and avoids a thundering herd of historical gondolin runs the
-  first time a long-down workspace comes back up — especially important here,
-  where every fire is a full micro-VM.
-- **But design the window in from day one**, because `work` is squarely anacron's
-  use case — a *local* tool on a laptop/dev box that is **not** running 24/7, so
-  "I closed the laptop over the weekend and my Monday-morning report never ran" is
-  the expected complaint. Temporal's `catchupWindow` is the cleanest model and
-  maps directly onto the §5 ticker: persist `last_fired_at`; on startup, if the
-  most recent missed fire is within the window, fire **once** (coalesce, don't
-  replay every interval); otherwise skip to the next future occurrence. A bounded
-  window + coalesce-to-one is the safe middle between "lose it silently" and
-  "backfill everything."
-- Surface it as a per-entry field mirroring the cron block, e.g.
-  `schedule: [{ cron: '...', catchUp: false }]` (or a duration window) — opt-in,
-  matching dagu/systemd/Temporal ergonomics.
+**Decision: skip, full stop — no catch-up, not even opt-in.** A slot that elapses
+while the host is down is dropped; on restart the schedule resumes at the next
+future occurrence (`seedBaselines` re-baselines every schedule to "now"). This
+matches the modern consensus (Airflow's deliberate 3.x flip; cron/n8n/Windmill)
+and avoids a thundering herd of historical gondolin runs the first time a long-down
+workspace comes back up — especially important here, where every fire is a full
+micro-VM. A configurable catch-up window (Temporal/dagu-style) was considered and
+**rejected**: it's surface area we don't need — if a missed run matters, trigger it
+by hand. The schema stays `{ cron }`, with no catch-up field.
 
 **Overlap policy** (PROPOSED): a prior scheduled run may still be executing when
 the next fire is due. Default to **skip** (Temporal's and dagu's default:
@@ -519,10 +509,9 @@ never for execution. Sources:
 - **Compute, don't sleep-and-loop.** Persist an absolute `next_fire_at`; on each
   wake recompute the next instant from the expression. Never chain
   `setInterval(period)` — it drifts and double-fires after sleep/clock jumps.
-- **Catch-up policy after downtime & overlap policy** — see §10 (the full
-  cross-tool analysis and recommendation): default **skip**, opt-in bounded
-  catch-up window (coalesce-to-one), overlap default **skip**. `last_fired_at`
-  (the `work.schedules` source of truth, §5/§6) detects the gap.
+- **Missed-slot & overlap policy** — see §10: missed slots are **skipped** with no
+  catch-up (`seedBaselines` re-baselines on boot), and overlap defaults to **skip**.
+  `last_fired_at` (the `work.schedules` source of truth, §5/§6) is the baseline.
 - **Timezone / DST.** UTC default (matches GHA). If `tz:` is added: a wall-clock
   time in the DST "spring-forward" gap may not exist (skip) and in "fall-back"
   may occur twice (dedupe) — croner does the math, but we pick the semantics.
@@ -537,8 +526,8 @@ never for execution. Sources:
 
 1. **Spec** — `ScheduleTrigger` + `schedule?` on `OnSpec` (`spec/types.ts`);
    `parseSchedule` + bare-string fix in `parseOn` (`spec/parse.ts`); barrel
-   re-export. Validate cron at parse time. Include the opt-in catch-up + overlap
-   fields (§10), e.g. `{ cron, tz?, catchUp? }`.
+   re-export. Validate cron at parse time. The entry schema is `{ cron }` — no
+   catch-up field (§10).
 2. **Dependency** — add `croner` to `dependencies` (no build-script change;
    `packages:"external"` handles it).
 3. **Rename `--web` → `work serve`, scheduler as a module (§7)** — promote the
@@ -549,7 +538,7 @@ never for execution. Sources:
    extraction is retired (one host, nothing to diverge from). `startRun`,
    `RunManager`, and the HTTP layer are untouched.
 4. **Scheduler** — the §5 app-side ticker (slot-keyed idempotent `dispatch`),
-   the module from step 3; honors the §10 catch-up/overlap policy. Unit-testable
+   the module from step 3; honors the §10 skip + overlap policy. Unit-testable
    with a fake `dispatch`, no HTTP needed.
 5. **Single-instance lock (§8, optional / not a gate)** — a `.workflows/db/` lock
    acquired before the engine opens would turn an accidental double-launch into a
@@ -571,8 +560,8 @@ never for execution. Sources:
    Scheduled runs already show in the console history (and `work runs`/`work logs`
    when serve is down) for free once tagged.
 10. **e2e** — a `test/e2e/` scheduled-workflow example + parse/scheduler unit
-    tests (cron validation, next-fire math, catch-up/overlap policy, idempotent
-    fire).
+    tests (cron validation, next-fire math, skip-on-restart, overlap policy,
+    idempotent fire).
 11. **Docs-site** — user-facing `on: schedule` + `work serve` reference pages
     (this doc is the maintainer record only).
 
@@ -629,7 +618,7 @@ findings:
   `server.ts:815-843`): it takes `{ runStore, workspace, dispatch }` and is wired
   at `:223` with `dispatch: (o) => runManager.dispatch(o)`. It lifts into
   `RunService` unchanged — and is the direct structural analog of the §5/§10
-  catch-up-on-boot logic.
+  boot re-baselining (`seedBaselines`).
 - **Supporting material for §5**: `dispatch(opts: DispatchOptions)` (`:154`)
   **already accepts a caller-supplied `runId`** — `DispatchOptions.runId?` with
   the comment *"Caller-supplied run id (tests pin it); minted when omitted,"*
