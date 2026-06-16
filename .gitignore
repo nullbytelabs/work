@@ -24,3 +24,5 @@ work.json
 # else under .review/ is local scratch.
 .review/*
 !.review/accepted.md
+
+.env.grafana-cloud

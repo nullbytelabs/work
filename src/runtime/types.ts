@@ -10,6 +10,25 @@
  */
 import type { ExecutionPlan } from "../compiler/index.ts";
 
+/** Cumulative token usage for one agent step (the whole Pi loop). */
+export interface StepAgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  /** Model calls in the loop — counts real requests, not steps. */
+  requests?: number;
+}
+
+/** Telemetry for a `work/agent` step: the model and (once captured) token usage.
+ *  Structural + primitive so the durable core stays agent-agnostic — it forwards
+ *  this opaquely; the observability layer reads it. */
+export interface StepAgentInfo {
+  model: string;
+  provider?: string;
+  usage?: StepAgentUsage;
+}
+
 export interface StepResult {
   name: string;
   status: "success" | "failure" | "skipped";
@@ -18,6 +37,8 @@ export interface StepResult {
   stderr: string;
   /** Outputs this step produced ($WORK_OUTPUT lines, or an agent's declared outputs). */
   outputs?: Record<string, string>;
+  /** Present only for `work/agent` steps — model + token usage for telemetry. */
+  agent?: StepAgentInfo;
 }
 
 export interface JobResult {
@@ -40,13 +61,51 @@ export interface WorkflowResult {
   jobs: JobResult[];
 }
 
+/** Run-level metadata for `onWorkflowStart` (telemetry's trace-root seed). */
+interface WorkflowHookMeta {
+  runId: string;
+  workflow: string;
+  /** True when this invocation is resuming a prior interrupted run. */
+  resumed?: boolean;
+}
+
+/** Per-job metadata carried on `onJobStart` (beyond the id) — the dimensions
+ *  telemetry attaches to the job span / metrics. */
+export interface JobHookMeta {
+  runsOn: string;
+  /** Author-given label, for the span name (the `jobId` stays the stable identity). */
+  title?: string;
+  /** The VM image identity (the `work:<image>` selector, or stock target key). */
+  image?: string;
+  arch?: string;
+  matrix?: Record<string, string | number | boolean>;
+  /** Upstream job ids this job `needs` — fan-in span links. */
+  needs?: string[];
+}
+
+/** Per-step metadata carried on `onStepStart`. */
+export interface StepHookMeta {
+  kind: "run" | "uses";
+  uses?: string;
+  /** Author-given label, for the span name (the stable step name stays the identity). */
+  title?: string;
+}
+
+/**
+ * The run lifecycle event stream. Consumers (TUI/web presenters, the observability
+ * emitter) implement the subset they need. The metadata args are optional so a
+ * consumer that only wants ids/results can implement the narrow form, and a caller
+ * (e.g. the presenter test) can drive the hooks without the metadata.
+ */
 export interface RunHooks {
-  onJobStart?: (jobId: string) => void;
-  onStepStart?: (jobId: string, stepName: string) => void;
+  onWorkflowStart?: (meta: WorkflowHookMeta) => void;
+  onJobStart?: (jobId: string, meta?: JobHookMeta) => void;
+  onStepStart?: (jobId: string, stepName: string, meta?: StepHookMeta) => void;
   onOutput?: (jobId: string, stepName: string, chunk: { stream: "stdout" | "stderr"; text: string }) => void;
   onStepEnd?: (jobId: string, result: StepResult) => void;
   /** Fired when a job finishes (success or failure) — the point to flush buffered per-job output. */
   onJobEnd?: (jobId: string, result: JobResult) => void;
+  onWorkflowEnd?: (result: WorkflowResult) => void;
 }
 
 export interface RunContext {
@@ -144,6 +203,9 @@ export interface UsesResult {
   stdout?: string;
   stderr?: string;
   outputs?: Record<string, string>;
+  /** Telemetry for a `work/agent` handler — model + token usage; carried onto the
+   *  step result for the observability layer. Absent for non-agent handlers. */
+  agent?: StepAgentInfo;
 }
 
 export interface UsesHandler {

@@ -84,6 +84,30 @@ export interface WebhookConfig {
   datasources?: string[];
 }
 
+/**
+ * Telemetry config: push OTLP (traces + metrics) to a collector (Grafana Alloy →
+ * Tempo + Prometheus). Off unless explicitly enabled, or the standard
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` env var is set (resolved in `startTelemetry`). The
+ * single `otlpEndpoint` is the OTLP/HTTP base; the exporters append `/v1/traces` and
+ * `/v1/metrics`. See docs/observability-otel-metrics.md.
+ */
+export interface ObservabilityConfig {
+  enabled?: boolean;
+  /** OTLP/HTTP base, e.g. `http://alloy.host:4318` (or `$OTEL_EXPORTER_OTLP_ENDPOINT`). */
+  otlpEndpoint?: string;
+  /**
+   * Headers added to every OTLP export — e.g. an auth token for a hosted collector
+   * (Grafana Cloud, Honeycomb). Like `apiKey`/`token`, values support `$VAR` / `${VAR}`
+   * expansion so the secret lives in the environment, not the file (fails loud if unset).
+   * Takes precedence over the standard `OTEL_EXPORTER_OTLP_HEADERS` env var.
+   */
+  headers?: Record<string, string>;
+  /** Periodic metric push interval (default 15000ms). */
+  metricExportIntervalMs?: number;
+  traces?: { enabled?: boolean };
+  metrics?: { enabled?: boolean };
+}
+
 export interface PiWorkflowsConfig {
   providers: Record<string, ProviderConfig>;
   models: Record<string, ModelConfig>;
@@ -93,6 +117,8 @@ export interface PiWorkflowsConfig {
   datasources?: Record<string, DatasourceConfig>;
   /** Named webhook receivers (operator-owned; referenced by `on: webhook`). */
   webhooks?: Record<string, WebhookConfig>;
+  /** OpenTelemetry traces + metrics, pushed over OTLP to a collector. */
+  observability?: ObservabilityConfig;
 }
 
 /** A model + its provider's connection details, ready to call. */
@@ -161,6 +187,8 @@ export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
   if (datasources) config.datasources = datasources;
   const webhooks = parseWebhooks(raw);
   if (webhooks) config.webhooks = webhooks;
+  const observability = parseObservability(raw);
+  if (observability) config.observability = observability;
   return config;
 }
 
@@ -272,6 +300,47 @@ function parseWebhookEntry(name: string, w: unknown): WebhookConfig {
   return wc;
 }
 
+/** Shape-validate the optional `observability` block (no cross-refs). */
+function parseObservability(raw: Record<string, unknown>): ObservabilityConfig | undefined {
+  if (raw.observability === undefined) return undefined;
+  const o = raw.observability;
+  if (!isObject(o)) throw new UserFacingError("config.observability must be an object");
+  const out: ObservabilityConfig = {};
+  if (o.enabled !== undefined) {
+    if (typeof o.enabled !== "boolean") throw new UserFacingError("config.observability.enabled must be a boolean");
+    out.enabled = o.enabled;
+  }
+  const endpoint = optStr(o.otlpEndpoint, "config.observability.otlpEndpoint");
+  if (endpoint !== undefined) out.otlpEndpoint = endpoint;
+  if (o.metricExportIntervalMs !== undefined) {
+    if (typeof o.metricExportIntervalMs !== "number") throw new UserFacingError("config.observability.metricExportIntervalMs must be a number");
+    out.metricExportIntervalMs = o.metricExportIntervalMs;
+  }
+  if (o.headers !== undefined) {
+    if (!isObject(o.headers)) throw new UserFacingError("config.observability.headers must be an object");
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(o.headers)) {
+      if (typeof v !== "string") throw new UserFacingError(`config.observability.headers.${k} must be a string`);
+      headers[k] = v;
+    }
+    out.headers = headers;
+  }
+  const traces = parseSignalToggle(o.traces, "traces");
+  if (traces) out.traces = traces;
+  const metrics = parseSignalToggle(o.metrics, "metrics");
+  if (metrics) out.metrics = metrics;
+  return out;
+}
+
+/** Validate an optional `{ enabled?: boolean }` signal toggle. */
+function parseSignalToggle(v: unknown, label: string): { enabled?: boolean } | undefined {
+  if (v === undefined) return undefined;
+  if (!isObject(v)) throw new UserFacingError(`config.observability.${label} must be an object`);
+  if (v.enabled === undefined) return {};
+  if (typeof v.enabled !== "boolean") throw new UserFacingError(`config.observability.${label}.enabled must be a boolean`);
+  return { enabled: v.enabled };
+}
+
 /**
  * Merge two config layers — `over` wins. `providers`/`models` merge by key, with
  * a colliding entry replaced *wholesale* (predictable beats field-merge); an
@@ -293,6 +362,10 @@ export function mergeConfig(base: PiWorkflowsConfig, over: PiWorkflowsConfig): P
   }
   if (base.webhooks || over.webhooks) {
     merged.webhooks = { ...base.webhooks, ...over.webhooks };
+  }
+  // Top-level field merge — a later layer overrides endpoint/headers/toggles wholesale.
+  if (base.observability || over.observability) {
+    merged.observability = { ...base.observability, ...over.observability };
   }
   return merged;
 }

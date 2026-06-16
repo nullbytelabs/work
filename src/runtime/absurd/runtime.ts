@@ -41,7 +41,7 @@ import {
 } from "../../compiler/index.ts";
 import { createAbsurdEngine, JOBS_QUEUE, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
-import type { JobResult, RunContext, Runtime, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
+import type { JobHookMeta, JobResult, RunContext, Runtime, StepHookMeta, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
 import { parseOutputFile } from "../output.ts";
 
 /** The orchestrator task's queue. Job tasks run on a *separate* queue
@@ -49,10 +49,15 @@ import { parseOutputFile } from "../output.ts";
  *  worker slots — see docs/durable-orchestrator.md. */
 const QUEUE = "default";
 const DEFAULT_MAX_CONCURRENCY = 16;
-/** How often the orchestrator task heartbeats its lease while awaiting jobs
- *  (well under the worker's claim timeout). Short runs finish before it ever
- *  fires; long ones keep their lease alive. */
-const ORCH_HEARTBEAT_MS = 300_000;
+/** Worker claim timeout (seconds): how long Absurd waits for a heartbeat before
+ *  presuming a worker dead and reclaiming/terminating its task. */
+const CLAIM_TIMEOUT_S = 600;
+/** Heartbeat cadence — comfortably under `CLAIM_TIMEOUT_S` so a renewal is never
+ *  missed. BOTH the orchestrator and each job task heartbeat at this rate, so a
+ *  *live* task keeps its lease no matter how long its work runs (a multi-minute agent
+ *  step no longer trips the timeout); only a genuinely dead worker is reclaimed (after
+ *  `CLAIM_TIMEOUT_S`). Short tasks finish before it ever fires. */
+const HEARTBEAT_MS = 150_000;
 
 /** Upstream job outputs + status passed to a job's task (JSON-serializable). */
 type NeedsBag = OutputBag & { result?: JobResult["status"] };
@@ -205,12 +210,22 @@ export class AbsurdRuntime implements Runtime {
     const jobTaskName = `job:${plan.name}:${runId}`;
     const orchTaskName = `orch:${plan.name}:${runId}`;
 
-    // Each job is a durable task on the JOBS queue.
+    // Each job is a durable task on the JOBS queue. It heartbeats its own lease — a
+    // job's step can run for many minutes (a long agent loop especially), far past the
+    // claim timeout — so a live job is never reclaimed/terminated for merely being slow
+    // (only a dead worker is). The step exec is `await`ed I/O, so the event loop is free
+    // to fire the heartbeat throughout.
     jobsApp.registerTask(
       { name: jobTaskName, queue: JOBS_QUEUE, defaultMaxAttempts: 1 },
       async (params: unknown, taskCtx: TaskContext) => {
-        const p = params as { jobId: string; needs: NeedsContext };
-        return runJobInTask(plan.jobs[p.jobId]!, deps, taskCtx, p.needs ?? {});
+        const beat = setInterval(() => void taskCtx.heartbeat().catch(() => {}), HEARTBEAT_MS);
+        beat.unref?.();
+        try {
+          const p = params as { jobId: string; needs: NeedsContext };
+          return await runJobInTask(plan.jobs[p.jobId]!, deps, taskCtx, p.needs ?? {});
+        } finally {
+          clearInterval(beat);
+        }
       },
     );
 
@@ -222,7 +237,7 @@ export class AbsurdRuntime implements Runtime {
     app.registerTask(
       { name: orchTaskName, queue: QUEUE, defaultMaxAttempts: 1 },
       async (_params: unknown, taskCtx: TaskContext) => {
-        const beat = setInterval(() => void taskCtx.heartbeat().catch(() => {}), ORCH_HEARTBEAT_MS);
+        const beat = setInterval(() => void taskCtx.heartbeat().catch(() => {}), HEARTBEAT_MS);
         beat.unref?.();
         try {
           return await runOrchestration({ plan, deps, jobsApp, runId, jobTaskName });
@@ -236,8 +251,8 @@ export class AbsurdRuntime implements Runtime {
     const concurrency = Math.max(1, this.maxConcurrency ?? Math.min(jobCount, DEFAULT_MAX_CONCURRENCY));
     // A worker on each queue — separate pools so an orchestrator awaiting jobs can
     // never deadlock the jobs it's waiting on.
-    const jobsWorker = await jobsApp.startWorker({ concurrency, batchSize: concurrency, claimTimeout: 600, pollInterval: 0.05 });
-    const orchWorker = await app.startWorker({ concurrency, batchSize: concurrency, claimTimeout: 600, pollInterval: 0.05 });
+    const jobsWorker = await jobsApp.startWorker({ concurrency, batchSize: concurrency, claimTimeout: CLAIM_TIMEOUT_S, pollInterval: 0.05 });
+    const orchWorker = await app.startWorker({ concurrency, batchSize: concurrency, claimTimeout: CLAIM_TIMEOUT_S, pollInterval: 0.05 });
 
     try {
       // Spawn the orchestrator (idempotent on runId) and await its result — the
@@ -247,16 +262,26 @@ export class AbsurdRuntime implements Runtime {
       // orchestrator (even one whose WorkflowResult is `failure` — a job that ran
       // and failed) is a real outcome, reused as-is.
       const spawned = await app.spawn(orchTaskName, {}, { queue: QUEUE, idempotencyKey: runId });
+      // `created` is known synchronously here — before the orchestrator's worker can run
+      // a job — so onWorkflowStart still precedes any onJobStart. `resumed` = the run id
+      // already had an orchestrator task: a real resume, or a no-op re-drive of an
+      // already-finished run (e.g. `work serve` re-claiming leftover tasks on startup).
+      ctx.hooks?.onWorkflowStart?.({ runId, workflow: plan.name, resumed: !spawned.created });
       let snap = await awaitTaskTerminal(app, spawned.taskID);
       if (!spawned.created && snap.state === "failed") {
         const retried = await app.retryTask(spawned.taskID, { spawnNewTask: false });
         snap = await awaitTaskTerminal(app, retried.taskID);
       }
-      if (snap.state === "completed") return snap.result as unknown as WorkflowResult;
-      // The orchestrator task failed — the run was interrupted (a job torn out) and
-      // couldn't finish in this invocation. Report `interrupted` (not `failure`):
-      // it's resumable, and re-running with the same runId picks it back up.
-      return { name: plan.name, status: "interrupted", jobs: [] };
+      // A completed orchestrator is a real outcome (even a `failure`). A failed one
+      // means the run was interrupted (a job torn out) and couldn't finish in this
+      // invocation — report `interrupted` (not `failure`): it's resumable, and
+      // re-running with the same runId picks it back up.
+      const result: WorkflowResult =
+        snap.state === "completed"
+          ? (snap.result as unknown as WorkflowResult)
+          : { name: plan.name, status: "interrupted", jobs: [] };
+      ctx.hooks?.onWorkflowEnd?.(result);
+      return result;
     } finally {
       await orchWorker.close();
       await jobsWorker.close();
@@ -430,6 +455,26 @@ async function provisionTarget(
  *  malformed `if:` is itself a step failure. */
 type StepDecision = { kind: "run" | "skip" } | { kind: "error"; result: StepResult };
 
+/** Telemetry metadata for a job's `onJobStart` (target image, matrix, fan-in needs). */
+function jobHookMeta(job: PlannedJob): JobHookMeta {
+  return {
+    runsOn: job.runsOn,
+    image: job.runsOn,
+    ...(job.title ? { title: job.title } : {}),
+    ...(job.matrix ? { matrix: job.matrix } : {}),
+    ...(job.needs.length ? { needs: job.needs } : {}),
+  };
+}
+
+/** Telemetry metadata for a step's `onStepStart` (kind + uses + author title). */
+function stepHookMeta(step: PlannedStep): StepHookMeta {
+  return {
+    kind: step.uses !== undefined ? "uses" : "run",
+    ...(step.uses !== undefined ? { uses: step.uses } : {}),
+    ...(step.title ? { title: step.title } : {}),
+  };
+}
+
 function decideStep(step: PlannedStep, condCtx: ConditionContext, failed: boolean): StepDecision {
   if (step.if === undefined) return { kind: failed ? "skip" : "run" };
   try {
@@ -517,7 +562,7 @@ async function runSteps(
     for (const step of job.steps) {
       const decision = decideStep(step, condCtx(), failed);
       if (decision.kind === "error") {
-        ctx.hooks?.onStepStart?.(job.id, step.name);
+        ctx.hooks?.onStepStart?.(job.id, step.name, stepHookMeta(step));
         ctx.hooks?.onStepEnd?.(job.id, decision.result);
         recordStep(step, decision.result);
         continue;
@@ -527,7 +572,7 @@ async function runSteps(
         continue;
       }
 
-      ctx.hooks?.onStepStart?.(job.id, step.name);
+      ctx.hooks?.onStepStart?.(job.id, step.name, stepHookMeta(step));
       // A throw from executeStep means the step never reached a verdict — the
       // target/VM was torn out under it. Surface it to the presenter (so the step
       // isn't left "running"), then raise `JobInterrupted` so the job *task* fails
@@ -559,7 +604,7 @@ async function runJobInTask(
   needs: NeedsContext,
 ): Promise<JobResult> {
   const { ctx } = deps;
-  ctx.hooks?.onJobStart?.(job.id);
+  ctx.hooks?.onJobStart?.(job.id, jobHookMeta(job));
 
   // Anything after onJobStart that throws (staging, an output interpolation, an
   // unexpected target/handler error) must still fire onJobEnd — otherwise the
@@ -722,6 +767,7 @@ async function runUsesStep(
       stdout: res.stdout ?? "",
       stderr: res.stderr ?? "",
       ...(res.outputs ? { outputs: res.outputs } : {}),
+      ...(res.agent ? { agent: res.agent } : {}),
     };
   } catch (err) {
     // Handlers shouldn't throw, but never let one crash the job task.

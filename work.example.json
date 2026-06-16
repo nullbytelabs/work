@@ -20,5 +20,12 @@
       "auth": "bearer",
       "secret": "$CI_WEBHOOK_SECRET"
     }
+  },
+  "observability": {
+    "enabled": false,
+    "otlpEndpoint": "https://otlp-gateway-prod-<region>.grafana.net/otlp",
+    "headers": {
+      "Authorization": "Basic $GRAFANA_CLOUD_OTLP_TOKEN"
+    }
   }
 }

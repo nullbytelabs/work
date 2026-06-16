@@ -1,21 +1,11 @@
 # review (multi-agent, composed)
-# description: reusable agent review — now PURE COMPOSITION of four focused,
-#              self-contained reusables (security / compiler / runtime / web), each
-#              composed via `uses: workflow/<x>-review`. Every focused review does
-#              its own scan + verify + cap and emits already-distilled JSON, so the
-#              final `collect` editor fans in PRE-VERIFIED reviews (small context)
-#              rather than raw scanner dumps. Each focused review also runs
-#              standalone (e.g. `work run compiler-review`) for fast, narrow-context
-#              feedback — same definition `review`/`ci` compose.
-#
-#              No tooling-reviewer agent. Lint/typecheck/knip/fan-in/test produce a
-#              DETERMINISTIC pass/fail signal — re-narrating that through an LLM is
-#              cost + a hallucination surface over an already-authoritative result.
-#              Instead the caller passes each tool's OUTCOME (success/failure/skipped)
-#              via declared `inputs:`; `collect` is handed that deterministic status
-#              and leads with any hard failure, and the `show` step prints a
-#              deterministic TOOLING banner regardless of what the agent says. Detail
-#              for a failure lives in the `checks`/`test` job output in the run.
+# description: agent code review — PURE COMPOSITION of four focused, self-contained
+#              reusables (security / compiler / runtime / web), each composed via
+#              `uses: workflow/<x>-review`. Every focused review does its own scan +
+#              verify + cap and emits already-distilled JSON, so the final `collect`
+#              editor fans in PRE-VERIFIED reviews (small context) rather than raw
+#              scanner dumps. Each focused review also runs standalone (e.g.
+#              `work run compiler-review`) for fast, narrow-context feedback.
 #
 #              Each focused reviewer reads its subsystem's source in the checkout
 #              and reports real issues. An empty findings list is a legitimate,
@@ -24,8 +14,9 @@
 #              `collect` emits machine-readable JSON between the unlabeled REVIEW
 #              JSON sentinels (the aggregate contract the Pi feedback loop parses;
 #              focused reviews use scope-LABELED sentinels — see SKILL.md). Needs a
-#              model in work.json. Called by `ci` via `uses: workflow/review`; also
-#              runnable: `work run review`. Sizing: agent-only → `machine: small`.
+#              model in work.json. Run on demand: `work run review` — kept OUT of `ci`
+#              so its cost and model-dependence stay clear of the deterministic gate.
+#              Sizing: agent-only → `machine: small`.
 ---
 name: review
 
@@ -33,17 +24,6 @@ on:
   workflow_call:
     outputs:
       review: ${{ jobs.collect.outputs.review }}
-
-# Deterministic tool OUTCOMES (success | failure | skipped), passed in by the caller
-# (ci.yaml) from its checks/test job step outcomes — NOT logs and NOT an agent's
-# reading of logs. Defaults are empty so a standalone `work run review` (no tooling
-# upstream) is well-defined: an empty status means "tooling did not run here".
-inputs:
-  lint: { type: string, default: "" }
-  typecheck: { type: string, default: "" }
-  knip: { type: string, default: "" }
-  fanin: { type: string, default: "" }
-  test: { type: string, default: "" }
 
 jobs:
   # Each subsystem is a focused, self-contained reusable (scan + verify + cap),
@@ -75,36 +55,21 @@ jobs:
             {"verdict","summary","findings":[...]} (already verified against the
             checkout and capped; normalize whatever they sent). Your job is to MERGE
             them into one review — you do NOT need to re-verify, only fold together:
-
-            1. Combine all findings, de-duplicate overlap across subsystems, rank by
-               severity, and keep at most 6.
-            2. TOOLING: the deterministic pass/fail status of this project's own
-               tooling is below (from the engine, not a guess). If any status is
-               "failure", LEAD your summary with that — a broken build/test outranks
-               code findings — and include it as a finding with subsystem "tooling"
-               (file = the tool name, the failure is the issue; detail lives in the
-               run's checks/test output). If a status is empty, tooling did not run
-               in this invocation; ignore it.
+            combine all findings, de-duplicate overlap across subsystems, rank by
+            severity, and keep at most 6.
 
             Output a single JSON object ONLY — no prose before or after, no markdown
             fences. Exact shape:
             {"verdict": "clean" | "findings",
-             "summary": "2-3 sentences: overall state, leading with any tooling failure",
+             "summary": "2-3 sentences on the overall state",
              "findings": [
-               {"subsystem": "compiler|runtime|web|agent-security|tooling",
+               {"subsystem": "compiler|runtime|web|agent-security",
                 "file": "src/...", "line": 123, "severity": "critical|high|medium|low",
                 "confidence": "high|medium|low", "issue": "...", "fix": "...",
-                "evidence": "what the focused reviewer confirmed (or the tool status)"}
+                "evidence": "what the focused reviewer confirmed"}
              ]}
             "verdict": "clean" with an empty findings array is correct when nothing
-            survives and all tooling passed.
-
-            === tooling status (deterministic — success | failure | skipped) ===
-            lint:      ${{ inputs.lint }}
-            typecheck: ${{ inputs.typecheck }}
-            knip:      ${{ inputs.knip }}
-            fan-in:    ${{ inputs.fanin }}
-            test:      ${{ inputs.test }}
+            survives.
 
             === agent + egress + config (security) ===
             ${{ needs.security.outputs.review }}
@@ -120,23 +85,7 @@ jobs:
       - name: show review
         env:
           REVIEW: ${{ steps.editor.outputs.output }}
-          LINT: ${{ inputs.lint }}
-          TYPECHECK: ${{ inputs.typecheck }}
-          KNIP: ${{ inputs.knip }}
-          FANIN: ${{ inputs.fanin }}
-          TEST: ${{ inputs.test }}
         run: |
-          # Deterministic tooling banner — computed from the engine's step outcomes,
-          # independent of anything the agent wrote. "Build broken" is surfaced here
-          # for certain, not left to the model's discretion.
-          failed=""
-          for pair in "lint:$LINT" "typecheck:$TYPECHECK" "knip:$KNIP" "fan-in:$FANIN" "test:$TEST"; do
-            name="${pair%%:*}"; outcome="${pair#*:}"
-            [ "$outcome" = "failure" ] && failed="$failed $name"
-          done
-          if [ -n "$failed" ]; then
-            printf '⚠ TOOLING FAILED (fix before code findings):%s\n' "$failed"
-          fi
           printf '%s\n' "===== REVIEW JSON BEGIN ====="
           printf '%s\n' "$REVIEW"
           printf '%s\n' "===== REVIEW JSON END ====="

@@ -15,6 +15,7 @@
  * docs/agent-primitive-and-actions.md.
  */
 import type { ResolvedModel } from "../config/index.ts";
+import type { StepAgentUsage } from "../runtime/types.ts";
 
 export interface AgentRequest {
   /**
@@ -41,6 +42,9 @@ export interface AgentResult {
   text: string;
   /** Why the model stopped — "stop" (complete) or "length" (truncated at max_tokens), etc. */
   finishReason?: string;
+  /** Cumulative token usage across the whole agent loop (from Pi's session stats),
+   *  for telemetry. Absent when the runner/SDK didn't surface it. */
+  usage?: StepAgentUsage;
 }
 
 export interface AgentRunner {

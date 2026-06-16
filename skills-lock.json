@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "dashboarding": {
+      "source": "grafana/skills",
+      "sourceType": "github",
+      "skillPath": "skills/grafana-core/dashboarding/SKILL.md",
+      "computedHash": "d8b1a6b7b8e7796fc8fc0eacda974a6c6c61594d848e5b3f30df837112ead839"
+    },
+    "grafana-oss": {
+      "source": "grafana/skills",
+      "sourceType": "github",
+      "skillPath": "skills/grafana-core/grafana-oss/SKILL.md",
+      "computedHash": "5ce55a36f0b7d89e900eadd1bc3177e23ed2df7c85a9585fec36c8cd7093d9ab"
+    },
+    "opentelemetry": {
+      "source": "grafana/skills",
+      "sourceType": "github",
+      "skillPath": "skills/grafana-core/opentelemetry/SKILL.md",
+      "computedHash": "7726c7e8b48f15a846f22bf1c8af710095c033cf3f8f5440c2284321ec0fc205"
+    },
+    "promql": {
+      "source": "grafana/skills",
+      "sourceType": "github",
+      "skillPath": "skills/grafana-core/promql/SKILL.md",
+      "computedHash": "81d1df0ad4d81f51ef9ac71e4e63e9a67a8423a7cd4fbb73efee25a7a22cb8ba"
+    }
+  }
+}

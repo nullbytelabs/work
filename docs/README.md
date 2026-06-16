@@ -78,6 +78,16 @@ the rationale is the point.
   docs-site coverage gaps, and the ranked unaccounted-for surfaces to scaffold
   next (action packages, datasource/webhook config, template variety).
 
+## Observability
+
+- [`observability-otel-metrics.md`](observability-otel-metrics.md) — instrumenting
+  runs with OpenTelemetry traces (run→job→step spans, GenAI/CI-CD semconv, VM image
+  and token attributes) and metrics, pushed over OTLP to Grafana Alloy → Tempo +
+  Prometheus: the hooks seam as the single instrumentation point, traces across
+  crash-resume (skip-on-replay for free via memoized checkpoints; persist+restore the
+  root span context), the metric catalog, the agent token-capture gap, and the opt-in /
+  no-op dependency design.
+
 Records for explored-but-rejected directions (multi-host queues, embedded
 tunnels, …) are removed once the decision is captured; they live in git
 history.

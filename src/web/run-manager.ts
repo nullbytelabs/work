@@ -18,6 +18,7 @@ import type { AbsurdEngine } from "../runtime/index.ts";
 import type { TargetFactory } from "../targets/index.ts";
 import type { PiWorkflowsConfig } from "../config/index.ts";
 import { startRun } from "../run.ts";
+import type { TelemetryHandle } from "../observability/index.ts";
 import type { RunRepository } from "../persistence/runs.ts";
 import type { RunEventRepository } from "../persistence/run-events.ts";
 import { WebPresenter, type Frame } from "./web-presenter.ts";
@@ -98,6 +99,12 @@ export interface RunManagerOptions {
    * for the in-memory, session-scoped behavior (the injected-engine path).
    */
   eventStore?: RunEventRepository;
+  /**
+   * Shared telemetry handle (started once by the server). Injected into every run so
+   * the OTel SDK is registered ONCE for the process — not re-started per run. Omit when
+   * telemetry is disabled.
+   */
+  telemetry?: TelemetryHandle;
 }
 
 /** The outcome of a dispatch: accepted (running or queued) or shed at capacity. */
@@ -114,6 +121,7 @@ export class RunManager {
   private readonly makeTarget: TargetFactory | undefined;
   private readonly runStore: RunRepository | undefined;
   private readonly eventStore: RunEventRepository | undefined;
+  private readonly telemetry: TelemetryHandle | undefined;
   private readonly runs = new Map<string, RunRecord>();
   /** Insertion order, so `list()` can return newest-first cheaply. */
   private readonly order: string[] = [];
@@ -140,6 +148,7 @@ export class RunManager {
     this.makeTarget = opts.makeTarget;
     this.runStore = opts.runStore;
     this.eventStore = opts.eventStore;
+    this.telemetry = opts.telemetry;
     this.maxConcurrentRuns = Math.max(1, opts.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS);
     this.maxQueuedRuns = Math.max(0, opts.maxQueuedRuns ?? DEFAULT_MAX_QUEUED_RUNS);
   }
@@ -208,6 +217,7 @@ export class RunManager {
       ...(opts.datasources ? { datasources: opts.datasources } : {}),
       engine: this.engine,
       ...(this.makeTarget ? { makeTarget: this.makeTarget } : {}),
+      ...(this.telemetry ? { telemetry: this.telemetry } : {}),
       hooks: presenter.hooks,
     })
       .then(async (result) => {
@@ -325,6 +335,27 @@ export class RunManager {
     });
     res.flushHeaders?.();
     for (const frame of frames) res.write(frameToSse(frame));
+    res.end();
+    return true;
+  }
+
+  /**
+   * Last-resort replay for a run with NO persisted event frames — a run recorded before
+   * event-stream persistence existed (`work.run_events` empty for it). Surface its stored
+   * terminal status from `work.runs` as a minimal `run-init` + `run-end`, so the detail
+   * view shows the real outcome instead of hanging on "Running". No step detail — those
+   * frames are genuinely gone — but the run is no longer a perpetual spinner. Returns
+   * `false` (untouched response) when there's no store or no row, so the caller can 404.
+   */
+  async replayStoredStatus(runId: string, res: ServerResponse): Promise<boolean> {
+    if (!this.runStore) return false;
+    const row = await this.runStore.get(runId);
+    if (!row) return false;
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+    res.flushHeaders?.();
+    const send = (event: string, data: Record<string, unknown>) => res.write(frameToSse({ event, data: { runId, ts: Date.now(), ...data } }));
+    send("run-init", { name: row.name, jobOrder: [], jobs: {}, status: row.status });
+    send("run-end", { status: row.status, ...(row.error !== undefined ? { error: row.error } : {}) });
     res.end();
     return true;
   }
