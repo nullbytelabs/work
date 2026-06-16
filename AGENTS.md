@@ -48,7 +48,16 @@ Dev never touches `dist/`. A *published* package lives under `node_modules`, whe
 to strip types, so `prepack` runs `scripts/build.mjs`: esbuild bundles `src/cli.ts` → `dist/cli.js`
 (deps kept external) and copies two runtime assets loaded via `import.meta.url` —
 `schema.sql` and `guest-runner-script.mjs` — flat next to it. `bin/work.mjs` prefers
-`dist/cli.js` if present, else falls back to `src/cli.ts`. Publishing needs npm 2FA (`--otp`).
+`dist/cli.js` if present, else falls back to `src/cli.ts`.
+
+**Releasing is automated — never `npm publish` by hand.** Cut a release by (1) bumping the
+version in a normal commit on `main` (`package.json` + `package-lock.json` + the docs-site
+nav label in `.vitepress/config.ts` — see the `release: vX.Y.Z` commits), then (2) pushing a
+matching `vX.Y.Z` tag. The tag push triggers `.github/workflows/release.yml`, which verifies
+the tag equals `package.json`'s version, builds, runs `npm publish --provenance` (auth via the
+`NPM_TOKEN` secret + OIDC build provenance — no local 2FA/`--otp`), and creates the GitHub
+Release with auto-generated notes. So the agent's job at release time is the version-bump commit
+and (if asked) the tag; the publish is CI's. Only an admin can push `v*` tags.
 
 > **Footgun:** because the shim prefers `dist/`, running `npm run build` locally (e.g. to
 > verify packaging) leaves a `dist/` that **shadows your `src/` edits** for `./bin/work.mjs`

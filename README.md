@@ -213,13 +213,16 @@ The prompt can also be file-backed (`promptFile:`); there's no separate system-p
 
 ```bash
 # run a workflow file directly
-work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--quiet]
+work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--workdir <dir>] [--resume <id>] [--quiet]
 
 # run a project workflow by name (resolves .workflows/*.yaml whose `name:` matches)
-work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--quiet]
+work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--resume <id>] [--quiet]
 
 # print the job DAG instead of running it
 work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
+
+# boot the long-lived local host: web console + webhook receiver + scheduler
+work serve [--workspace <dir>] [--port <n>]
 ```
 
 | Flag | Effect |
@@ -227,9 +230,20 @@ work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
 | `--workspace <dir>` | project root for `run <name>` / `graph <name>` (default: current dir) |
 | `--inputs '<json>'` | values for the workflow's declared `inputs:` |
 | `--config <file>` | model/provider config (default: `./work.json`, or `$WORK_CONFIG`) |
+| `--datasources <a,b>` | datasource keys this run's jobs may reach (header-injected egress; see config) |
 | `--workdir <dir>` | where job workspaces are staged (default: a temp dir) |
+| `--resume <id>` | resume a prior interrupted run (a persisted `.workflows/` project run) |
 | `--quiet` | suppress the live board / per-job output |
 | `--steps` | (graph) expand each job into its ordered steps |
+| `--port <n>` | (serve) HTTP port for the local host (default: 4280) |
+
+---
+
+## The serve host, triggers, and observability
+
+Beyond one-shot CLI runs, `work serve` boots a long-lived **local host** for a project (loopback only): a browser console to launch and watch workflows live, an authenticated **webhook receiver** (`on: webhook`), and a **scheduler** for `on: schedule` cron triggers — one process, the same engine. See [the serve host guide](https://nullbytelabs.github.io/work/guide/web-ui).
+
+Any run can also emit **OpenTelemetry** traces and metrics over OTLP — off by default, enabled with one `observability` block in `work.json` (or plain `OTEL_*` env vars). Point it at any collector to see runs as standard distributed traces with per-model token usage. See [Observability](https://nullbytelabs.github.io/work/guide/observability).
 
 ---
 
