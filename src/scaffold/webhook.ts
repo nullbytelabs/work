@@ -271,7 +271,7 @@ export async function runCreateWebhook(argv: string[], cwd: string = process.cwd
   }
   process.stdout.write(`  ${source.note}\n`);
   process.stdout.write(`  set the secret: export ${webhookSecretEnv(hook)}=...  (kept out of work.json)\n`);
-  process.stdout.write(`  point the sender at: POST /hooks/${hook}  (served by ${p} --web)\n`);
+  process.stdout.write(`  point the sender at: POST /hooks/${hook}  (served by ${p} serve)\n`);
   process.stdout.write(`  smoke-test it:       POST /api/webhooks/${hook}/test\n`);
   return 0;
 }

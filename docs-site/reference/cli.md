@@ -34,8 +34,8 @@ work [--workspace <dir>] rerun <id>
 # print the job DAG instead of running it
 work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
 
-# open the local web console over a workspace's .workflows/
-work [--workspace <dir>] --web [--port <n>]
+# boot the long-lived host (HTTP API + console + webhook receiver + scheduler)
+work [--workspace <dir>] serve [--port <n>]
 
 # check the host can run sandboxed jobs
 work doctor [--json]
@@ -245,7 +245,7 @@ on:
     source: grafana
 ```
 
-The hook is served by `work --web` at `POST /hooks/<name>`; a smoke-test
+The hook is served by `work serve` at `POST /hooks/<name>`; a smoke-test
 endpoint lives at `POST /api/webhooks/<name>/test`. The `secret` is always emitted
 as a `$VAR` env-ref (`$ALERTS_SECRET`), never a literal — `export ALERTS_SECRET=...`
 to set it. `--datasources` scopes the egress the triggered run may use.
@@ -305,8 +305,11 @@ work [--workspace <dir>] runs [--status queued|running|success|failure|interrupt
 ```
 
 Lists the workspace's run history, newest first — the durable record of every
-project run. The CLI and the web console write the **same** store, so this lists
-runs from either. `--status` filters; for example, the runs that didn't finish:
+project run. It reads the **same** durable store [`work serve`](#work-serve) uses,
+so it lists runs started either way. It's a *serve-is-down* tool, though: the store
+is single-owner, so don't run it against a workspace a `serve` is currently holding
+— read live history through that host's console / `GET /api/runs` instead. `--status`
+filters; for example, the runs that didn't finish:
 
 ```bash
 work runs
@@ -358,34 +361,44 @@ work graph report.yaml --format ascii --steps # by file path
 work --workspace my-project graph report --format mermaid
 ```
 
-### `work --web`
+### `work serve`
 
 ```bash
-work [--workspace <dir>] --web [--port <n>]
+work [--workspace <dir>] serve [--port <n>]
 ```
 
-Boots the **local web console** over the workspace's `.workflows/` instead of
+Boots the long-lived **local host** over the workspace's `.workflows/` instead of
 running a single workflow, and keeps the process alive until you stop it
-(`Ctrl-C`). It prints the URL it bound:
+(`Ctrl-C`). One process serves four surfaces: the HTTP API, the browser console,
+the [webhook receiver](../guide/web-ui#webhook-triggers), and the
+[scheduler](../guide/web-ui#scheduled-triggers) that fires `on: schedule`
+triggers. It prints what it bound:
 
 ```bash
-work --workspace . --web
-# work web UI: http://127.0.0.1:4280/
+work serve
+# work serve: http://127.0.0.1:4280/
+#   workspace: /path/to/project
+#   history:   /path/to/project/.workflows/db
+#   auth token: 1f3a…
+# Press Ctrl-C to stop.
 ```
 
 From the browser you can run workflows from an auto-generated input form, watch
-runs stream live, browse durable history (and re-run), and manage
-[webhook triggers](../guide/web-ui#webhook-triggers). The server binds **loopback
-only** (`127.0.0.1`), validates the `Host` header, and requires a CSRF token on
-every mutating request. Run history lives under `<workspace>/.workflows/db/`. See
-the [Web console guide](../guide/web-ui) for the full tour.
+runs stream live, browse durable history (and re-run), manage webhook triggers,
+and see the schedules the host is driving. The server binds **loopback only**
+(`127.0.0.1`), validates the `Host` header, and requires a CSRF token on every
+mutating request. History, deliveries, and schedule state live under
+`<workspace>/.workflows/db/`. See the [serve host guide](../guide/web-ui) for the
+full tour.
 
 | Option | Effect |
 |---|---|
-| `--workspace <dir>` | Project root whose `.workflows/` the console serves (default: current directory). |
+| `--workspace <dir>` | Project root whose `.workflows/` the host serves (default: current directory). |
 | `--port <n>` | Port to bind (default `4280`; an integer `1`–`65535`). |
 
-`--web` takes no positional arguments, and `--port` only applies alongside `--web`.
+`serve` takes no positional arguments, and `--port` only applies to `serve`. Run
+**one** `serve` per workspace — it's the sole owner of that workspace's durable
+store (see [the guide](../guide/web-ui)).
 
 ### `work doctor`
 
@@ -419,9 +432,8 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 
 | Flag | Applies to | Effect |
 |---|---|---|
-| `--workspace <dir>` | `run`, `graph`, `--web` | Project root for resolving a workflow by name / serving the web console (default: current directory). |
-| `--web` | (standalone) | Open the local web console over the workspace's `.workflows/` instead of running a workflow. |
-| `--port <n>` | `--web` | Port the web console binds (default `4280`; `1`–`65535`). |
+| `--workspace <dir>` | `run`, `graph`, `serve` | Project root for resolving a workflow by name / serving the host (default: current directory). |
+| `--port <n>` | `serve` | Port the host binds (default `4280`; `1`–`65535`). |
 | `--inputs '<json>'` | `run`, file, `resume`, `rerun` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`, overrides the inputs stored in history. |
 | `--config <file>` | `run`, file | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
 | `--datasources <a,b>` | `run`, file | [Datasources](./configuration#datasources) this run's jobs may reach (comma-separated; the CLI counterpart of a webhook's `datasources` scope). Deny-by-default when omitted. |

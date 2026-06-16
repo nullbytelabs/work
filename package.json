@@ -41,6 +41,7 @@
     "@electric-sql/pglite": "^0.5.1",
     "@electric-sql/pglite-socket": "^0.2.1",
     "absurd-sdk": "0.4.0",
+    "croner": "^10.0.1",
     "pg": "^8.21.0",
     "yaml": "^2.5.1"
   },

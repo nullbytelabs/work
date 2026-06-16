@@ -12,5 +12,6 @@ export type {
   OnSpec,
   WebhookTrigger,
   WorkflowCallSpec,
+  ScheduleTrigger,
 } from "./types.ts";
 export { parseWorkflow, parseInputs, WorkflowParseError } from "./parse.ts";

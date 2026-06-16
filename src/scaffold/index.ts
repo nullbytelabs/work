@@ -224,7 +224,7 @@ async function runCreateWorkflow(argv: string[], cwd: string): Promise<number> {
   }
   if (source) {
     process.stdout.write(
-      `  webhook:  export ${webhookSecretEnv(name)} and POST to /hooks/${name} (served by ${p} --web)\n`,
+      `  webhook:  export ${webhookSecretEnv(name)} and POST to /hooks/${name} (served by ${p} serve)\n`,
     );
   }
   return 0;

@@ -53,9 +53,9 @@ interface CliArgs {
   format?: GraphFormat;
   /** `graph --steps`: expand each job to its ordered steps. */
   steps?: boolean;
-  /** `--web`: boot the local web UI instead of running a single workflow. */
-  web?: boolean;
-  /** `--port <n>`: the web UI port (defaults to 4280). */
+  /** `serve`: boot the long-lived host (HTTP API + console + webhooks) instead of running a single workflow. */
+  serve?: boolean;
+  /** `--port <n>`: the `serve` HTTP port (defaults to 4280). */
   port?: number;
   /** `--resume <id>`: continue a prior run's persisted journal instead of starting fresh. */
   resume?: string;
@@ -81,7 +81,6 @@ interface FlagState {
   datasources?: string[];
   format?: GraphFormat;
   steps: boolean;
-  web: boolean;
   port?: number;
   resume?: string;
   status?: string;
@@ -94,10 +93,6 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
   "--workspace": (argv, i, s) => {
     s.workspace = argv[++i];
     if (!s.workspace) fail("--workspace requires a directory path");
-    return i;
-  },
-  "--web": (_argv, i, s) => {
-    s.web = true;
     return i;
   },
   "--port": (argv, i, s) => {
@@ -176,7 +171,7 @@ function parseInputsFlag(argv: string[], i: number, s: FlagState): number {
 
 /** Tokenize argv into a FlagState (flags + positionals); `-h`/`--help` exits. */
 function parseFlags(argv: string[]): FlagState {
-  const s: FlagState = { positionals: [], quiet: false, inputs: {}, noGlobal: false, steps: false, web: false };
+  const s: FlagState = { positionals: [], quiet: false, inputs: {}, noGlobal: false, steps: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     const handler = FLAG_HANDLERS[arg];
@@ -208,8 +203,8 @@ function parseArgs(argv: string[]): CliArgs {
   if (s.positionals[0] === "resume") return resolveRecover(s, common, "resume");
   if (s.positionals[0] === "rerun") return resolveRecover(s, common, "rerun");
   if (s.positionals[0] === "logs") return resolveLogs(s, common);
-  if (s.web) return resolveWeb(s, common);
-  if (s.port !== undefined) fail("--port only applies to `--web`");
+  if (s.positionals[0] === "serve") return resolveServe(s, common);
+  if (s.port !== undefined) fail("--port only applies to `serve`");
   if (s.positionals[0] === "graph") return resolveGraph(s, common);
   if (s.positionals[0] === "run") return resolveRun(s, common);
   return resolveFile(s, common);
@@ -249,15 +244,16 @@ function resolveRuns(s: FlagState, common: CommonArgs): CliArgs {
   return { runs: true, ...(s.status ? { runStatus: s.status } : {}), ...common };
 }
 
-// `--web` — boot the local web UI over the workspace's `.workflows/` (it
-// enumerates *all* pipelines, so it takes no workflow name/file). Allowed with
-// `--workspace` and `--port`; rejects the run/graph-only flags.
-function resolveWeb(s: FlagState, common: CommonArgs): CliArgs {
-  if (s.positionals.length > 0) fail(`--web takes no positional arguments (got ${s.positionals[0]})`);
+// `serve` — boot the long-lived host (HTTP API + console + webhook receiver +
+// scheduler) over the workspace's `.workflows/` (it enumerates *all* pipelines, so
+// it takes no workflow name/file). Allowed with `--workspace` and `--port`; rejects
+// the run/graph-only flags.
+function resolveServe(s: FlagState, common: CommonArgs): CliArgs {
+  if (s.positionals.length > 1) fail(`serve takes no positional arguments (got ${s.positionals[1]})`);
   if (s.format) fail("--format only applies to `graph`");
   if (s.steps) fail("--steps only applies to `graph`");
   if (s.resume) fail("--resume only applies to `run <name>` / a workflow file");
-  return { web: true, ...(s.port !== undefined ? { port: s.port } : {}), ...common };
+  return { serve: true, ...(s.port !== undefined ? { port: s.port } : {}), ...common };
 }
 
 // `graph <file|name>` — emit the DAG instead of running. The target is treated
@@ -312,7 +308,7 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs\n` +
       `  ${prog} [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]\n` +
       `  ${prog} [--workspace <dir>] logs <id>     # replay a past run's stored log (web-run logs)\n` +
-      `  ${prog} [--workspace <dir>] --web [--port <n>]\n` +
+      `  ${prog} [--workspace <dir>] serve [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} doctor [--json]\n`,
@@ -325,8 +321,9 @@ function fail(msg: string): never {
 }
 
 /**
- * Boot the local web UI over the workspace's `.workflows/` and keep the process
- * alive on the listening server (Ctrl-C closes it + the owned engine).
+ * Boot the long-lived host (`serve`) over the workspace's `.workflows/` — the HTTP
+ * API, console, and webhook receiver — and keep the process alive on the listening
+ * server (Ctrl-C closes it + the owned engine).
  */
 async function runWebServer(args: CliArgs): Promise<void> {
   const workspace = args.workspace ?? process.cwd();
@@ -347,7 +344,7 @@ async function runWebServer(args: CliArgs): Promise<void> {
     dataDir,
     ...(args.port !== undefined ? { port: args.port } : {}),
   });
-  process.stdout.write(`work web UI: ${server.url}\n`);
+  process.stdout.write(`work serve: ${server.url}\n`);
   process.stdout.write(`  workspace: ${workspace}\n`);
   process.stdout.write(`  history:   ${dataDir}\n`);
   process.stdout.write(`  auth token: ${server.token}\n`);
@@ -445,7 +442,7 @@ async function showLogs(args: CliArgs): Promise<void> {
       // Metadata exists but no frames: only web-console runs persist their log.
       process.stdout.write(
         `run ${run.id.slice(0, 8)} (${run.name}, ${run.status}) has no stored log.\n` +
-          `Logs are persisted for runs started in the web console (\`${prog} --web\`); a plain ` +
+          `Logs are persisted for runs started in the web console (\`${prog} serve\`); a plain ` +
           `\`${prog} run\` streams to the terminal live but does not store frames.\n`,
       );
       process.exit(0);
@@ -584,10 +581,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  // `--web` — boot the local web UI and keep the process alive (it does NOT
-  // resolve a single workflow; the UI enumerates every pipeline in the
-  // workspace). Branches before the single-workflow resolve below.
-  if (args.web) {
+  // `serve` — boot the long-lived host (HTTP API + console + webhook receiver +
+  // scheduler) and keep the process alive (it does NOT resolve a single workflow;
+  // it enumerates every pipeline in the workspace). Branches before the
+  // single-workflow resolve below.
+  if (args.serve) {
     await runWebServer(args);
     return; // keep the event loop alive on the listening server
   }

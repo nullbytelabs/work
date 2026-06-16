@@ -29,8 +29,8 @@ import { WebPresenter, type Frame } from "./web-presenter.ts";
 // `interrupted` = the run didn't finish (orchestrator torn out mid-flight) — resumable.
 export type RunStatus = "queued" | "running" | "success" | "failure" | "interrupted";
 
-/** How a run was started: the UI's "Run workflow" button, or an authenticated webhook POST. */
-export type RunTrigger = "dispatch" | "webhook";
+/** How a run was started: the UI's "Run workflow" button, an authenticated webhook POST, or a cron schedule. */
+export type RunTrigger = "dispatch" | "webhook" | "schedule";
 
 export interface RunRecord {
   id: string;

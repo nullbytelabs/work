@@ -50,6 +50,10 @@ the rationale is the point.
 - [`webhook-triggers-research.md`](webhook-triggers-research.md) — the webhook
   trigger and its security boundary (layered auth, sender constraints,
   deployment tiers).
+- [`scheduled-triggers-research.md`](scheduled-triggers-research.md) — the
+  `on: schedule` cron trigger: GHA-mirrored syntax, why durability rides Absurd's
+  `sleepUntil` (a self-rescheduling ticker, not `pg_cron`), the web-server
+  lifecycle as host, and `croner` for cron math.
 - [`tailnet-incident-response-research.md`](tailnet-incident-response-research.md) —
   a cluster fleet and its LGTM telemetry stack as datasources over a Tailscale
   tailnet, and the autonomous loop: PrometheusRule → Alertmanager → `work`

@@ -1,32 +1,48 @@
-# Web console
+# The serve host
 
-`work --web` boots a small **local web console** for a project — a browser UI to
-run your workflows from a form, watch them execute live, browse run history, and
-manage webhook triggers. It's the same engine as the CLI, with a front end.
+`work serve` boots a small, long-lived **local host** for a project: an HTTP API
+with a browser console to run your workflows and watch them live, an authenticated
+**webhook receiver**, and a **scheduler** that fires `on: schedule` triggers. It's
+the same engine as the CLI, kept running. One process, bound to loopback.
 
 ```bash
-work --workspace . --web
-# work web UI: http://127.0.0.1:4280/
+work serve
+# work serve: http://127.0.0.1:4280/
+#   workspace: /path/to/project
+#   history:   /path/to/project/.workflows/db
+#   auth token: 1f3a…
+# Press Ctrl-C to stop.
 ```
 
-Open the printed URL. The console serves the workflows in that workspace's
-`.workflows/` directory; leave the process running for as long as you want the UI
-(and any [webhook receiver](#webhook-triggers)) up. Stop it with `Ctrl-C`.
+Open the printed URL. The host serves the workflows in that workspace's
+`.workflows/` directory; leave it running for as long as you want the console, the
+[webhook receiver](#webhook-triggers), and the [scheduler](#scheduled-triggers) up.
+Stop it with `Ctrl-C`. Point it at another project with `--workspace <dir>` and
+move its port with `--port <n>`.
 
 ::: tip No extra dependencies
 The server is plain `node:http` — there's no separate web server to install and
 nothing leaves your machine. It binds to loopback only (see [Security](#security)).
 :::
 
+::: warning One host per workspace
+The host owns the workspace's durable store (an in-process Postgres under
+`.workflows/db/`), and that store is single-process. Run **one** `work serve` per
+workspace — don't point a second `serve` (or a `work runs`/`work logs` CLI) at a
+workspace a `serve` is already running. Read live state through this host's API and
+console instead, never by opening its database from another process.
+:::
+
 ## What it gives you
 
-The console has three pages, all backed by the real engine:
+The console has four pages, all backed by the real engine:
 
 | Page | What it does |
 |---|---|
 | **Workflows** | Every workflow in the workspace, as a card. Pick one to get an auto-generated input form (from its `inputs:`), run it, and watch the job DAG and per-step output stream live. |
+| **Webhooks** | The [webhook triggers](#webhook-triggers) declared in your config — each with its public receiver URL, a **Send test** button, and a delivery audit log. |
+| **Schedules** | The [`on: schedule`](#scheduled-triggers) triggers this host is driving, each with its cron expression and its last-fired / next-fire instants. |
 | **History** | Past runs with status and timing. Open one to replay its output, or **re-run** it with the same inputs in one click. |
-| **Webhooks** | The webhook triggers declared in your config — each with its public receiver URL, a **Send test** button, and a delivery audit log. |
 
 ![A finished run in the work console: the job graph and per-step timings, replayed from history](/screenshots/console-run.png)
 
@@ -64,8 +80,8 @@ it left off — finished jobs are reused rather than redone.
 
 ## Webhook triggers
 
-The web server doubles as a **webhook receiver**: an external system can `POST` to
-it to trigger a workflow run. This is opt-in and authenticated at every layer — a
+The host doubles as a **webhook receiver**: an external system can `POST` to it to
+trigger a workflow run. This is opt-in and authenticated at every layer — a
 workflow is only reachable by webhook if it explicitly opts in **and** an operator
 wires up a matching, secret-bearing hook in config.
 
@@ -153,6 +169,68 @@ workflow opted in, a matching hook exists, and the request authenticates:
 - **Bounded** — the body is size-capped and parsed only *after* auth passes;
   concurrent runs are bounded so a burst of deliveries can't overwhelm the host.
 
+## Scheduled triggers
+
+The host also runs a **scheduler**: a workflow that declares `on: schedule` fires
+itself when a cron slot comes due, with no external trigger. The schedule lives in
+the workflow (it's committed, secret-free), and `work serve` is what evaluates it —
+there's no separate daemon and no CLI scheduling.
+
+### 1. Declare the schedule
+
+Add an `on: schedule` block listing one or more cron expressions. Cron is the
+familiar five-field syntax, evaluated in **UTC**:
+
+```yaml
+# .workflows/nightly-report.yaml
+name: nightly-report
+on:
+  schedule:
+    - cron: '0 6 * * *'    # 06:00 UTC every day
+    - cron: '0 18 * * 1-5' # and 18:00 UTC on weekdays
+jobs:
+  report:
+    steps:
+      - run: ./build-report.sh
+```
+
+Each `cron:` is validated when the workflow is parsed, so a malformed expression is
+a clean error at load time, not a silent no-fire.
+
+### 2. Run the host
+
+A schedule only fires while `work serve` is running over the workspace — it's the
+scheduler. Nothing else is required:
+
+```bash
+work serve
+```
+
+A newly-seen schedule is baselined to "now" and fires from its **next** slot
+forward — it never back-fires for time before the host first saw it. If the host
+is down across one or more slots, those slots are **skipped**, not back-filled: on
+restart the schedule resumes from the next upcoming slot (no catch-up storm). Each
+fired slot dispatches the workflow down the same path a manual run takes, recorded
+in History with a `schedule` trigger.
+
+### 3. See what's scheduled
+
+The **Schedules** page lists every `on: schedule` trigger the host is driving —
+the workflow, its cron expression, when it last fired, and when it'll fire next.
+The same data is available from the API at `GET /api/schedules`:
+
+```bash
+curl -s http://127.0.0.1:4280/api/schedules
+# { "active": true,
+#   "schedules": [
+#     { "workflow": "nightly-report", "cron": "0 6 * * *",
+#       "lastFired": 1749880800000, "nextFire": 1749967200000 } ] }
+```
+
+This is the *only* place schedule status lives — read through the running host.
+There's deliberately no CLI command to inspect schedules: that would mean a second
+process opening the workspace's single-owner database while `serve` holds it.
+
 ## Security
 
 The console is meant for your machine, and the defaults enforce that:
@@ -172,19 +250,18 @@ auth, fail-closed.
 
 ## Where data lives
 
-Run history and webhook deliveries are journaled to an in-process Postgres under
-`<workspace>/.workflows/db/`. That directory is the console's durable store — it's
-why History and the delivery log persist across restarts. It's machine-local
-runtime state, so keep it out of git — add `**/.workflows/db/` to your
-`.gitignore`.
+Run history, webhook deliveries, and schedule baselines are journaled to an
+in-process Postgres under `<workspace>/.workflows/db/`. That directory is the
+host's durable store — it's why History, the delivery log, and schedule state
+persist across restarts. It's machine-local runtime state, so keep it out of git —
+add `**/.workflows/db/` to your `.gitignore`.
 
 ## Flags
 
 | Flag | Effect |
 |---|---|
-| `--web` | Boot the console instead of running a single workflow. |
-| `--workspace <dir>` | Project root whose `.workflows/` the console serves (default: current directory). |
+| `--workspace <dir>` | Project root whose `.workflows/` the host serves (default: current directory). |
 | `--port <n>` | Port to bind (default `4280`; `1`–`65535`). |
 
-`--web` takes no positional arguments and ignores the run/graph-only flags. See the
-[CLI reference](../reference/cli#work-web).
+`serve` takes no positional arguments and ignores the run/graph-only flags. See the
+[CLI reference](../reference/cli#work-serve).

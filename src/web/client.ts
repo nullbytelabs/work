@@ -434,6 +434,14 @@ h1.run-state[data-status=skipped] { color: var(--skip); }
 .chips { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 .hook-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 
+/* Schedule timing — two labelled instants (last fired / next fire) on a hairline. */
+.sched-times {
+  display: flex; gap: var(--space-5); flex-wrap: wrap;
+  margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border);
+}
+.sched-times .lbl { display: block; color: var(--muted); font-size: var(--text-xs); margin-bottom: 2px; }
+.sched-times .val { font-size: var(--text-sm); color: var(--fg-soft); }
+
 /* Deliveries — a hairline-divided list (no nested cards). */
 .deliveries { margin-top: var(--space-4); border-top: 1px solid var(--border); padding-top: var(--space-4); }
 .deliveries .section-title { margin-bottom: var(--space-3); }
@@ -658,6 +666,7 @@ pre .stderr { color: #ff8d8d; }
     <nav class="app" aria-label="Primary">
       <a id="nav-workflows" href="#">Workflows</a>
       <a id="nav-webhooks" href="#">Webhooks</a>
+      <a id="nav-schedules" href="#">Schedules</a>
       <a id="nav-history" href="#">History</a>
     </nav>
     <span class="spacer"></span>
@@ -1586,6 +1595,74 @@ async function viewHistory() {
   }
 }
 
+// ---- schedules ---------------------------------------------------------
+// The on:schedule triggers this host is driving (GET /api/schedules). When the
+// host has no persistent store the scheduler isn't running, so active is false —
+// declared schedules still list (with a computed next-fire) behind a notice that
+// this host won't fire them.
+async function viewSchedules() {
+  closeActiveEs();
+  setActiveNav('nav-schedules');
+  app.innerHTML =
+    '<div class="page-head"><h1>Schedules</h1>' +
+    '<p class="sub">Time-based <code>on: schedule</code> triggers, evaluated in UTC by this host. ' +
+    'A due cron slot fires the workflow down the same path a run takes — no catch-up for slots ' +
+    'missed while the host was down.</p></div>' +
+    '<div class="hooks" id="scheds">' + skeletonRows(2) + '</div>';
+  mount('Schedules');
+  const list = document.getElementById('scheds');
+  let data;
+  try { data = await getJson('/api/schedules'); }
+  catch (e) { app.innerHTML = errorBlock(e.message); mount(); return; }
+  const scheds = data.schedules || [];
+  if (!scheds.length) {
+    list.outerHTML = emptyState(
+      'No scheduled workflows',
+      'Add an <code>on: schedule</code> block with a <code>cron:</code> entry to a workflow, ' +
+      'then reload to see it here.');
+    return;
+  }
+  list.innerHTML = '';
+  // When the host owns no persistent store the ticker isn't running — be honest
+  // that these won't fire here, while still showing what's declared.
+  if (!data.active) {
+    const note = document.createElement('p');
+    note.className = 'err boxed';
+    note.innerHTML = 'This host isn\\'t persisting state, so the scheduler is <strong>not running</strong> — ' +
+      'these schedules are declared but won\\'t fire here. Run <code>work serve</code> over the project ' +
+      '(it persists under <code>.workflows/db/</code>) to drive them.';
+    list.appendChild(note);
+  }
+  for (const s of scheds) list.appendChild(scheduleCard(s, data.active));
+}
+
+// One schedule card: workflow + cron, then last-fired / next-fire instants.
+function scheduleCard(s, active) {
+  const card = document.createElement('div');
+  card.className = 'card pad';
+  const stateTag = active ? statusPill('success', 'scheduling') : statusPill('skipped', 'not scheduling');
+  const cronTag = '<span class="tag mono">' + esc(s.cron) + '</span>';
+  card.innerHTML =
+    '<div class="hook-head">' +
+      '<div class="hook-title">' +
+        '<div class="hname">' + esc(s.workflow) + '</div>' +
+        '<div class="hmeta">cron, UTC</div>' +
+      '</div>' +
+      '<div class="hook-badges">' + cronTag + stateTag + '</div>' +
+    '</div>' +
+    '<div class="sched-times">' +
+      '<div><span class="lbl">Last fired</span>' +
+        '<span class="val">' + (s.lastFired ? esc(fmtWhen(s.lastFired)) : '—') + '</span></div>' +
+      '<div><span class="lbl">Next fire</span>' +
+        '<span class="val">' + (s.nextFire ? esc(fmtWhen(s.nextFire)) : '—') + '</span></div>' +
+    '</div>';
+  // Jump to the workflow's run page from its name.
+  const title = card.querySelector('.hname');
+  title.style.cursor = 'pointer';
+  title.onclick = () => viewTrigger(s.workflow);
+  return card;
+}
+
 // ---- shared view fragments ---------------------------------------------
 function emptyState(title, html) {
   return '<div class="empty">' +
@@ -1615,6 +1692,7 @@ function bindNav(id, fn) {
 bindNav('nav-home', viewWorkflows);
 bindNav('nav-workflows', viewWorkflows);
 bindNav('nav-webhooks', viewWebhooks);
+bindNav('nav-schedules', viewSchedules);
 bindNav('nav-history', viewHistory);
 viewWorkflows();
 </script>

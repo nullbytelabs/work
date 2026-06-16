@@ -163,8 +163,8 @@ config alone can't make a workflow webhook-triggerable.
 The receiver is **fail-closed**: a delivery is rejected unless the workflow opted
 in, a matching hook exists, and the request authenticates. Deliveries are de-duped
 (replay protection), size-capped, and parsed only after auth — and the audit log
-the web console shows never stores the payload or the secret. See the
-[Web console guide](../guide/web-ui#webhook-triggers) for the end-to-end flow.
+the console shows never stores the payload or the secret. See the
+[serve host guide](../guide/web-ui#webhook-triggers) for the end-to-end flow.
 
 ## Secrets and env expansion
 

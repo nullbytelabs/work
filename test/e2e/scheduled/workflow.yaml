@@ -1,0 +1,25 @@
+# scheduled trigger
+# description: a time-based `on: schedule` trigger. The host (`work serve`)
+#              evaluates the cron on a tick and fires the workflow when a slot
+#              comes due — UTC, GitHub-Actions cron syntax. The jobs run exactly
+#              as any other run; the schedule only governs *when* a run starts.
+# note: triggers fire under `work serve`, not an ad-hoc `work run`. Schedule
+#       status (last-fired / next-fire) is read through the host at
+#       `GET /api/schedules` and the serve console — never a separate CLI. A
+#       new schedule is seeded to "now" and fires from the next slot forward
+#       (no retroactive catch-up). This example runs to success the same way
+#       under `work run` — the trigger declaration doesn't change the run path.
+# usage: ./work ./test/e2e/scheduled/workflow.yaml   # runs the jobs once, now
+---
+name: scheduled
+
+on:
+  schedule:
+    - cron: '0 * * * *' # top of every hour (UTC)
+
+jobs:
+  report:
+    runs-on: gondolin
+    steps:
+      - name: collect
+        run: echo "hourly report at $(date -u +%H:%M)"

@@ -7,7 +7,7 @@ examples, read [Writing a workflow](../guide/writing-workflows) first.
 
 ```yaml
 name: report        # required — the workflow's name
-on: …               # optional — triggers (e.g. webhook)
+on: …               # optional — triggers (webhook / schedule / workflow_call)
 inputs: …           # optional — typed run-time parameters
 env: …              # optional — base env for all jobs/steps
 jobs: …             # required — the named jobs
@@ -16,18 +16,19 @@ jobs: …             # required — the named jobs
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** The workflow's name; also how `work run <name>` resolves it. |
-| `on` | string \| map | Trigger declaration (see [Triggers](#triggers)): `webhook` (remote POST) and/or `workflow_call` (make this workflow [reusable](#reusable-workflows)). |
+| `on` | string \| map | Trigger declaration (see [Triggers](#triggers)): `webhook` (remote POST), `schedule` (cron), and/or `workflow_call` (make this workflow [reusable](#reusable-workflows)). |
 | `inputs` | map | Declared run-time inputs (see [Inputs](#inputs)). |
 | `env` | `map<string,string>` | Workflow-level environment, the base layer for every job and step. |
 | `jobs` | map | **Required.** The named jobs (see [Jobs](#jobs)). |
 
 ## Triggers
 
-`on:` declares how a workflow may be invoked besides a direct `work run`. Two
+`on:` declares how a workflow may be invoked besides a direct `work run`. Three
 triggers are supported: `webhook` (below) opts in to remote, authenticated `POST`
-triggering by the [web console's](../guide/web-ui#webhook-triggers) receiver, and
+triggering by the [serve host's](../guide/web-ui#webhook-triggers) receiver,
+`schedule` ([below](#scheduled-on-schedule)) fires the workflow on a cron, and
 `workflow_call` opts in to being called by another workflow (see
-[Reusable workflows](#reusable-workflows)). Both can appear together.
+[Reusable workflows](#reusable-workflows)). They can appear together.
 
 ```yaml
 on: webhook                  # string shorthand — opt in, no options
@@ -57,6 +58,31 @@ inert to the engine — the [webhook receiver](../guide/web-ui#webhook-triggers)
 reads it, and the matching `webhooks.<name>` entry in
 [config](./configuration#webhooks) supplies the secret and auth scheme. A
 webhook-triggered run reads the request body via the [`event` context](#expressions).
+
+### Scheduled (`on: schedule`)
+
+`on: schedule` fires the workflow on a cron, with no external trigger. It's a list
+of entries, each with a `cron:` expression — the familiar five-field syntax,
+evaluated in **UTC**:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 6 * * *'    # 06:00 UTC daily
+    - cron: '*/15 * * * *' # and every 15 minutes
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `schedule` | list | One or more entries; each fires independently. |
+| `cron` | string | **Required** per entry. A five-field cron expression (`min hour day-of-month month day-of-week`), UTC. Validated when the workflow is parsed. |
+
+Schedules fire only while [`work serve`](../guide/web-ui#scheduled-triggers) runs
+over the workspace — it's the scheduler; there's no separate daemon. A newly-seen
+schedule fires from its **next** slot forward (never retroactively), and slots that
+elapse while the host is down are **skipped**, not back-filled. Status — last-fired
+and next-fire per schedule — is read through the host (`GET /api/schedules` and the
+console's Schedules page), never a separate CLI.
 
 ## Jobs
 
