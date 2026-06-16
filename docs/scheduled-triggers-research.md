@@ -570,13 +570,10 @@ never for execution. Sources:
    host owns the DB exclusively (a separate reader is the double-open hazard, §8).
    Scheduled runs already show in the console history (and `work runs`/`work logs`
    when serve is down) for free once tagged.
-10. **Scaffolding (optional)** — a `create workflow --schedule "<cron>"` flag that
-    injects an `on: schedule` block via `injectAfterName`
-    (`scaffold/templates.ts:154`), parallel to `webhookTriggerBlock`.
-11. **e2e** — a `test/e2e/` scheduled-workflow example + parse/scheduler unit
+10. **e2e** — a `test/e2e/` scheduled-workflow example + parse/scheduler unit
     tests (cron validation, next-fire math, catch-up/overlap policy, idempotent
     fire).
-12. **Docs-site** — user-facing `on: schedule` + `work serve` reference pages
+11. **Docs-site** — user-facing `on: schedule` + `work serve` reference pages
     (this doc is the maintainer record only).
 
 The downstream `dispatch → startRun → Runtime.run` path is unchanged; the work is
