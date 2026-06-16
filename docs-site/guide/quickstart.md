@@ -95,15 +95,15 @@ Formats: `mermaid`, `dot`, `json`, `ascii`. See the [CLI reference](../reference
 
 ## Run it from the browser
 
-Prefer a UI? Open the local web console over the same project:
+Prefer a UI? Boot the local host over the same project:
 
 ```bash
-work --workspace . --web         # → http://127.0.0.1:4280/
+work serve                       # → http://127.0.0.1:4280/
 ```
 
 Run workflows from an auto-generated form, watch them stream live, browse durable
-history, and receive webhook triggers — all loopback-only. See the
-[Web console guide](./web-ui).
+history, receive webhook triggers, and drive cron schedules — all loopback-only.
+See the [serve host guide](./web-ui).
 
 ## Explore the examples
 
@@ -117,5 +117,5 @@ directly.
 - Organize a real project with the [`.workflows/` layout](./project-layout).
 - Compose pipelines from smaller ones with [Reusable workflows](./reusable-workflows).
 - Add an [AI agent step](./agent-steps), or the built-in [`work/agent` primitive and your own JavaScript actions](./actions).
-- Drive it from the [web console](./web-ui).
+- Drive it from the [serve host](./web-ui).
 :::

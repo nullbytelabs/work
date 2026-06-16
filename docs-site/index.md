@@ -53,8 +53,8 @@ features:
     link: /guide/agent-steps
   - icon:
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M10 12l4 2.5-4 2.5z"/></svg>'
-    title: Local web console
-    details: "`work --web` opens a loopback browser UI to run workflows from a form, watch them stream live, browse durable history, and receive authenticated webhook triggers — no extra dependencies, nothing leaves your machine."
-    linkText: Web console
+    title: Local serve host
+    details: "`work serve` boots a loopback host — a browser console to run workflows from a form and watch them stream live, plus durable history, an authenticated webhook receiver, and a cron scheduler — no extra dependencies, nothing leaves your machine."
+    linkText: The serve host
     link: /guide/web-ui
 ---

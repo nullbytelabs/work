@@ -77,7 +77,7 @@ export default withMermaid(defineConfig({
             { text: "Actions", link: "/guide/actions" },
             { text: "Composite actions", link: "/guide/composite-actions" },
             { text: "Built-in actions", link: "/guide/builtin-actions" },
-            { text: "Web console", link: "/guide/web-ui" },
+            { text: "The serve host", link: "/guide/web-ui" },
           ],
         },
         {

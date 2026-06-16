@@ -13,7 +13,7 @@ with `work`, on one machine, no external CI (see [test](#test-the-suite-runs-its
 
 ```bash
 work run ci          # the whole pipeline, headless
-work --web           # or watch it run in the console
+work serve           # or watch it run in the console
 ```
 
 ## The pipeline at a glance
