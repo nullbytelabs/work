@@ -80,7 +80,7 @@ describe("observability — Layer 2 (runtime integration)", () => {
 
       // Job meta threaded by the runtime: the VM image is the (default) runs-on.
       const jobA = one(s, "job a");
-      assert.equal(jobA.attributes["host.image.name"], "gondolin");
+      assert.equal(jobA.attributes["host.image.name"], "work:base");
 
       // Step kind threaded by the runtime.
       assert.equal(one(s, "step ok").attributes["work.step.kind"], "run");

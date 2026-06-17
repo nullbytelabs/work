@@ -10,14 +10,14 @@ env:
 
 jobs:
   hello-world:
-    runs-on: gondolin # default
+    runs-on: gondolin # the stock guest (pinned; the default is work:base)
     steps:
       - name: hello-world
         run: |
           echo $HELLO_WORLD
 
   hello-name:
-    runs-on: gondolin # default
+    runs-on: gondolin # the stock guest (pinned; the default is work:base)
     steps:
       - name: hello-name
         run: |

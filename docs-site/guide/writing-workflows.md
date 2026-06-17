@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: work:base            # where the job runs (default: gondolin)
+    runs-on: work:base            # where the job runs (default: work:base)
     machine: large               # how big the VM is (default: medium)
     steps:
       - name: install
@@ -65,10 +65,12 @@ job-level `uses:` — see [Reusable workflows](./reusable-workflows).
 Every job runs in a Gondolin micro-VM; `runs-on` selects which **guest image**
 boots inside it:
 
-- **`gondolin`** — the stock guest, and the default if you omit `runs-on`. It ships
-  `sh`/`bash`, `node`/`npm`, `python3`, `curl`, and `ca-certificates`.
-- **`work:base`** — a more capable base that adds **git** and **jq** on top of the
-  stock guest. Reach for it when a step needs git (a checkout) or jq.
+- **`work:base`** — our capable base and **the default** if you omit `runs-on`. It
+  adds **git** and **jq** on top of the stock guest (which ships `sh`/`bash`,
+  `node`/`npm`, `python3`, `curl`, and `ca-certificates`), so a checkout or a `jq`
+  filter just works.
+- **`gondolin`** — the stock guest, with no git or jq. Pin it explicitly for a job
+  that wants the leanest possible image and doesn't need the extra tools.
 
 ```yaml
 jobs:
@@ -80,13 +82,12 @@ jobs:
 
 `work:base` (and any custom image) is **built on first use** on each machine, then
 reused — so the first run that needs it takes a few minutes; later runs boot
-instantly. `gondolin` boots immediately, so prefer it for jobs that don't need the
-extra tools. You can also define your own images with whatever toolchain your jobs
+instantly. You can also define your own images with whatever toolchain your jobs
 need — see [Custom images](./custom-images).
 
 ::: info Per-job only
 `runs-on` belongs on an individual job, not at the workflow level. The engine
-warns if you omit it (and applies the default `gondolin`); it errors if you put it
+warns if you omit it (and applies the default `work:base`); it errors if you put it
 at the top level or directly under `jobs:`.
 :::
 
