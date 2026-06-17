@@ -78,6 +78,15 @@ the rationale is the point.
   docs-site coverage gaps, and the ranked unaccounted-for surfaces to scaffold
   next (action packages, datasource/webhook config, template variety).
 
+## Testing & quality
+
+- [`property-based-testing.md`](property-based-testing.md) — adopting fast-check
+  for the pure compiler/spec surface: Anthropic's PBT framing (properties as a
+  higher-altitude spec; "is the test testing anything worthwhile?"), the
+  pattern vocabulary, the ranked concern inventory (matrix fan-out is the entry
+  point; expression access-path is the showcase round-trip), the anti-tautology
+  quality gate, and a living findings log. A knowledge guide + progress tracker.
+
 ## Observability
 
 - [`observability-otel-metrics.md`](observability-otel-metrics.md) — instrumenting

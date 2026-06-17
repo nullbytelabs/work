@@ -84,7 +84,10 @@ export function cellId(cell: MatrixCell, axisOrder: string[]): string {
     .filter((k) => !axisOrder.includes(k))
     .sort();
   const keys = [...axisOrder.filter((a) => a in cell), ...extra];
-  return keys.map((k) => `${k}-${safe(cell[k]!)}`).join("_");
+  // Sanitize keys as well as values: axis/include key names are unvalidated at
+  // parse time (src/spec/parse.ts), so a key like `os/arch` would otherwise leak
+  // a path separator into the id, breaking the path-safe contract (plan.ts:41).
+  return keys.map((k) => `${safe(k)}-${safe(cell[k]!)}`).join("_");
 }
 
 /** A human-readable leg label, e.g. `test (node=20, os=ubuntu)`. */
