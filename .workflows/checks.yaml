@@ -1,14 +1,12 @@
 # checks
 # description: reusable static-checks workflow — one gondolin VM, a single `npm ci`,
-#              then lint / typecheck / knip / fan-in each as its own step. Every tool
-#              step is `continue-on-error: true`, so a failing tool does NOT fail the
-#              job — the run carries on and each tool's deterministic OUTCOME
-#              (success/failure/skipped) is forwarded to `review` via
-#              `steps.<id>.outcome`. `review` leads with any failure; failure DETAIL
-#              stays in this job's step output in the run (no agent re-narrates the
-#              logs). The hard repo gate is GitHub Actions (.github/workflows/ci.yml),
-#              which runs these tools directly. Called by `ci` via
-#              `uses: workflow/checks`; also runnable: `work run checks`.
+#              then lint / typecheck / knip / fan-in each as its own step. A failing
+#              tool fails the job — and the `ci` run — so this is a hard gate, not an
+#              advisory pass (the run fails fast at the first red tool). Each tool's
+#              deterministic OUTCOME is still forwarded to `review` via
+#              `steps.<id>.outcome` for a per-tool summary. GitHub Actions
+#              (.github/workflows/ci.yml) runs these tools directly too. Called by `ci`
+#              via `uses: workflow/checks`; also runnable: `work run checks`.
 ---
 name: checks
 
@@ -25,9 +23,9 @@ jobs:
     runs-on: work:base
     # Forward each tool's deterministic OUTCOME to `review` (success/failure/skipped).
     # `steps.<id>.outcome` is the engine's built-in per-step verdict — no logs, no
-    # `$WORK_OUTPUT` plumbing, no LLM in the loop for "did it pass". `continue-on-error`
-    # (below) keeps the job green on a red tool so every outcome still reaches review;
-    # the failed step's own output remains visible in the run for detail.
+    # `$WORK_OUTPUT` plumbing, no LLM in the loop for "did it pass". A failing tool
+    # fails the job (hard gate); steps after the first failure don't run, so `review`
+    # sees outcomes up to that point. The failed step's output stays visible in the run.
     outputs:
       lint: ${{ steps.lint.outcome }}
       typecheck: ${{ steps.typecheck.outcome }}
@@ -39,20 +37,16 @@ jobs:
 
       - id: lint
         name: lint
-        continue-on-error: true
         run: npm run lint
 
       - id: typecheck
         name: typecheck
-        continue-on-error: true
         run: npm run typecheck
 
       - id: knip
         name: knip
-        continue-on-error: true
         run: npm run knip
 
       - id: fanin
         name: fan-in
-        continue-on-error: true
         run: npm run fan-in

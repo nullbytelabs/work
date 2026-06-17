@@ -8,10 +8,9 @@
 #              portable, nothing machine-specific baked in). The inner VMs download
 #              the alpine-base guest image once over the job's egress and reuse it
 #              for the whole run (the cache lives in the outer guest). One `npm ci`,
-#              then `npm test` as a `continue-on-error` step so a failure doesn't
-#              fail the job — `ci` carries the result into `review`. The step's real
-#              outcome still shows in the run. Called by `ci` via
-#              `uses: workflow/test`; also runnable: `work run test`.
+#              then `npm test` — a test failure fails the job and the `ci` run (a hard
+#              gate); the step outcome is still carried into `review`. Called by `ci`
+#              via `uses: workflow/test`; also runnable: `work run test`.
 #
 # GitHub Actions CI is unaffected — ci.yml runs `npm test` directly, not `work run`.
 # The mediated-egress secret-injection e2e skips its two on-box-dial assertions when
@@ -30,9 +29,9 @@ jobs:
     runs-on: work:nested
     machine: { cpus: 8, memory: "64G" }   # outer VM hosts the nested e2e VMs
     # `steps.test.outcome` is the engine's deterministic per-step verdict
-    # (success/failure/skipped); `continue-on-error` keeps the job green on a test
-    # failure so the outcome still reaches `review` (which leads with it). Failure
-    # detail stays in this step's output in the run — no agent re-narrates the log.
+    # (success/failure/skipped); a test failure now fails the job (a hard gate) and the
+    # outcome still reaches `review` (which leads with it). Failure detail stays in this
+    # step's output in the run — no agent re-narrates the log.
     outputs:
       test: ${{ steps.test.outcome }}
     steps:
@@ -41,7 +40,6 @@ jobs:
 
       - id: test
         name: test (full suite, nested VMs)
-        continue-on-error: true
         env:
           WORK_SKIP_VM: ""
           WORK_NESTED: "1"            # we ARE a gondolin guest: see egress-e2e skip
