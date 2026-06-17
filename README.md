@@ -13,12 +13,12 @@ It's a general workflow engine: anything you'd otherwise wire together with a sh
 name: report
 jobs:
   collect:
-    runs-on: gondolin          # each job runs in its own micro-VM
+    runs-on: work:base         # each job runs in its own micro-VM
     steps:
       - run: node scripts/aggregate.js > data.json
   summarize:
     needs: [collect]
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - uses: work/agent       # an AI agent reads data.json and writes the summary
         with:
@@ -75,7 +75,7 @@ cat > hello.yaml <<'EOF'
 name: hello
 jobs:
   greet:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - run: echo "hello from the sandbox"
 EOF
@@ -101,7 +101,7 @@ env:
 
 jobs:
   build:
-    runs-on: gondolin            # where the job runs (default: gondolin)
+    runs-on: work:base           # where the job runs (default: work:base)
     steps:
       - name: install
         run: npm install
@@ -111,7 +111,7 @@ jobs:
 
   report:
     needs: [build]               # runs after build succeeds
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - name: show
         env:
@@ -126,7 +126,7 @@ The building blocks:
 | Feature | How |
 |---|---|
 | **Jobs & steps** | `jobs:` → named jobs, each with ordered `steps:`. A step is a `run:` command or a `uses:` agent. |
-| **`runs-on`** | `gondolin` — every job runs in a micro-VM (the only target, and the default; state it explicitly per job). |
+| **`runs-on`** | the micro-VM guest image: `work:base` (our capable base — git/jq/curl/node — **and the default**) or `gondolin` (the stock guest), plus any custom `work:<image>`. Every job runs in a micro-VM; state it explicitly per job. |
 | **`needs`** | `needs: [build]` — a job waits for its dependencies. Independent jobs run **in parallel**. |
 | **`env`** | declared at workflow, job, or step level; inner scopes override outer. |
 | **Inputs** | `inputs:` declares typed params (`string`/`number`/`boolean`, with `required`/`default`/`options`/`pattern`). Pass at run time with `--inputs '{"name":"ada"}'`, read via `${{ inputs.name }}`. |
@@ -196,7 +196,7 @@ An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-
 ```yaml
 jobs:
   review:
-    runs-on: gondolin
+    runs-on: work:base
     steps:
       - id: summary
         uses: work/agent

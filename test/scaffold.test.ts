@@ -37,7 +37,7 @@ describe("scaffoldFiles — hello-world", () => {
     const yaml = files.get(".workflows/deploy.yaml")!;
     assert.match(yaml, /^name: deploy$/m);
     assert.match(yaml, /^ {2}deploy:$/m); // job id is the slug
-    assert.match(yaml, /runs-on: gondolin/);
+    assert.match(yaml, /runs-on: work:base/);
     assert.doesNotMatch(yaml, /\{\{name\}\}/); // no unrendered placeholders
   });
 });

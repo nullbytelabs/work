@@ -48,7 +48,7 @@ env:
 
 jobs:
   {{name}}:
-    runs-on: gondolin # the secure micro-VM (the default and only target)
+    runs-on: work:base # the secure micro-VM, our capable base image (the default)
     steps:
       - name: greet
         run: |
@@ -67,7 +67,7 @@ name: {{name}}
 
 jobs:
   {{name}}:
-    runs-on: gondolin
+    runs-on: work:base
     outputs:
       result: \${{ steps.agent.outputs.summary }}
     steps:
@@ -222,7 +222,7 @@ name: <unique name>          # how you invoke it: work run <name>
 env: { KEY: value }          # optional workflow-level env
 jobs:
   <job-id>:
-    runs-on: gondolin        # the only target (the default)
+    runs-on: work:base       # the micro-VM guest image (the default; gondolin = stock)
     needs: [<other-job>]     # optional dependencies
     strategy:
       matrix: { k: [a, b] }  # optional fan-out

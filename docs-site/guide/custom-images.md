@@ -4,14 +4,15 @@ Every job runs in a Gondolin micro-VM. **`runs-on`** picks which guest image boo
 inside it — the stock guest, the bundled `work:base`, or a custom image you define.
 Reach for a richer image when your jobs need tools the stock guest doesn't ship.
 
-## Stock guest vs `work:base`
+## `work:base` vs the stock guest
 
-- **`gondolin`** — the stock guest, and the default when you omit `runs-on`. It
-  ships `sh`/`bash`, `node`/`npm`, `python3`, `curl`, and `ca-certificates`, and
-  boots immediately (nothing to build) — so it's the right choice when those tools
-  are enough.
 - **`work:base`** — a bundled image that adds **git** and **jq** on top of the
-  stock guest. Reach for it when a step needs git (a checkout) or jq.
+  stock guest, and **the default when you omit `runs-on`**. It's built on first use
+  (then cached), so a checkout or a `jq` filter works out of the box.
+- **`gondolin`** — the stock guest, and nothing more. It ships `sh`/`bash`,
+  `node`/`npm`, `python3`, `curl`, and `ca-certificates`, and boots immediately
+  (nothing to build) — pin it explicitly when those tools are enough and you want
+  the leanest image.
 
 ```yaml
 jobs:

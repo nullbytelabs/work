@@ -110,7 +110,7 @@ export type MachineSpec =
  * exclusivity; the compiler inlines a `uses:` job's callee into the flat plan.
  */
 export interface JobSpec {
-  /** Where the job runs. Default applied by the compiler (`DEFAULT_RUNS_ON`, "gondolin"). Forbidden on a `uses:` job. */
+  /** Where the job runs. Default applied by the compiler (`DEFAULT_RUNS_ON`, "work:base"). Forbidden on a `uses:` job. */
   runsOn?: string;
   /** Machine sizing (named type or inline cpu/memory). Resolved by the compiler against the built-in catalog. Forbidden on a `uses:` job. */
   machine?: MachineSpec;

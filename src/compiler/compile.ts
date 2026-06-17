@@ -58,7 +58,7 @@ export interface CompileOptions {
   _deferredInputs?: Set<string>;
 }
 
-export const DEFAULT_RUNS_ON = "gondolin";
+export const DEFAULT_RUNS_ON = "work:base";
 
 /**
  * Validate a job's `runs-on` (shape only). The supported targets are the stock
@@ -80,12 +80,13 @@ function validateRunsOn(jobId: string, runsOn: string | undefined): void {
 
 /**
  * Nudge authors to state the sandbox outright: an omitted `runs-on` defaults to
- * gondolin, which we'd rather have written explicitly. Returns a warning string
- * for an implicit `runs-on`, or undefined when it's explicit.
+ * `work:base` (our capable floor — git/jq/curl/node on top of the stock guest),
+ * which we'd rather have written explicitly. Returns a warning string for an
+ * implicit `runs-on`, or undefined when it's explicit.
  */
 function runsOnWarning(jobId: string, runsOn: string | undefined): string | undefined {
   if (runsOn === undefined) {
-    return `job "${jobId}": no "runs-on" set — defaulting to "${DEFAULT_RUNS_ON}". Set "runs-on: gondolin" explicitly.`;
+    return `job "${jobId}": no "runs-on" set — defaulting to "${DEFAULT_RUNS_ON}". Set "runs-on: ${DEFAULT_RUNS_ON}" explicitly.`;
   }
   return undefined;
 }
