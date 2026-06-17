@@ -209,7 +209,7 @@ function expandJob(baseId: string, job: JobSpec): { id: string; title?: string; 
  * spec always produces the same order — important for a durable runtime where
  * orchestration must be replay-stable.
  */
-function topoSort(jobs: Record<string, PlannedJob>): string[] {
+export function topoSort(jobs: Record<string, PlannedJob>): string[] {
   const ids = Object.keys(jobs).sort();
   const indegree = new Map<string, number>(ids.map((id) => [id, 0]));
   const dependents = new Map<string, string[]>(ids.map((id) => [id, []]));

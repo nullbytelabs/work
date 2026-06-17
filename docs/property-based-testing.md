@@ -12,10 +12,10 @@ This doc is three things at once:
 3. a **findings log** — an append-only record of bugs found, properties that
    surprised us, and dead ends. Real PBT value shows up here over time.
 
-Status: **adopting.** Branch `pbt`. fast-check `4.8.0` is a devDependency. Target #1
-(matrix fan-out, `src/compiler/matrix.ts`) is landed — 5 properties, and it found a
-real path-safety bug on day one. See the [progress tracker](#progress-tracker) and
-[findings log](#findings-log).
+Status: **established.** Branch `pbt`. fast-check `4.8.0` is a devDependency. Four of
+five inventory targets are landed (14 properties, all mutation-checked); target #1
+found a real path-safety bug on day one. #4 (condition eval) is deferred. See the
+[progress tracker](#progress-tracker) and [findings log](#findings-log).
 
 ---
 
@@ -302,7 +302,7 @@ the property describes intended behavior rather than mirroring the code.
 | 2 | Expression access-path | `src/compiler/expr.ts` | ☑ done | 4 / 4 | 0 (F-3) |
 | 3 | Typed input coercion | `src/compiler/inputs.ts` | ☑ done | 5 / 5 | 0 (F-4) |
 | 4 | Condition evaluation | `src/compiler/condition.ts` | ☐ deferred | — | — |
-| 5 | Topological sort | `src/compiler/compile.ts` | ☐ todo | 0 / 4 | — |
+| 5 | Topological sort | `src/compiler/compile.ts` | ☑ done | 4 / 4 | 0 (F-5) |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · deferred.
 
@@ -399,6 +399,39 @@ there was gold in the hill.
   (options/pattern) are kept out of the P4 idempotence scenario on purpose: feeding
   a resolved sentinel back makes it "present", which *would* then be constraint-
   checked — a real asymmetry, isolated to P5 rather than allowed to muddy P4.
+
+### F-5 — `topoSort` DAG invariants: no bug; replay-stability holds
+
+- **Target #5** (`test/toposort.property.test.ts`): 4 properties — P1 the order is a
+  permutation of the job ids, P2 every `need` precedes its dependent, P3 the result
+  is independent of job insertion order (the replay-stability the algorithm exists
+  for), P4 cyclic graphs throw and name the cycle. All green.
+- **Generator:** acyclicity is made *structural*, not filtered — fix the node list
+  as a linear order and let each node `need` only earlier nodes. Cyclic cases use a
+  ring (self-loop for n=1). No `.filter` on the arbitrary, so shrinking stays sharp.
+- **Exported `topoSort` for testing** (`compile.ts`) — it was private, used only by
+  `compile`. This matches the repo's existing habit of exporting pure helpers
+  (`expandMatrix`, `parseAccessPath`, `closingBracket`) for unit coverage; no
+  behavior change.
+- **Mutation note (P3):** the determinism property only falsifies when *insertion
+  order actually leaks*. Reversing the tie-break (e.g. `.sort().reverse()`
+  everywhere) stays order-independent, so P3 would not catch it — P3 asserts
+  *stability*, not the specific alphabetical choice. The mutant that does falsify it
+  removes both the initial `ids` sort and the ready-queue sort so insertion order
+  reaches `ready.shift()`. (If we ever want to pin the *alphabetical* tie-break
+  specifically, that's a separate, stronger property worth adding.)
+
+---
+
+## Where this leaves us
+
+Four of five inventory targets landed (14 properties), each a self-contained,
+mutation-checked commit; #4 (condition eval) remains deferred until there's reason
+to spend the larger surface. The one real bug (F-1) was found on day one by the
+first target. The "no bug" targets (#2/#3/#5) still bought regression nets over the
+parser's inverse-ness, the input contract's strictness, and the sort's
+replay-stability — and several reusable learnings about *checking* properties
+(equivalent mutants, autoboxing-`undefined`, stability-vs-choice).
 
 ---
 
