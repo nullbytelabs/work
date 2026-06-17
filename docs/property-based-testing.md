@@ -445,6 +445,29 @@ there was gold in the hill.
   equivalent mutant for P2 — `!!e` collapses back to identity — so P2's mutant has to
   break the negation count *asymmetrically*, e.g. `! → true`. Same family as F-2/F-3.)
 
+### F-7 — S-2 path confinement: no bug, but the property nearly lacked teeth
+
+- **Target S-2** (`test/path-confinement.property.test.ts`): 3 properties — the leg-id
+  format `<base>::<cell>` confines for adversarial cells (P2), the full pipeline via
+  `compile(parseWorkflow(...))` confines every job id for adversarial matrices (P1,
+  driven by JSON-as-YAML to feed nasty strings without escaping), and reusable
+  namespacing preserves confinement (P3). All green — post-F-1, `safe()` keeps ids
+  confined by construction.
+- **The real lesson is about the *test*, not the code.** The first cut passed even
+  with `safe()` deleted (a genuinely escaping mutation). Two reasons, both fixed:
+  1. **Generator too weak.** A single matrix value could carry at most one `../`-ish
+     token, and the `<key>-` prefix absorbs one leading `..` (`j::a-../../etc` cancels
+     back to a subdir). Escaping needs a *leading separator + several* `../`, which the
+     corpus never produced. Fix: a `traversal` arbitrary that chains 1–8 `../`/`/`
+     tokens, so it can actually climb above the root.
+  2. **Predicate too lax.** It treated `resolve(...) === root` as confined, but an id
+     that cancels to the root itself (only reachable with broken sanitization) means a
+     job would stage *over* the work root. Fix: require a **proper** subdir
+     (`r !== root && r.startsWith(root + sep)`).
+  After both, the mutation falsifies all three (counterexample: axis name `../../../`,
+  value `..`). A property that stays green on a real bug is worse than none — always
+  confirm the security property can fail before trusting its green.
+
 ---
 
 ## Where this leaves us
@@ -563,7 +586,7 @@ Before `serve` may bind a non-loopback address, these must land (PBT-shaped mark
 | # | Surface | Invariant | Status | Bug? |
 |---|---|---|---|---|
 | S-1 | `event`→`walkPath` inherited-property leak | resolution returns own payload data only | ◐ in progress | yes — fixing |
-| S-2 | job-id → filesystem confinement | computed id stays confined under `workRoot` | ☐ todo | — |
+| S-2 | job-id → filesystem confinement | computed id stays confined under `workRoot` | ☑ done | no (F-7) |
 | S-3 | egress allowlist ↔ secret-scope + matcher contract | credential scoped to exactly the allowlisted host | ☐ todo | — |
 | R | pre-`0.0.0.0` readiness (bind-gate, webhook-auth, limits, authN) | see checklist | ☐ todo | — |
 
