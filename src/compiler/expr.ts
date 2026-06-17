@@ -274,6 +274,11 @@ export function walkPath(root: unknown, segments: Segment[]): unknown {
       if (!Array.isArray(cur)) return undefined;
       cur = cur[seg.index];
     } else {
+      // Own properties only: untrusted payloads (the webhook `event`) flow through
+      // here, so a key like `constructor`/`__proto__`/`toString` must read as
+      // "missing", never reach an inherited builtin. Matches the hasOwnProperty
+      // guards on the other context roots (resolveInputs/resolveMatrix in this file).
+      if (!Object.hasOwn(cur, seg.name)) return undefined;
       cur = (cur as Record<string, unknown>)[seg.name];
     }
   }
