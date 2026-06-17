@@ -300,7 +300,7 @@ the property describes intended behavior rather than mirroring the code.
 | — | Add `fast-check` devDependency | `package.json` | ☑ done (`4.8.0`, exact) | — | — |
 | 1 | Matrix fan-out | `src/compiler/matrix.ts` | ☑ done | 5 / 5 | 1 (F-1) |
 | 2 | Expression access-path | `src/compiler/expr.ts` | ☑ done | 4 / 4 | 0 (F-3) |
-| 3 | Typed input coercion | `src/compiler/inputs.ts` | ☐ todo | 0 / 5 | — |
+| 3 | Typed input coercion | `src/compiler/inputs.ts` | ☑ done | 5 / 5 | 0 (F-4) |
 | 4 | Condition evaluation | `src/compiler/condition.ts` | ☐ deferred | — | — |
 | 5 | Topological sort | `src/compiler/compile.ts` | ☐ todo | 0 / 4 | — |
 
@@ -380,6 +380,25 @@ there was gold in the hill.
   counterexample `walk({a:0}, [a, ""]) → 0`. Lesson: when the correct output is
   `undefined`, guard against mutants that *also* yield `undefined` for the wrong
   reason — pick a mutant that returns a distinguishable value.
+
+### F-4 — `inputs.ts` typed resolution: no bug, strict-typing contract holds
+
+- **Target #3** (`test/inputs.property.test.ts`): 5 properties — P1 output
+  shape/typing invariant (result keys == declared keys; every value matches its
+  declared type, whether from the body, a default, or a sentinel), P2 unknown-key
+  rejection, P3 strict no-coercion (a wrong-typed value throws — `"36"` is never a
+  number), P4 idempotence (resolution is a fixed point), P5 the `if (present)` gate
+  (an absent optional with a sentinel-hostile constraint resolves to the sentinel,
+  not a throw). All green; `resolveInputs` upholds its strict-typing contract.
+- **All 5 mutation-checked, no equivalent-mutant surprises:** bad sentinel type,
+  ignore-unknown-keys, coerce-numbers, append-on-string (non-idempotent), and
+  drop-the-present-gate each falsified exactly the matching property.
+- **Generator note:** scenarios are normalized to always resolve — a required input
+  with no default is force-provided — so P1/P4 test the resolution logic, not the
+  required-without-value throw (which P-side error paths cover). Constraints
+  (options/pattern) are kept out of the P4 idempotence scenario on purpose: feeding
+  a resolved sentinel back makes it "present", which *would* then be constraint-
+  checked — a real asymmetry, isolated to P5 rather than allowed to muddy P4.
 
 ---
 
