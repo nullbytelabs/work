@@ -461,6 +461,114 @@ stateful `fc.commands` model of the runtime's durable step memoization.
 
 ---
 
+## Security track
+
+PBT is unusually good at security invariants: a security property is a "must hold
+for *every* input, especially adversarial ones" claim, and fuzzing adversarial
+strings/JSON is exactly what generators do. This track captures the highest-leverage
+security surfaces, grounded in how the boundary actually works (see
+`docs/egress-data-path.md`, `docs/gondolin-secure-execution.md`, `src/web/server.ts`).
+
+**Threat-model note — `serve` will eventually bind `0.0.0.0`.** Today `work serve`
+is loopback-hardened: `listen(port, "127.0.0.1")` (`server.ts:974`), a Host-header
+allowlist (`:259`, anti-DNS-rebinding), and a CSRF token on mutating UI POSTs
+(`:290`). The **webhook delivery path** is the one surface already built for hostile
+networks (HMAC-SHA256 / bearer, `timingSafeEqual`, fail-closed, generic 404 — no hook
+enumeration; `authorizeHook`, `:566`). Binding `0.0.0.0` is a stated future goal, and
+it dissolves the loopback assumption — see the [pre-`0.0.0.0` readiness](#pre-0000-readiness)
+checklist. That goal *re-rates* the items below: an attacker-reachable webhook makes
+the event-payload surface (S-1) load-bearing.
+
+### S-1 — inherited-property leakage in context resolution (confirmed gap) ← doing first
+
+**Invariant:** resolving `${{ event.<path> }}` / `if: event.<path>` returns **only own
+data from the payload** — never an inherited builtin (`constructor`, `__proto__`,
+`toString`, `hasOwnProperty`, …). Walking a JSON value never yields a function or a
+prototype object.
+
+**Gap (confirmed):** `walkPath` (`expr.ts:269`) does raw `cur[seg.name]`, which walks
+the prototype chain. The guarded roots — `inputs` (`expr.ts:100`), `matrix`
+(`expr.ts:117`), `needs`/`steps` (`:128`,`:150`) — gate every access with
+`Object.prototype.hasOwnProperty.call`. But **`event`** resolution (`expr.ts:167`) and
+**all** condition roots (`condition.ts:353`) flow through unguarded `walkPath`. So
+`event.constructor` → a function, `event.toString` → a function, `event.anything`
+falls through to `Object.prototype`. `event` is the attacker-controlled webhook
+surface (`server.ts:762` `JSON.parse`, returned as-is). It's a prototype-*read* gadget
+(no write/pollution site was found — JSON.parse's `__proto__` key is an own property,
+not a prototype mutation), but it can flip an `if:` gate truthy or inject a function's
+source into a `run:` string, and it's the seam where a future write-path becomes
+pollution.
+
+**Fix:** make `walkPath` own-property-only (`Object.hasOwn` guard on key access) —
+idiomatic here (`compile.ts:369` already notes "`in` walks the prototype"). This
+hardens `event` in interpolation *and* every root in conditions, in one place,
+matching the existing guarded roots.
+
+**Properties:** (P1) `walkPath` over any JSON value agrees with an own-only reference
+walk for any path drawn from a builtin-key-rich pool; (P2) `walkPath` over a JSON value
+never returns a function; (P3) at the surface, `evaluateCondition`/`interpolate` resolve
+builtin keys on a non-owning event to falsy/`""`. Status: see [tracker](#security-tracker).
+
+### S-2 — path confinement on the job-id → filesystem sink (durable guarantee)
+
+**Invariant:** for *any* workflow (plain, matrix, reusable, and compositions), the
+computed `job.id` stays a single confined segment — `path.join(workRoot, job.id)`
+never escapes `workRoot` (no `..`, no separators, never `.`/empty). The sink is real:
+`runtime.ts:613` does `join(ctx.workRoot, job.id)`, and matrix `<base>::<cell>` /
+reusable `<callId>__<jobId>` ids **bypass** the parse-time `assertValidJobKey`
+(`parse.ts:506`). This is the security invariant behind the `cellId` bug (F-1); a
+property over the full id pipeline (`cellId` → `::` → namespacing → `-n` disambiguation)
+asserted at the sink locks the whole class. Likely green post-F-1 — a regression net on
+a path-traversal sink — but stresses untested compositions (an id that collapses to
+`.`/`..`/empty would be a fix).
+
+### S-3 — egress allowlist ↔ secret-scope consistency, and locking the matcher contract
+
+**Invariant:** the host a credential is scoped to is exactly the host that's allowlisted
+and exactly what a guest request canonicalizes to. Our derivation —
+`hostOf(baseUrl)` / `modelHostOf` feeding both the allowlist set and the secret's
+`hosts` (`egress/datasource.ts`, `agent/egress.ts:75`) — must not diverge, or a token
+is injected for an unintended host (leak) or a host is reachable without its token.
+The matcher itself (`matchHostname` in `node_modules/@earendil-works/gondolin`) is
+vendor code and already `^…$`-anchored, so we don't re-test their regex — we
+**characterize and lock the contract we depend on** ("`hostOf(baseUrl)` matches that
+exact host and nothing else; no suffix/trailing-dot/IDN/port escape"), so a gondolin
+auto-bump that loosened matching turns the property red instead of silently widening
+egress. Generators vary case/ports/trailing-dots/IPv6/IDN. Mostly fail-closed today, so
+this primarily codifies the credential-scoping guarantee against seam bugs and
+dependency drift.
+
+### Pre-`0.0.0.0` readiness
+
+Before `serve` may bind a non-loopback address, these must land (PBT-shaped marked ⚙):
+
+- ⚙ **Bind-gating (fail-closed):** never bind non-loopback unless explicitly opted in
+  *and* auth is configured — property: `bindAddress ≠ 127.0.0.1 ⇒ authConfigured`.
+  The guardrail that makes shipping this incrementally safe.
+- ⚙ **Webhook-auth hardening:** fuzz `authorizeHook` (`server.ts:566`) — truncated/
+  oversized signatures, type-confusion (array/object headers), missing-header→deny,
+  constant-time across all reject paths, and **body read+HMAC'd before auth** (size cap
+  to avoid a pre-auth DoS).
+- ⚙ **Body-size / connection limits:** remote-reachable `JSON.parse` + PGLite
+  single-writer are DoS surfaces.
+- **Host-header / rebinding rework:** the `{127.0.0.1:port, localhost:port}` allowlist
+  403s every remote client — redesign without losing rebinding protection (design,
+  then property-test the resulting policy).
+- **Real UI/API authN (not PBT, the long pole):** a CSRF token is anti-CSRF, *not*
+  authentication (it's embedded in the served page). The management surface needs
+  genuine auth before exposure.
+
+### Security tracker
+
+| # | Surface | Invariant | Status | Bug? |
+|---|---|---|---|---|
+| S-1 | `event`→`walkPath` inherited-property leak | resolution returns own payload data only | ◐ in progress | yes — fixing |
+| S-2 | job-id → filesystem confinement | computed id stays confined under `workRoot` | ☐ todo | — |
+| S-3 | egress allowlist ↔ secret-scope + matcher contract | credential scoped to exactly the allowlisted host | ☐ todo | — |
+| R | pre-`0.0.0.0` readiness (bind-gate, webhook-auth, limits, authN) | see checklist | ☐ todo | — |
+
+---
+
 ## Appendix: fast-check mechanics
 
 Condensed from the official docs (fast-check.dev) at **v4.8.0**. Cite the live docs
