@@ -25,6 +25,7 @@ import { listWorkflows, listScheduledWorkflows, findWorkflowByName, resolveWorkf
 import { createAbsurdEngine, type AbsurdEngine } from "../runtime/index.ts";
 import type { TargetFactory } from "../targets/index.ts";
 import { expandEnv, type PiWorkflowsConfig, type WebhookConfig } from "../config/index.ts";
+import { VERSION } from "../version.ts";
 import { UserFacingError } from "../errors.ts";
 import { RunRepository } from "../persistence/runs.ts";
 import { RunEventRepository } from "../persistence/run-events.ts";
@@ -136,7 +137,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   // inject the shared handle into every run, so a long-lived server registers the SDK a
   // single time. Each run still builds its own emitter (isolated span state). Shut down
   // in `close()`. Off unless `observability` is enabled.
-  const telemetry = await startTelemetry(opts.config?.observability, process.env["npm_package_version"] ?? "dev");
+  const telemetry = await startTelemetry(opts.config?.observability, VERSION);
 
   const runManager = new RunManager({
     engine,

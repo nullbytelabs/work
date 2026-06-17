@@ -19,6 +19,7 @@ import { resolveImageConfig, ensureImageTag } from "./images/index.ts";
 import type { TargetFactory } from "./targets/index.ts";
 import { createWorkHandler, makeAgentEgressResolver } from "./agent/index.ts";
 import { createActionUsesHandler, type SubUsesDispatch } from "./actions/index.ts";
+import { VERSION } from "./version.ts";
 import type { UsesHandler } from "./runtime/index.ts";
 import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.ts";
 import { RunRepository } from "./persistence/runs.ts";
@@ -249,7 +250,7 @@ async function composeTelemetry(opts: StartRunOptions): Promise<{ hooks?: RunHoo
   // its per-run span state is isolated — critical when a shared handle drives several
   // concurrent runs. The shared tracer/meter are concurrency-safe; instruments aggregate.
   const owns = opts.telemetry === undefined;
-  const telemetry = opts.telemetry ?? (await startTelemetry(opts.config?.observability, process.env["npm_package_version"] ?? "dev"));
+  const telemetry = opts.telemetry ?? (await startTelemetry(opts.config?.observability, VERSION));
   if (!telemetry) return { ...(opts.hooks ? { hooks: opts.hooks } : {}), flush: () => Promise.resolve() };
   const emitter = createTelemetryHooks({ tracer: telemetry.tracer, meter: telemetry.meter });
   return {

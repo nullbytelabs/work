@@ -15,8 +15,7 @@
  *     ERROR span with `error.type`; a job that absorbs it (continue-on-error) stays
  *     non-error. Skipped steps are clean spans with `result=skip`.
  */
-import { createHash } from "node:crypto";
-import { trace, context, SpanKind, SpanStatusCode, TraceFlags } from "@opentelemetry/api";
+import { trace, context, SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import type { Tracer, Meter, Span, Context, SpanContext, Attributes, Link } from "@opentelemetry/api";
 import type { RunHooks, JobHookMeta, StepResult, JobResult, WorkflowResult, StepAgentInfo } from "../runtime/types.ts";
 import { ATTR, GEN_AI_PROVIDER_ANTHROPIC, runResult, taskResult } from "./semconv.ts";
@@ -38,20 +37,6 @@ const NOOP: RunHooks = {
 };
 
 const stepKey = (jobId: string, stepName: string) => `${jobId} ${stepName}`;
-
-/**
- * A deterministic SpanContext derived from the run id, used as the (synthetic,
- * never-emitted) parent of the run span. Every attempt of the same run — the first
- * try and any resume/re-drive — derives the *same* trace id and anchor, so they group
- * into ONE trace in the backend without persisting/restoring anything across processes.
- * (A lighter slice of the deterministic-id idea than a full custom IdGenerator, which
- * stays deferred — see docs/observability-otel-metrics.md §4.)
- */
-function runAnchor(runId: string): SpanContext {
-  const traceId = createHash("sha256").update(runId).digest("hex").slice(0, 32);
-  const spanId = createHash("sha256").update(`${runId}:anchor`).digest("hex").slice(0, 16);
-  return { traceId, spanId, traceFlags: TraceFlags.SAMPLED, isRemote: true };
-}
 
 /** Build the telemetry hook consumer (a `RunHooks` implementation). */
 export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
@@ -134,12 +119,14 @@ export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
         [ATTR.CICD_PIPELINE_RUN_ID]: meta.runId,
         ...(resumed ? { [ATTR.WORK_RUN_RESUMED]: true } : {}),
       };
-      // Parent the run span on the run's deterministic anchor so every attempt of this
-      // run id lands in the same trace (resume continuity, no persistence needed). The
-      // anchor is synthetic and never emitted, so the run span is still the trace's top.
-      const anchorCtx = trace.setSpan(context.active(), trace.wrapSpanContext(runAnchor(meta.runId)));
-      rootSpan = tracer.startSpan(`run ${meta.workflow}`, { kind: SpanKind.SERVER, attributes }, anchorCtx);
-      rootCtx = trace.setSpan(anchorCtx, rootSpan);
+      // The run span IS the trace root — a true empty-parent span. OTLP backends detect
+      // the root as the span with no parent (Tempo sources a trace's service name, root
+      // name, and timeline placement from it), so `root: true` is load-bearing: parenting
+      // the run on a synthetic, never-emitted span leaves the trace permanently rootless
+      // ("<root span not yet received>" in Tempo Drilldown). Coalescing a resumed run's
+      // attempts into one trace is a persistence concern, not faked via a derived id.
+      rootSpan = tracer.startSpan(`run ${meta.workflow}`, { kind: SpanKind.SERVER, attributes, root: true });
+      rootCtx = trace.setSpan(context.active(), rootSpan);
     },
 
     onJobStart(jobId, meta?: JobHookMeta) {
