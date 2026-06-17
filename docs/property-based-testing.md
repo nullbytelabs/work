@@ -12,10 +12,10 @@ This doc is three things at once:
 3. a **findings log** — an append-only record of bugs found, properties that
    surprised us, and dead ends. Real PBT value shows up here over time.
 
-Status: **established.** Branch `pbt`. fast-check `4.8.0` is a devDependency. Four of
-five inventory targets are landed (14 properties, all mutation-checked); target #1
-found a real path-safety bug on day one. #4 (condition eval) is deferred. See the
-[progress tracker](#progress-tracker) and [findings log](#findings-log).
+Status: **established.** Branch `pbt`. fast-check `4.8.0` is a devDependency. All five
+inventory targets are landed (23 properties, all mutation-checked); target #1 found a
+real path-safety bug on day one. See the [progress tracker](#progress-tracker) and
+[findings log](#findings-log).
 
 ---
 
@@ -233,14 +233,22 @@ not required gets its type-default deterministically; `pattern`/`options` valida
 **only** present inputs; an unknown provided key always errors. Metamorphic:
 re-running `resolveInputs` on its own output is idempotent.
 
-### 4. Condition evaluation — `src/compiler/condition.ts`
+### 4. Condition evaluation — `src/compiler/condition.ts` ← landed (was deferred)
 
-**Why / why not yet.** Richest logic (tokenizer + recursive-descent parser +
-evaluator, 408 lines) and great metamorphic properties: operator precedence
-(`||` < `&&` < `==` < `!`), `==` commutativity, double-negation `!!x == truthy(x)`,
-De Morgan. But the surface is large — deliberately **not** the entry point. Revisit
-once the pattern is established. Candidate for an **oracle** property: a tiny
-reference evaluator over a restricted grammar subset.
+**Why it waited, and how it landed.** Richest logic (tokenizer + recursive-descent
+parser + evaluator, 408 lines), so it was deliberately not the entry point — done
+last, once the pattern was worn in. We considered an **oracle** (a tiny reference
+evaluator over a restricted grammar) but rejected it: a hand-written mirror risks
+copying the engine's own quirks, so a shared bug would pass. Instead the 9 properties
+are **algebraic laws any correct boolean engine must satisfy** — implementation-
+independent and impossible to satisfy tautologically: literal truthiness (a small
+leaf oracle), double-negation `!!e == e`, `==` commutativity, `!=` is `!(==)`, De
+Morgan, `&&`/`||` commutativity, identity/domination (`x&&true=x`, `x||false=x`,
+`x&&false=false`, `x||true=true`), totality (well-formed ⇒ boolean, no throw), and
+the reject-don't-pass safety contract (unsupported `<`, unknown context root, lone
+`&`, unbalanced parens, trailing tokens, empty ⇒ `ConditionError`). A `fc.letrec`
+generator emits fully-parenthesized well-formed expressions over literals and safe
+`inputs.*` refs.
 
 ### 5. Topological sort — `src/compiler/compile.ts:212` (`topoSort`)
 
@@ -301,7 +309,7 @@ the property describes intended behavior rather than mirroring the code.
 | 1 | Matrix fan-out | `src/compiler/matrix.ts` | ☑ done | 5 / 5 | 1 (F-1) |
 | 2 | Expression access-path | `src/compiler/expr.ts` | ☑ done | 4 / 4 | 0 (F-3) |
 | 3 | Typed input coercion | `src/compiler/inputs.ts` | ☑ done | 5 / 5 | 0 (F-4) |
-| 4 | Condition evaluation | `src/compiler/condition.ts` | ☐ deferred | — | — |
+| 4 | Condition evaluation | `src/compiler/condition.ts` | ☑ done | 9 / 9 | 0 (F-6) |
 | 5 | Topological sort | `src/compiler/compile.ts` | ☑ done | 4 / 4 | 0 (F-5) |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · deferred.
@@ -421,17 +429,35 @@ there was gold in the hill.
   reaches `ready.shift()`. (If we ever want to pin the *alphabetical* tie-break
   specifically, that's a separate, stronger property worth adding.)
 
+### F-6 — condition engine: no bug; algebraic laws hold across the grammar
+
+- **Target #4** (`test/condition.property.test.ts`): 9 properties (listed in the
+  inventory entry above). All green; the `if:`/`when:` engine obeys the boolean
+  algebra it should.
+- **Why laws, not an oracle:** a reference evaluator would re-encode `truthy`/
+  `looseEq`/`numeric` and could replicate a bug in the engine, so it could not catch
+  it. Metamorphic laws (commutativity, De Morgan, double-negation, identity) are true
+  for *any* correct engine regardless of implementation — the non-tautological choice.
+- **Mutation-checked across the engine:** invert number truthiness (→ P1), make
+  `looseEq` asymmetric (→ P3), make `!=` return `==` (→ P4), make `!` return a
+  constant (→ P2), make `&&` behave like `||` (→ P7), accept trailing tokens (→ P9)
+  — each caught by the matching law. (Note: dropping *both* negations in `!` is an
+  equivalent mutant for P2 — `!!e` collapses back to identity — so P2's mutant has to
+  break the negation count *asymmetrically*, e.g. `! → true`. Same family as F-2/F-3.)
+
 ---
 
 ## Where this leaves us
 
-Four of five inventory targets landed (14 properties), each a self-contained,
-mutation-checked commit; #4 (condition eval) remains deferred until there's reason
-to spend the larger surface. The one real bug (F-1) was found on day one by the
-first target. The "no bug" targets (#2/#3/#5) still bought regression nets over the
-parser's inverse-ness, the input contract's strictness, and the sort's
-replay-stability — and several reusable learnings about *checking* properties
-(equivalent mutants, autoboxing-`undefined`, stability-vs-choice).
+All five inventory targets landed (23 properties), each a self-contained,
+mutation-checked commit. The one real bug (F-1) was found on day one by the first
+target. The "no bug" targets (#2–#5) still bought regression nets — over the parser's
+inverse-ness, the input contract's strictness, the sort's replay-stability, and the
+condition engine's boolean algebra — plus reusable learnings about *checking*
+properties (equivalent mutants, autoboxing-`undefined`, stability-vs-choice,
+oracle-vs-law). Next candidates if PBT keeps paying off: matrix `${{ }}` resolution
+(`compile.ts:matrixLegs`), reusable-workflow id namespacing (`reusable.ts`), and a
+stateful `fc.commands` model of the runtime's durable step memoization.
 
 ---
 
