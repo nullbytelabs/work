@@ -224,19 +224,21 @@ deterministic-ID machinery**, as long as the resumed spans can find their parent
 
 ### 4.2 Continuing the trace
 
-> **Shipped (Phase 4) — a lighter approach than the persist/restore below.** The run span is
-> parented on a **deterministic anchor `SpanContext` derived from the run id**
-> (`traceId = sha256(runId)[:32]`, a stable synthetic `spanId`, never emitted). Every attempt
-> of the same run — first try and any resume — derives the *same* trace id, so they group into
-> one trace **with no cross-process persistence at all**. The anchor is never emitted, so the
-> run span is still the trace's effective top. Resumed runs carry `work.run.resumed=true` and
-> bump `work_run_resumes_total`. This is a thin slice of the deterministic-id idea (§4.4) — just
-> the *trace* id, not every span id — so it needs no custom `IdGenerator` and no journal column.
+> **Status.** The run span is a **true root span** (`root: true`, empty parent). OTLP backends
+> identify a trace's root as its empty-parent span and source the trace's service name, root
+> name, and timeline placement from it — so a real root is load-bearing, not cosmetic. Each run
+> attempt is its own trace, correlated by `work.run.id`; resumed runs carry `work.run.resumed=true`
+> and bump `work_run_resumes_total`. **Coalescing a resumed run's separate attempts into one
+> trace is not done today** — the persist/restore design below is the way to add it when wanted.
 > **No-op re-drive guard:** a resumed run that executes **zero** jobs (a worker re-claiming an
 > already-finished run on `work serve` startup) emits nothing — the root span is left un-ended
 > (so never exported) and no run counter fires, killing the phantom sub-100ms "success" traces.
-> The persist/restore design below is retained as the rationale for why continuity matters and
-> as the fallback if the deterministic anchor ever proves insufficient.
+>
+> *Guardrail:* do **not** pin the trace id by parenting the run span on a synthetic,
+> never-emitted "anchor" `SpanContext`. It leaves the trace with no empty-parent span, so Tempo
+> reports it as rootless (`<root span not yet received>`) and drops it from list/timeline views,
+> even though single-trace-by-id rendering still looks fine. Trace continuity belongs in
+> persistence (below), not in a derived id.
 
 The one thing that doesn't survive a crash is the **long-lived root span** (and any job span
 open at the moment of the tear-out): with a `BatchSpanProcessor`, a span is only exported on
@@ -581,16 +583,17 @@ distributor instead. For pure instrumentation debugging without a collector, a
 3. **Metrics.** OTel metrics + `PeriodicExportingMetricReader` → OTLP metrics exporter (to the
    same Alloy endpoint); the catalog (§5.2) with the shared bucket-set `View`; `forceFlush` on
    shutdown so CLI runs report. No HTTP endpoint.
-4. **Resume fidelity.** ✅ **Shipped.** Implemented as a **deterministic trace-id anchor** per
-   run id (§4.2) — every attempt of a run groups into one trace, no persistence — rather than
-   the persist/restore originally sketched. `work.run.resumed=true` + `work_run_resumes_total`
+4. **Resume marking + true root span.** ✅ **Shipped.** The run span is a true root
+   (`root: true`, empty parent) so OTLP backends recognize the trace root (§4.2). Each attempt
+   is its own trace, correlated by `work.run.id`; `work.run.resumed=true` + `work_run_resumes_total`
    on a genuine resume. The runtime passes `resumed = !spawned.created` to `onWorkflowStart`
    (moved to just after the orchestrator spawn, where `created` is known but before any job
    runs). **Replay/no-op guard:** a resumed run that executes **zero** jobs (a `work serve`
    worker re-claiming an already-finished run on startup — observed: a restart re-drove three
    leftover ci runs into three childless sub-100ms "success" traces) emits nothing — the root
    span is left un-ended (never exported) and no run counter fires. Covered by Layer-1 tests
-   (deterministic-id continuity, suppression, resume marking/counter).
+   (true-root guard, suppression, resume marking/counter). **Not yet done:** coalescing a
+   resumed run's separate attempts into one trace — the persist/restore design in §4.2.
 5. **(Deferred) deterministic-ID tracer** (§4.4) — only if resumed-trace fidelity must be
    perfect.
 

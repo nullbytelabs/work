@@ -125,9 +125,23 @@ describe("observability emitter — Layer 1 (unit)", () => {
     const job = one(spans, "job checks");
     const install = one(spans, "step install");
 
-    assert.ok(parentId(run) && !spans.some((s) => spanId(s) === parentId(run)), "run's parent is the synthetic run-anchor, not an emitted span");
+    assert.ok(!parentId(run), "run is the trace root (no parent)");
     assert.equal(parentId(job), spanId(run), "job parents to run");
     assert.equal(parentId(install), spanId(job), "step parents to job");
+  });
+
+  it("emits the run span as a true root (empty parent) so backends recognize the trace root", () => {
+    // Regression guard: a run span parented on a synthetic, never-emitted "anchor"
+    // leaves the trace with no empty-parent span. Tempo (and every OTLP backend)
+    // detects the root as the span whose parent is empty, so such a trace is
+    // permanently rootless — "<root span not yet received>" / no name / no timeline
+    // placement in Tempo Drilldown, while single-trace-by-id views still render fine.
+    h.hooks.onWorkflowStart({ runId: "4f9a2c", workflow: "ci" });
+    playChecksJob(h.hooks);
+    h.hooks.onWorkflowEnd({ name: "ci", status: "success" });
+
+    const run = one(h.spans(), "run ci");
+    assert.ok(!parentId(run), `run span must be a true root (empty parent), got parent=${parentId(run)}`);
   });
 
   it("sets cicd.* / work.* / host.image.* attributes at the right levels", () => {
@@ -274,26 +288,7 @@ describe("observability emitter — Layer 1 (unit)", () => {
     }
   });
 
-  // ── Phase 4: resume continuity + the no-op re-drive guard ──────────────────────
-
-  it("derives a deterministic trace id per run id (resume continues the same trace)", () => {
-    const traceOf = (runId: string, isResume: boolean) => {
-      const hh = makeHarness();
-      try {
-        hh.hooks.onWorkflowStart({ runId, workflow: "ci", ...(isResume ? { resumed: true } : {}) });
-        playChecksJob(hh.hooks);
-        hh.hooks.onWorkflowEnd({ name: "ci", status: "success" });
-        return one(hh.spans(), "run ci").spanContext().traceId;
-      } finally {
-        void hh.shutdown();
-      }
-    };
-    const first = traceOf("run-XYZ", false);
-    const resume = traceOf("run-XYZ", true);
-    const other = traceOf("run-OTHER", false);
-    assert.equal(resume, first, "same run id → same trace id (a resume continues the trace)");
-    assert.notEqual(other, first, "a different run id → a different trace id");
-  });
+  // ── Phase 4: the no-op re-drive guard ──────────────────────────────────────────
 
   it("suppresses a no-op re-drive (resumed run that executes zero jobs)", async () => {
     h.hooks.onWorkflowStart({ runId: "redrive-1", workflow: "ci", resumed: true });
