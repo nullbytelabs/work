@@ -41,7 +41,13 @@ export const GUEST_MODEL_KEY_ENV = "PI_WF_MODEL_KEY";
  *  doesn't parse. The unit Gondolin scopes an injected secret by. */
 export function modelHostOf(baseUrl: string): string | undefined {
   try {
-    return new URL(baseUrl).hostname || undefined;
+    const host = new URL(baseUrl).hostname || undefined;
+    // The host scopes the injected model key (and the in-guest `modelKeyEnv`). It's
+    // used as a gondolin `matchHostname` pattern, which treats `*` as a wildcard, so a
+    // `*` in the host would scope the key to a pattern instead of one host — leaking it
+    // to any matching host the agent's allow-all egress can reach. Refuse it (fail
+    // closed). Mirrors `hostOf` in egress/datasource.ts — keep the two in lockstep.
+    return host?.includes("*") ? undefined : host;
   } catch {
     return undefined;
   }

@@ -37,7 +37,17 @@ export interface DatasourceJobNetwork {
 // must contribute `hostname`, not `host` (which keeps the port and never matches).
 function hostOf(baseUrl: string): string | undefined {
   try {
-    return new URL(baseUrl).hostname;
+    const host = new URL(baseUrl).hostname || undefined;
+    // This host literal becomes a gondolin `matchHostname` *pattern* — it scopes both
+    // the egress allowlist AND the injected token (`secretHosts`). That matcher treats
+    // `*` as a wildcard (it splits the pattern on `*` before escaping every other
+    // metachar), so a host containing `*` would silently widen the scope from one host
+    // to a whole pattern: extra reachable hosts, and — worse — the credential injected
+    // for any host the pattern matches. `*` is never a legal DNS hostname, so refuse it
+    // and fail closed (skip the datasource) rather than emit a wildcard scope. Every
+    // other URL-legal host char is regex-escaped by the matcher, so `*` is the only
+    // escape; `modelHostOf` (agent/guest-pi-runner.ts) must keep the same guard.
+    return host?.includes("*") ? undefined : host;
   } catch {
     return undefined;
   }
