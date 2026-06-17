@@ -299,7 +299,7 @@ the property describes intended behavior rather than mirroring the code.
 |---|---|---|---|---|---|
 | — | Add `fast-check` devDependency | `package.json` | ☑ done (`4.8.0`, exact) | — | — |
 | 1 | Matrix fan-out | `src/compiler/matrix.ts` | ☑ done | 5 / 5 | 1 (F-1) |
-| 2 | Expression access-path | `src/compiler/expr.ts` | ☐ todo | 0 / 4 | — |
+| 2 | Expression access-path | `src/compiler/expr.ts` | ☑ done | 4 / 4 | 0 (F-3) |
 | 3 | Typed input coercion | `src/compiler/inputs.ts` | ☐ todo | 0 / 5 | — |
 | 4 | Condition evaluation | `src/compiler/condition.ts` | ☐ deferred | — | — |
 | 5 | Topological sort | `src/compiler/compile.ts` | ☐ todo | 0 / 4 | — |
@@ -357,6 +357,29 @@ there was gold in the hill.
   by a non-equivalent mutant (prepend appended cells, which shifts product indices).
   Worth remembering when we mutation-check future targets: distinguish "property too
   weak" from "mutant changes nothing."
+
+### F-3 — `expr.ts` access-path round-trip: no bug, parser is a clean inverse
+
+- **Target #2** (`test/expr-path.property.test.ts`): 4 properties — P1 the showcase
+  round-trip (`parseAccessPath ∘ serialize == identity`, plus an oracle: walk a
+  value planted at the path and recover it), P2 `walkPath` totality (never throws),
+  P3 malformed-input rejection, P4 missing-semantics (walking past a scalar leaf →
+  `undefined`). All green; `parseAccessPath`/`walkPath` round-trip cleanly over the
+  grammar's representable subset. A "no bug found" result is still signal — the
+  parser is robust, and we now have a regression net over its inverse-ness.
+- **Representable subset (documented in the test):** the serializer always quotes
+  bracketed keys with `"`, so the only keys it can't express are those containing a
+  literal `"` (the grammar has no escape) and `__proto__` (excluded to avoid JS's
+  own-vs-prototype `[]` getter semantics — a separate concern). Everything else —
+  empty keys, spaces, unicode, `]`, `'`, dotted identifiers, indices — round-trips.
+- **Equivalent-mutant learning (cf. F-2):** dropping `walkPath`'s non-object guard
+  (`return undefined`) falsified P2 (a `null` intermediate then throws on indexing)
+  but **not** P4 — because P4's leaf is a *non-null* scalar and JS autoboxing makes
+  `(5)["k"] === undefined`, so the "missing" outcome coincides with the bug. P4 is
+  only falsified by a mutant that returns a *non-undefined* value (`return cur`),
+  counterexample `walk({a:0}, [a, ""]) → 0`. Lesson: when the correct output is
+  `undefined`, guard against mutants that *also* yield `undefined` for the wrong
+  reason — pick a mutant that returns a distinguishable value.
 
 ---
 
