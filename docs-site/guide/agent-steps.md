@@ -2,12 +2,12 @@
 
 An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 coding agent **inside the job's micro-VM**, with its full toolset rooted at the
-checkout — so it can read and edit the project's files directly. The model is
+checkout, so it can read and edit the project's files directly. The model is
 reached only through the sandbox's mediated egress, and your API key is injected
 host-side and **never enters the guest**.
 
 The agent is a built-in **step primitive**, `uses: work/agent`, prompted entirely
-through `with:` — no package format, no special files. To give an agent a name, a
+through `with:`, with no package format and no special files. To give an agent a name, a
 typed interface, and a versioned home, wrap it in an [action](./actions) (the
 step-level reuse unit). The **job-level** `uses:`, which calls a whole workflow, is
 [Reusable workflows](./reusable-workflows).
@@ -74,13 +74,13 @@ jobs:
 
 The prompt can be inline (`prompt:`) or read from a file in the checkout
 (`promptFile:`). There's no separate system-prompt input — a standing persona can
-come from the prompt, or from Pi's own discovery of a committed `.pi/` persona /
+come from the prompt, or from Pi's own discovery of a committed `.pi/` persona or
 `AGENTS.md`.
 
 ## 3. Package an agent as an action
 
-When you want a named, reusable agent with a typed interface — the equivalent of a
-GitHub Action — wrap `work/agent` in a **[composite action](./composite-actions)**:
+When you want a named, reusable agent with a typed interface (the equivalent of a
+GitHub Action), wrap `work/agent` in a **[composite action](./composite-actions)**:
 a file-backed prompt and a declared output, called as `uses: action/<name>`.
 `work create workflow <name> --template agent-action` scaffolds exactly that. See
 [Composite actions](./composite-actions#packaging-an-agent) for the full shape.
@@ -89,8 +89,8 @@ a file-backed prompt and a declared output, called as `uses: action/<name>`.
 
 The agent runs **in-guest**: Pi is invoked inside the same micro-VM as the rest of
 the job, working directly against the job's checkout. The host resolves the model
-endpoint, allowlists it through the sandbox's egress, and injects the API key —
-which is why the key reaches the model without ever being visible inside the guest.
+endpoint, allowlists it through the sandbox's egress, and injects the API key, so
+the key reaches the model without ever being visible inside the guest.
 
 ::: tip Complete example
 [`test/e2e/agent-project/`](https://github.com/nullbytelabs/work/tree/main/test/e2e/agent-project)

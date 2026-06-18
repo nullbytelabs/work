@@ -1,7 +1,7 @@
 # Requirements
 
 work runs every job inside a [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin)
-micro-VM — there is no host-execution mode — so it needs a modern Node and QEMU.
+micro-VM (there is no host-execution mode), so it needs a modern Node and QEMU.
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ sudo apt-get install -y qemu-system-x86 qemu-utils
 
 :::
 
-On Linux, hardware acceleration uses **KVM** — make sure `/dev/kvm` exists and your
+On Linux, hardware acceleration uses **KVM**, so make sure `/dev/kvm` exists and your
 user can access it. On macOS, acceleration uses **HVF** and needs no extra setup.
 
 ## The guest image

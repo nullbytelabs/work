@@ -57,7 +57,7 @@ output and timing. This is the project's own dogfood pipeline (see
 
 On the **Workflows** page, click a workflow to open it. If it declares
 [`inputs:`](../reference/workflow-syntax#inputs), the console renders a typed form
-— required fields, defaults, `options:` as a dropdown, and `pattern:` validation —
+(required fields, defaults, `options:` as a dropdown, and `pattern:` validation),
 so you fill it in instead of hand-writing `--inputs` JSON. Submit, and the run
 starts immediately.
 
@@ -70,25 +70,25 @@ The same view replays from history after the run finishes.
 Every run is recorded durably (see [Where data lives](#where-data-lives)), so the
 **History** page survives restarts of the server. Open any past run to read its
 full output again, or hit **Re-run** to launch a fresh run with the same workflow
-and inputs — handy for retrying a flaky job or re-triggering a report.
+and inputs, handy for retrying a flaky job or re-triggering a report.
 
 ![The History page listing recent runs with status badges and timing](/screenshots/console-history.png)
 
 If the server is stopped while a run is still in flight, that run isn't lost: when
 the server next starts it **resumes** the run automatically, picking up from where
-it left off — finished jobs are reused rather than redone.
+it left off: finished jobs are reused rather than redone.
 
 ## Webhook triggers
 
 The host doubles as a **webhook receiver**: an external system can `POST` to it to
-trigger a workflow run. This is opt-in and authenticated at every layer — a
+trigger a workflow run. This is opt-in and authenticated at every layer: a
 workflow is only reachable by webhook if it explicitly opts in **and** an operator
 wires up a matching, secret-bearing hook in config.
 
 ### 1. Opt the workflow in
 
-Add an `on: webhook` trigger to the workflow. This is the gate the receiver checks
-— without it, no `POST` can ever start this workflow:
+Add an `on: webhook` trigger to the workflow. This is the gate the receiver checks;
+without it, no `POST` can ever start this workflow:
 
 ```yaml
 # .workflows/alert-triage.yaml
@@ -114,7 +114,7 @@ on:
 ### 2. Wire up the hook in config
 
 The operator declares the matching receiver in `work.json`. This is
-where the secret and auth scheme live — referenced by name, never committed
+where the secret and auth scheme live, referenced by name, never committed
 literally. See the [Configuration reference](../reference/configuration#webhooks):
 
 ```json
@@ -132,7 +132,7 @@ literally. See the [Configuration reference](../reference/configuration#webhooks
 
 The hook's public URL is `POST /hooks/alertmanager`. The **Webhooks** page shows
 it, lets you fire a signed **test** delivery, and lists every delivery with its
-result (`accepted`, `unauthorized`, `duplicate`, …) — the audit log never stores
+result (`accepted`, `unauthorized`, `duplicate`, …). The audit log never stores
 the payload or the secret.
 
 ![The Webhooks page: a hook card with its receiver URL and a fail-closed delivery audit log](/screenshots/console-webhooks.png)
@@ -144,7 +144,7 @@ the fail-closed behavior in action.*
 ### 3. Read the payload with `event.*`
 
 A webhook-triggered run can read the POST body through the `event` expression
-context — with nested paths and array indexing — in both interpolation and `if:`
+context (with nested paths and array indexing), in both interpolation and `if:`
 conditions:
 
 ```yaml
@@ -173,8 +173,8 @@ workflow opted in, a matching hook exists, and the request authenticates:
 
 The host also runs a **scheduler**: a workflow that declares `on: schedule` fires
 itself when a cron slot comes due, with no external trigger. The schedule lives in
-the workflow (it's committed, secret-free), and `work serve` is what evaluates it —
-there's no separate daemon and no CLI scheduling.
+the workflow (it's committed, secret-free), and `work serve` is what evaluates it.
+There's no separate daemon and no CLI scheduling.
 
 ### 1. Declare the schedule
 
@@ -199,7 +199,7 @@ a clean error at load time, not a silent no-fire.
 
 ### 2. Run the host
 
-A schedule only fires while `work serve` is running over the workspace — it's the
+A schedule only fires while `work serve` is running over the workspace; it's the
 scheduler. Nothing else is required:
 
 ```bash
@@ -207,7 +207,7 @@ work serve
 ```
 
 A newly-seen schedule is baselined to "now" and fires from its **next** slot
-forward — it never back-fires for time before the host first saw it. If the host
+forward; it never back-fires for time before the host first saw it. If the host
 is down across one or more slots, those slots are **skipped**, not back-filled: on
 restart the schedule resumes from the next upcoming slot (no catch-up storm). Each
 fired slot dispatches the workflow down the same path a manual run takes, recorded
@@ -215,7 +215,7 @@ in History with a `schedule` trigger.
 
 ### 3. See what's scheduled
 
-The **Schedules** page lists every `on: schedule` trigger the host is driving —
+The **Schedules** page lists every `on: schedule` trigger the host is driving:
 the workflow, its cron expression, when it last fired, and when it'll fire next.
 The same data is available from the API at `GET /api/schedules`:
 
@@ -252,8 +252,8 @@ auth, fail-closed.
 
 Run history, webhook deliveries, and schedule baselines are journaled to an
 in-process Postgres under `<workspace>/.workflows/db/`. That directory is the
-host's durable store — it's why History, the delivery log, and schedule state
-persist across restarts. It's machine-local runtime state, so keep it out of git —
+host's durable store: it's why History, the delivery log, and schedule state
+persist across restarts. It's machine-local runtime state, so keep it out of git;
 add `**/.workflows/db/` to your `.gitignore`.
 
 ## Flags

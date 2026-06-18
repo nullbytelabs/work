@@ -54,7 +54,7 @@ on:
 
 `on:` is the opt-in **gate**: a workflow with no `webhook` trigger can never be
 started by a `POST`, regardless of config. The trigger is validated but otherwise
-inert to the engine — the [webhook receiver](../guide/web-ui#webhook-triggers)
+inert to the engine: the [webhook receiver](../guide/web-ui#webhook-triggers)
 reads it, and the matching `webhooks.<name>` entry in
 [config](./configuration#webhooks) supplies the secret and auth scheme. A
 webhook-triggered run reads the request body via the [`event` context](#expressions).
@@ -62,7 +62,7 @@ webhook-triggered run reads the request body via the [`event` context](#expressi
 ### Scheduled (`on: schedule`)
 
 `on: schedule` fires the workflow on a cron, with no external trigger. It's a list
-of entries, each with a `cron:` expression — the familiar five-field syntax,
+of entries, each with a `cron:` expression in the familiar five-field syntax,
 evaluated in **UTC**:
 
 ```yaml
@@ -78,10 +78,10 @@ on:
 | `cron` | string | **Required** per entry. A five-field cron expression (`min hour day-of-month month day-of-week`), UTC. Validated when the workflow is parsed. |
 
 Schedules fire only while [`work serve`](../guide/web-ui#scheduled-triggers) runs
-over the workspace — it's the scheduler; there's no separate daemon. A newly-seen
+over the workspace: it's the scheduler, with no separate daemon. A newly-seen
 schedule fires from its **next** slot forward (never retroactively), and slots that
-elapse while the host is down are **skipped**, not back-filled. Status — last-fired
-and next-fire per schedule — is read through the host (`GET /api/schedules` and the
+elapse while the host is down are **skipped**, not back-filled. Status (last-fired
+and next-fire per schedule) is read through the host (`GET /api/schedules` and the
 console's Schedules page), never a separate CLI.
 
 ## Jobs
@@ -117,7 +117,7 @@ jobs:
 
 ## Machine types
 
-Each job runs in its own gondolin micro-VM. `machine:` sizes that VM — its vCPU
+Each job runs in its own gondolin micro-VM. `machine:` sizes that VM: its vCPU
 count and RAM. Pick a **named type** from the built-in catalog, or specify
 dimensions **inline**. Omitting `machine:` uses `medium`.
 
@@ -146,13 +146,13 @@ Built-in catalog:
 (e.g. `16G`). A custom spec may set either `cpus` or `memory`; whatever you leave
 out is taken from `medium`.
 
-> Disk size is not yet configurable — the gondolin guest image lacks the tooling
+> Disk size is not yet configurable: the gondolin guest image lacks the tooling
 > (`resize2fs`) to grow the root filesystem at boot, so jobs use the image's
 > default disk. It's planned once a custom guest image ships.
 
 ## Steps
 
-A step is either a `run` command or a `uses:` reference — never both. A step
+A step is either a `run` command or a `uses:` reference, but not both. A step
 `uses:` resolves to the built-in `work/agent` primitive, a user-space
 `action/<name>`, or a built-in `work/*` action (see
 [Step `uses:` forms](#step-uses-forms)).
@@ -204,7 +204,7 @@ declared outputs); read them the same way. See below.
 ### Step context
 
 Beyond the `outputs` it explicitly writes, every step with an `id` exposes data
-the engine already captures — so you can forward a command's output without a
+the engine already captures, so you can forward a command's output without a
 `$WORK_OUTPUT` wrapper:
 
 | Accessor | Value |
@@ -267,8 +267,8 @@ lists `runs.steps:` and maps each declared output to a `value:` expression
 
 ## Reusable workflows
 
-A job may call **another whole workflow** instead of defining steps — the
-job-level `uses:` surface. For a guided walkthrough, see
+A job may call **another whole workflow** instead of defining steps (the
+job-level `uses:` surface). For a guided walkthrough, see
 [Reusable workflows](../guide/reusable-workflows); this is the field reference.
 
 ### Caller job (`uses:`)
@@ -368,7 +368,7 @@ scalar (`age: 36`) declares a typed input with that default.
 
 ## Matrix
 
-`strategy.matrix:` expands a job into the cartesian product of its axes — one
+`strategy.matrix:` expands a job into the cartesian product of its axes, one
 independent leg per cell.
 
 ```yaml
@@ -415,7 +415,7 @@ Use `if` **or** `when` on a given step/job, not both.
 
 <code v-pre>${{ … }}</code> interpolates values into env, `with`, `outputs`, and
 conditions. The available contexts are `inputs`, `matrix`, `needs`, and `steps`
-(as listed above) — plus `event` on a [webhook-triggered](#triggers) run.
+(as listed above), plus `event` on a [webhook-triggered](#triggers) run.
 
 ### `event` (webhook runs)
 

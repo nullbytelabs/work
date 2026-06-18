@@ -1,7 +1,7 @@
 # Custom images
 
 Every job runs in a Gondolin micro-VM. **`runs-on`** picks which guest image boots
-inside it — the stock guest, the bundled `work:base`, or a custom image you define.
+inside it: the stock guest, the bundled `work:base`, or a custom image you define.
 Reach for a richer image when your jobs need tools the stock guest doesn't ship.
 
 ## `work:base` vs the stock guest
@@ -11,8 +11,9 @@ Reach for a richer image when your jobs need tools the stock guest doesn't ship.
   (then cached), so a checkout or a `jq` filter works out of the box.
 - **`gondolin`** — the stock guest, and nothing more. It ships `sh`/`bash`,
   `node`/`npm`, `python3`, `curl`, and `ca-certificates`, and boots immediately
-  (nothing to build) — pin it explicitly when those tools are enough and you want
+  (nothing to build). Pin it explicitly when those tools are enough and you want
   the leanest image.
+
 
 ```yaml
 jobs:
@@ -24,7 +25,7 @@ jobs:
 
 ## Defining your own image
 
-When you need more — a compiler, a CLI, a system library — define your own image:
+When you need more, like a compiler, a CLI, or a system library, define your own image:
 drop a Gondolin **build-config** at `.workflows/images/<name>/build-config.json`,
 then reference it as `runs-on: work:<name>`.
 
@@ -95,7 +96,7 @@ for how it runs the full test suite inside nested VMs.
 ## Built on first use
 
 A `work:<image>` is **built the first time a job uses it** on a given machine, then
-reused — Gondolin builds the image and keeps it in its local image store. So:
+reused: Gondolin builds the image and keeps it in its local image store. So:
 
 - The first run that needs the image takes a few minutes and needs **network** to
   fetch its packages.

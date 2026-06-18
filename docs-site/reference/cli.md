@@ -64,7 +64,7 @@ overwritten), the config is never clobbered, and a re-run that changes nothing i
 clean "already initialized" exit `0`.
 
 `--global` instead writes a **machine-wide** config to `~/.config/work/work.json`
-(XDG) — the home for your providers/models, merged underneath every project's config
+(XDG): the home for your providers/models, merged underneath every project's config
 at run time. See [Configuration discovery](#configuration-discovery).
 
 | Option | Effect |
@@ -125,7 +125,7 @@ and merges the config half:
 ```
 
 The secret is always emitted as a `$VAR` env-ref (`$TRIAGE_SECRET`), never a
-literal — `export TRIAGE_SECRET=...` to set it. `--source` picks the sender preset
+literal. Run `export TRIAGE_SECRET=...` to set it. `--source` picks the sender preset
 that supplies the auth scheme (and signature header where the sender signs
 deliveries); see [`work create webhook`](#work-create-webhook) for the preset
 table. `--datasources` scopes the egress the triggered run may use.
@@ -148,7 +148,7 @@ work create datasource <name> [--preset <id>] [--url <baseUrl>] [--force] [--dry
 Scaffolds a [`datasources.<name>`](./configuration#datasources) entry, **merged
 into** the project's `work.json` (the rest of the file is preserved). A datasource
 is a named external HTTP service a plain `run:` step can reach with a
-header-injected token it never actually sees — egress is deny-by-default and the
+header-injected token it never actually sees: egress is deny-by-default and the
 secret is swapped in host-side, scoped to the datasource's host.
 
 The generated entry is a safe skeleton, not a live connection:
@@ -165,7 +165,7 @@ The generated entry is a safe skeleton, not a live connection:
 }
 ```
 
-- `token` is always a `$VAR` env-ref, never a literal secret — set the real value
+- `token` is always a `$VAR` env-ref, never a literal secret. Set the real value
   with `export GRAFANA_TOKEN=...`, never in workflow `env:`.
 - `tokenEnv` is emitted explicitly (derived as `<NAME>_TOKEN`) so you can see which
   variable to export.
@@ -174,7 +174,7 @@ The generated entry is a safe skeleton, not a live connection:
   `--preset` (or get the `generic` skeleton). Shipped presets: `kubernetes`,
   `prometheus`, `grafana`, `loki`, `tempo`, `mimir`, `alertmanager`, `generic`.
 - For a host public DNS can't name (a loopback/kind service, an SSH tunnel, a
-  Tailscale peer), add `"resolve": "<ip>"` to the entry — the generator never
+  Tailscale peer), add `"resolve": "<ip>"` to the entry. The generator never
   emits it because it's deployment-specific, and pinning also lifts the sandbox's
   private-range block for that IP.
 
@@ -197,7 +197,7 @@ work create datasource api --url https://internal.example.com/v1
 work create image <name> [--force] [--dry-run]
 ```
 
-Scaffolds a custom job image — an arch-agnostic [Gondolin
+Scaffolds a custom job image: an arch-agnostic [Gondolin
 build-config](../guide/custom-images) at
 `.workflows/images/<name>/build-config.json`, which a job then selects with
 `runs-on: work:<name>`. The `<name>` is slugged, so `work create image "My Image"`
@@ -227,7 +227,7 @@ work create webhook <name> --workflow <existing> [--source <id>] [--datasources 
 Pairs a webhook with an **already existing** workflow. It merges only the
 [`webhooks.<name>`](./configuration#webhooks) config half into `work.json` (the
 rest of the file is preserved) and **prints the `on: webhook` snippet to paste
-in** — it never edits the workflow YAML. Use this to retrofit a workflow created
+in**; it never edits the workflow YAML. Use this to retrofit a workflow created
 without `--webhook`; for a fresh workflow, generate both halves at once with
 [`work create workflow --webhook`](#work-create-workflow).
 
@@ -247,7 +247,7 @@ on:
 
 The hook is served by `work serve` at `POST /hooks/<name>`; a smoke-test
 endpoint lives at `POST /api/webhooks/<name>/test`. The `secret` is always emitted
-as a `$VAR` env-ref (`$ALERTS_SECRET`), never a literal — `export ALERTS_SECRET=...`
+as a `$VAR` env-ref (`$ALERTS_SECRET`), never a literal. Run `export ALERTS_SECRET=...`
 to set it. `--datasources` scopes the egress the triggered run may use.
 
 `--source` selects the sender preset, which fixes the auth scheme (and the
@@ -284,7 +284,7 @@ otherwise the file's own folder is. See [Project layout](../guide/project-layout
 work [--workspace <dir>] run <name> [flags]
 ```
 
-Runs a project workflow **by its `name:`** — the engine finds the
+Runs a project workflow **by its `name:`**: the engine finds the
 `.workflows/*.yaml` in the workspace whose `name:` matches `<name>`. `--workspace`
 sets the project root (default: current directory).
 
@@ -293,10 +293,10 @@ work --workspace my-project run report
 ```
 
 A project run is **durable**: it's recorded in run history and journaled as it
-goes, so a run that's interrupted — stopped mid-flight before it finishes — can be
+goes, so a run that's interrupted (stopped mid-flight before it finishes) can be
 **resumed** rather than lost. (A standalone `work <file>` run, outside a
 `.workflows/` project, is ephemeral.) Pass `--resume <id>` to continue a prior run
-instead of starting a new one — `work resume <id>` below is the shorthand.
+instead of starting a new one; `work resume <id>` below is the shorthand.
 
 ### `work runs`
 
@@ -304,11 +304,11 @@ instead of starting a new one — `work resume <id>` below is the shorthand.
 work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
 ```
 
-Lists the workspace's run history, newest first — the durable record of every
+Lists the workspace's run history, newest first: the durable record of every
 project run. It reads the **same** durable store [`work serve`](#work-serve) uses,
 so it lists runs started either way. It's a *serve-is-down* tool, though: the store
-is single-owner, so don't run it against a workspace a `serve` is currently holding
-— read live history through that host's console / `GET /api/runs` instead. `--status`
+is single-owner, so don't run it against a workspace a `serve` is currently holding.
+Read live history through that host's console / `GET /api/runs` instead. `--status`
 filters; for example, the runs that didn't finish:
 
 ```bash
@@ -326,7 +326,7 @@ work [--workspace <dir>] resume <id>   # continue an interrupted run
 work [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs
 ```
 
-Both recover a past run **by id** (copy it from `work runs`) — the workflow and
+Both recover a past run **by id** (copy it from `work runs`); the workflow and
 inputs come from history, so you don't retype them:
 
 - **`resume`** continues the *same* run: jobs that already finished are reused,
@@ -345,7 +345,7 @@ work graph <workflow.yaml|name> [--format <fmt>] [--steps]
 
 Compiles the workflow and emits its job DAG **instead of running it** — useful for
 review and for embedding in docs. The target is a **file path** when it looks like
-one (a `.yaml`/`.yml` extension or a `/`), otherwise it's resolved **by name** —
+one (a `.yaml`/`.yml` extension or a `/`); otherwise it's resolved **by name**:
 the `.workflows/*.yaml` in the workspace whose `name:` matches, exactly like
 [`work run`](#work-run). So `work graph ci` works from a project root with no extra
 flags; `--workspace` sets the project root (default: current directory).
@@ -456,7 +456,7 @@ When running a workflow, the presenter adapts to the environment:
 - **`--quiet`** — no board or per-job output.
 
 A run exits **`0`** on success and **non-zero** if a job fails or the run is
-interrupted — so it drops into a script or scheduler cleanly. An interrupted
+interrupted, so it drops into a script or scheduler cleanly. An interrupted
 project run prints the `--resume` command to continue it.
 
 ## Configuration discovery

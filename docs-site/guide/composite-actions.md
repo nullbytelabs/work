@@ -3,7 +3,7 @@
 A **composite action** is an [action](./actions) whose body is a list of `steps:` —
 each a `run:` command, a `uses: work/agent`, or a `uses:` of another action. Where a
 JavaScript action is custom code, a composite action is a **bundle of steps** with the
-same typed interface — and the canonical way to **package an agent**: wrap
+same typed interface. It's also the canonical way to **package an agent**: wrap
 [`work/agent`](./agent-steps) with a file-backed prompt and a declared output.
 
 ## Shape
@@ -32,7 +32,7 @@ runs:
         prompt: Review /tmp/diff.txt for regressions affecting ${{ inputs.target }}.
 ```
 
-Call it like any action — `uses: action/review` — and read its mapped outputs as
+Call it like any action (`uses: action/review`) and read its mapped outputs as
 `steps.<id>.outputs.summary`.
 
 ## Packaging an agent
@@ -62,7 +62,7 @@ workflow, the composite action, and a starter model config).
 
 The whole action runs as the caller's **single** durable step. A composite step's
 `with:` is resolved at **run time**, so an inner step can take a previous step's output
-as an input — the same step-to-step data flow GitHub composite actions support. Inner
+as an input, the same step-to-step data flow GitHub composite actions support. Inner
 `run:` steps capture `$WORK_OUTPUT`; inner `uses:` steps dispatch to their handler
 (`work/agent`, a nested action). It executes in the job's micro-VM with mediated egress,
 [like any action](./actions#how-a-js-action-runs).
