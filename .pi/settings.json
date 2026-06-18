@@ -1,3 +1,4 @@
 {
-  "defaultThinkingLevel": "medium"
+  "defaultThinkingLevel": "medium",
+  "enableSkillCommands": true
 }
