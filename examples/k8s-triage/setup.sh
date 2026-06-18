@@ -2,11 +2,11 @@
 # Stand up the throwaway kind cluster, deploy the demo workloads, and mint
 # read-only triage credentials.
 #
-# Networking is kind's default: the API server is published on the host's
-# loopback only (127.0.0.1:$API_PORT). Workflow jobs reach it through the
-# engine's host-side egress — the datasource's `resolve` pin (work.json) tells
-# the engine to dial 127.0.0.1 for it, like curl --resolve. The only fixed
-# choice is the API port, so work.json can stay static.
+# kind publishes the API server on the host's loopback only (127.0.0.1:7443);
+# jobs reach it through the engine's host-side egress, which dials the loopback
+# via the datasource's `resolve` pin (work.json), like curl --resolve. The
+# cluster name and port are fixed so the static kubeconfig.yaml and the printed
+# work.json block line up without editing.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -44,8 +44,8 @@ cat <<MSG
 cluster ready.
 
 1. add the cluster as a datasource in the repo-root work.json (next to your
-   model config). The hostname is just a label — \`resolve\` pins where the
-   engine actually dials, like curl --resolve:
+   model config). The hostname is just a label that must match kubeconfig.yaml;
+   \`resolve\` pins where the engine actually dials, like curl --resolve:
 
   "datasources": {
     "k8s": {

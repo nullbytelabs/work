@@ -8,14 +8,11 @@
 #
 #   export K8S_TRIAGE_TOKEN=$(kubectl --context kind-work-triage -n triage create token triage-bot --duration=2h)
 #   NODE_EXTRA_CA_CERTS=kind-ca.crt \
-#     work run triage \
-#     --config ../../work.json --datasources k8s \
-#     --inputs '{"server":"https://work-triage.internal:7443"}'
+#     work run triage --config ../../work.json --datasources k8s
 set -euo pipefail
 cd "$(dirname "$0")"
 
 CLUSTER=${CLUSTER:-work-triage}
-API_PORT=${API_PORT:-7443}
 
 [ -f kind-ca.crt ] || { echo "no kind-ca.crt here — run ./setup.sh first" >&2; exit 1; }
 [ -f ../../dist/cli.js ] || { echo "building the CLI (first run)…" >&2; (cd ../.. && npm run build) >/dev/null; }
@@ -24,5 +21,4 @@ export K8S_TRIAGE_TOKEN=$(kubectl --context "kind-$CLUSTER" -n triage create tok
 
 NODE_EXTRA_CA_CERTS=kind-ca.crt \
   exec node ../../bin/work.mjs run triage \
-  --config ../../work.json --datasources k8s \
-  --inputs "{\"server\":\"https://$CLUSTER.internal:$API_PORT\"}"
+  --config ../../work.json --datasources k8s
