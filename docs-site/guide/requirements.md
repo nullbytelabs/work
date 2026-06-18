@@ -7,7 +7,7 @@ micro-VM — there is no host-execution mode — so it needs a modern Node and Q
 
 | Requirement | Why |
 |---|---|
-| **Node.js ≥ 23.6** | The engine runs its TypeScript directly, with no build step. 23.6 is also where native TypeScript stripping is on by default. The `work` command refuses to start on anything older. |
+| **Node.js ≥ 23.6** | The `work` command refuses to start on anything older. |
 | **QEMU** | Every job runs in the `gondolin` micro-VM, which QEMU powers. macOS works out of the box (HVF); Linux needs KVM for hardware acceleration. |
 | **macOS or Linux** | The supported host platforms. |
 

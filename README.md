@@ -33,7 +33,7 @@ work --workspace . run report
 
 ## Requirements
 
-- **Node.js ≥ 23.6** — runs the engine's TypeScript directly, with no build step.
+- **Node.js ≥ 23.6**
 - **QEMU** — every job runs in the `gondolin` micro-VM (there is no host-execution mode), so QEMU is required. macOS works out of the box; Linux needs KVM. Install with `brew install qemu` (macOS) or `apt-get install qemu-system-x86 qemu-utils` (Linux).
 - macOS or Linux.
 
