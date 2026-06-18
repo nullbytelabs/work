@@ -1,24 +1,47 @@
 # Kubernetes triage: agents on evidence, not on clusters
 
 [`examples/k8s-triage`](https://github.com/nullbytelabs/work/tree/main/examples/k8s-triage)
-is a runnable workflow that triages a Kubernetes cluster: deterministic jobs
-gather facts with kubectl, an agent names the root cause. It demonstrates a
+is a runnable workflow that triages a Kubernetes cluster: a deterministic job
+gathers facts with kubectl, an agent names the root cause. It demonstrates a
 division of labor we think matters for repeatable operations work:
 
-- **`run:` jobs collect.** Two jobs fan out in parallel, each in its own
-  micro-VM: `observe` inventories the cluster (namespaces, workloads, pods);
-  `hunt` finds unhealthy pods and captures `describe`, logs, events, and the
-  config the pod references.
+- **A `run:` job collects.** `collect` runs in its own micro-VM: it inventories
+  the cluster (namespaces, workloads, pods), then finds unhealthy pods and
+  captures `describe`, logs, events, and the config the pod references.
 - **The agent only analyzes.** `diagnose` fans the captured outputs in through
-  `needs.*` interpolation and writes an incident report. It has no kubeconfig,
-  no token, and no cluster egress — every run reasons over the same kind of
-  evidence, gathered the same way.
+  `needs.*` interpolation and writes an incident report. It runs no kubectl and
+  gets no cluster connection — every run reasons over the same kind of evidence,
+  gathered the same way.
 
 ```mermaid
 graph LR
-  observe["observe<br/>(kubectl inventory)"] --> diagnose["diagnose<br/>(agent: root cause)"]
-  hunt["hunt<br/>(unhealthy pods → evidence)"] --> diagnose
+  collect["collect<br/>(kubectl: inventory + evidence)"] --> diagnose["diagnose<br/>(agent: root cause)"]
 ```
+
+## The connection is a normal kubeconfig
+
+Jobs just run `kubectl` — there's no per-job setup. `KUBECONFIG` points at a
+static `kubeconfig.yaml` checked in next to the workflow:
+
+```yaml
+env:
+  KUBECONFIG: /workspace/kubeconfig.yaml
+```
+
+It can stay static because the datasource (next section) supplies the parts that
+would otherwise be dynamic, host-side. The kubeconfig is a plain one with three
+deliberate choices:
+
+- **`server` is the datasource label,** `https://work-triage.internal:7443`, not
+  kind's `127.0.0.1`. The engine's `resolve` pin dials the real loopback
+  host-side.
+- **No `certificate-authority`.** The sandbox installs its egress CA into the
+  guest's system trust store, so kubectl verifies the proxy with the system
+  store — nothing to configure.
+- **The bearer token comes from an exec credential plugin** that echoes the
+  injected `$K8S_TOKEN` placeholder — the same shape an EKS kubeconfig uses to
+  shell out to `aws eks get-token`. The engine swaps the real token in
+  host-side; the placeholder is all the guest ever sees.
 
 ## The cluster is a datasource
 
@@ -42,23 +65,11 @@ the pinned address before its policy checks and the dial. Pinning is an
 explicit grant, so it also lifts the sandbox's private-address block for that
 one address.
 
-Jobs see a placeholder env var — the engine swaps the real ServiceAccount token
-into the `Authorization` header host-side, scoped to that one host. kubectl
-authenticates normally; the secret never enters the guest:
-
-```yaml
-- name: point kubectl at the cluster
-  env:
-    SERVER: ${{ inputs.server }}
-  run: |
-    kubectl config set-cluster triage --server="$SERVER" --certificate-authority="$NODE_EXTRA_CA_CERTS"
-    kubectl config set-credentials triage-bot --token="$K8S_TOKEN"
-    kubectl config set-context triage --cluster=triage --user=triage-bot
-    kubectl config use-context triage
-```
-
-The token itself is least-privilege and short-lived: a read-only ClusterRole
-bound to a dedicated ServiceAccount, minted with
+In-guest the token is only a placeholder (`$K8S_TOKEN`) — the engine swaps the
+real ServiceAccount token into the `Authorization` header host-side, scoped to
+that one host. kubectl authenticates normally; the secret never enters the
+guest. The token itself is least-privilege and short-lived: a read-only
+ClusterRole bound to a dedicated ServiceAccount, minted with
 `kubectl create token --duration=2h`.
 
 kubectl comes from a **workspace-local image**: `runs-on: work:k8s` resolves to
@@ -81,9 +92,7 @@ All commands run from `examples/k8s-triage/`:
 
 export K8S_TRIAGE_TOKEN=$(kubectl --context kind-work-triage -n triage create token triage-bot --duration=2h)
 NODE_EXTRA_CA_CERTS=kind-ca.crt \
-  work run triage \
-  --config ../../work.json --datasources k8s \
-  --inputs '{"server":"https://work-triage.internal:7443"}'
+  work run triage --config ../../work.json --datasources k8s
 ```
 
 The agent's report from a real run, unedited:
@@ -111,9 +120,10 @@ key from `db_url` to `database_url` so it matches the key the Deployment expects
 
 ## Remote clusters (EKS, GKE, AKS)
 
-The workflow is cluster-agnostic: the server URL is an input and auth is a
-bearer token, which is exactly how managed clusters authenticate. Pointing the
-triage at a remote cluster means changing only `work.json`:
+The workflow is cluster-agnostic: auth is a bearer token, which is exactly how
+managed clusters authenticate. Pointing the triage at a remote cluster means
+changing the `server` in `kubeconfig.yaml` to the cluster's real endpoint and
+the datasource in `work.json`:
 
 ```json
 "k8s": {
@@ -123,14 +133,15 @@ triage at a remote cluster means changing only `work.json`:
 ```
 
 and the local-only scaffolding drops away: a managed cluster has a real DNS
-name, so there is no `resolve` pin: the datasource is a hostname and a token,
+name, so there is no `resolve` pin — the datasource is a hostname and a token,
 nothing else. The pin (the same knob any loopback upstream would use — a local
 Postgres, a docker-published port, an SSH tunnel) is the only thing that made
 the laptop case special.
 
-In both cases TLS is two hops: in-guest, kubectl verifies the sandbox's egress
-CA (exported as `$NODE_EXTRA_CA_CERTS` inside the guest); host-side, the engine
-verifies the cluster's real CA. Hand it over with `NODE_EXTRA_CA_CERTS` on the
-`work` process, the same CA you'd put in a kubeconfig. For kind that's the CA
+In both cases TLS is two hops. In-guest, kubectl verifies the sandbox's egress
+CA, which the sandbox has already installed into the guest's system trust store
+— so kubectl needs no CA configured. Host-side, the engine verifies the
+cluster's real CA; hand it over with `NODE_EXTRA_CA_CERTS` on the `work`
+process, the same CA you'd put in a kubeconfig. For kind that's the CA
 `setup.sh` exports, verified against the pinned `127.0.0.1`, a name kind's
 default API server certificate already carries.
