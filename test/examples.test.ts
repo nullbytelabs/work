@@ -110,8 +110,8 @@ async function runExample(file: string, name: string) {
 
 // Every example runs on a real gondolin micro-VM (the guest ships
 // sh/bash/node/npm/python3, so every step language runs in the sandbox). This is
-// the QEMU tier — it self-skips without QEMU (or under WORK_SKIP_VM, the non-qemu
-// `test:unit` target). The full `npm test` boots VMs wherever QEMU is installed.
+// the QEMU tier; `npm test` always boots it. The only opt-out is WORK_SKIP_VM,
+// the explicit `test:unit` fast inner loop.
 describe("examples — every workflow runs to success", { skip: vmTestSkip() }, () => {
   for (const ex of examples) {
     it(`runs ${ex.label}`, { skip: exampleSkip(ex.name) }, async () => {

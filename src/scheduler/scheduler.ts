@@ -32,6 +32,13 @@ export interface SchedulerDeps {
   /** Fire a scheduled run. `runId` is the slot-derived idempotency key (exactly-once per slot). */
   dispatch: (fire: { workflow: string; cron: string; runId: string; slot: number }) => void | Promise<void>;
   clock: ScheduleClock;
+  /**
+   * Report a single schedule that threw while being evaluated (e.g. a malformed
+   * cron — `dueSlot` builds a `Cron` that throws on a bad expression — or a
+   * dispatch failure). Each schedule is isolated, so one bad entry never aborts the
+   * tick; this surfaces it instead of swallowing it. Optional: omit to drop quietly.
+   */
+  onError?: (item: ScheduledItem, err: unknown) => void;
 }
 
 /** The slot-derived idempotency key: stable per canonical slot instant, so duplicate ticks collapse. */
@@ -47,15 +54,22 @@ export function slotRunId(workflow: string, slot: number): string {
  */
 export async function tick(deps: SchedulerDeps): Promise<void> {
   const now = deps.clock.now();
-  for (const { workflow, cron } of await deps.listScheduled()) {
-    const last = await deps.store.lastFired(workflow, cron);
-    const slot = dueSlot(cron, last ?? now, now);
-    if (slot === null) {
-      if (last === null) await deps.store.record(workflow, cron, now); // seed baseline; no retroactive fire
-      continue;
+  for (const item of await deps.listScheduled()) {
+    const { workflow, cron } = item;
+    // Isolate each schedule: a malformed cron (`dueSlot` throws building the `Cron`)
+    // or a throwing dispatch must not abort evaluation of the schedules after it.
+    try {
+      const last = await deps.store.lastFired(workflow, cron);
+      const slot = dueSlot(cron, last ?? now, now);
+      if (slot === null) {
+        if (last === null) await deps.store.record(workflow, cron, now); // seed baseline; no retroactive fire
+        continue;
+      }
+      await deps.dispatch({ workflow, cron, runId: slotRunId(workflow, slot), slot });
+      await deps.store.record(workflow, cron, slot);
+    } catch (err) {
+      deps.onError?.(item, err);
     }
-    await deps.dispatch({ workflow, cron, runId: slotRunId(workflow, slot), slot });
-    await deps.store.record(workflow, cron, slot);
   }
 }
 

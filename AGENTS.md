@@ -17,7 +17,8 @@ also the default), so QEMU is required to run anything for real.
 Runs TypeScript directly via Node ≥ 23.6 native type-stripping — **no build step in development.**
 
 ```bash
-npm test                 # unit + e2e — boots real micro-VMs, needs QEMU
+npm test                 # full suite: unit + e2e — always boots real micro-VMs, needs QEMU
+npm run test:unit        # fast inner loop: everything EXCEPT the VM tier (WORK_SKIP_VM)
 npm run typecheck        # tsc --noEmit
 npm run lint             # eslint
 npm run build            # esbuild → dist/ (publish-only; see below)

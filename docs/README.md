@@ -80,6 +80,13 @@ the rationale is the point.
 
 ## Testing & quality
 
+- [`testing-strategy-review.md`](testing-strategy-review.md) — a critical
+  whole-suite review: the pyramid shape (wide unit base, diamond integration
+  waist, pinpoint VM tip), where confidence actually comes from vs. where the
+  green suite gives false confidence (the no-QEMU silent-skip trust gap, the
+  `HostTarget` path-divergence blind spot, no automated real-inference path), the
+  one real bug it turned up (scheduler `tick` aborts on a bad cron), and ranked
+  P0/P1/P2 recommendations.
 - [`property-based-testing.md`](property-based-testing.md) — adopting fast-check
   for the pure compiler/spec surface: Anthropic's PBT framing (properties as a
   higher-altitude spec; "is the test testing anything worthwhile?"), the

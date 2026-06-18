@@ -931,6 +931,11 @@ async function startScheduler(deps: {
       }
       deps.dispatch({ name: workflow, layout: layoutFields(layout), plan, runId, trigger: "schedule" });
     },
+    // Surface a single bad schedule (e.g. a malformed cron) rather than letting it
+    // silently starve every schedule after it in the tick — the per-item isolation
+    // lives in `tick`; this makes the failure loud.
+    onError: ({ workflow, cron }, err) =>
+      process.stderr.write(`work: schedule "${workflow}" (${cron}) failed this tick: ${err instanceof Error ? err.message : String(err)}\n`),
   };
   await seedBaselines(schedulerDeps);
   let ticking = false;
