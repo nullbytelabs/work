@@ -60,12 +60,10 @@ export class HostTarget implements ExecutionTarget {
       const child = spawn("/bin/bash", ["-lc", command], {
         cwd: opts.cwd ?? this.workdir,
         env: { ...process.env, ...opts.env },
-        signal: opts.signal,
       });
 
       let stdout = "";
       let stderr = "";
-      const timer = opts.timeoutMs ? setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs) : undefined;
 
       child.stdout.on("data", (b: Buffer) => {
         const t = b.toString();
@@ -78,12 +76,8 @@ export class HostTarget implements ExecutionTarget {
         opts.onOutput?.({ stream: "stderr", text: t });
       });
 
-      child.on("error", (err) => {
-        if (timer) clearTimeout(timer);
-        reject(err);
-      });
+      child.on("error", (err) => reject(err));
       child.on("close", (code) => {
-        if (timer) clearTimeout(timer);
         const exitCode = code ?? -1;
         resolve({ exitCode, stdout, stderr, ok: exitCode === 0 });
       });

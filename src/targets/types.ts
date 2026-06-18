@@ -16,10 +16,6 @@ export interface RunOptions {
   cwd?: string;
   /** Environment variables for this command. */
   env?: Record<string, string>;
-  /** Cancellation. */
-  signal?: AbortSignal;
-  /** Wall-clock timeout in ms. */
-  timeoutMs?: number;
   /** Live output callback (stdout/stderr interleaved as produced). */
   onOutput?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
 }
