@@ -1,13 +1,13 @@
 # Observability (OpenTelemetry)
 
-Every run can emit **OpenTelemetry traces and metrics** over OTLP — a trace per run
+Every run can emit **OpenTelemetry traces and metrics** over OTLP: a trace per run
 with a span for each job and step (and each AI call), plus the usual counters and
 histograms. It's **off by default** and turned on with one config block; when off,
 nothing about OpenTelemetry is loaded, so you pay nothing.
 
-Point it at any OTLP collector — a local [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/),
-[Grafana Alloy](https://grafana.com/docs/alloy/latest/), Jaeger (which ingests OTLP
-directly), or a hosted backend — and your runs show up as standard distributed traces.
+Point it at any OTLP collector (a local [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/),
+[Grafana Alloy](https://grafana.com/docs/alloy/latest/), Jaeger, which ingests OTLP
+directly, or a hosted backend) and your runs show up as standard distributed traces.
 
 ## Enable it
 
@@ -58,7 +58,7 @@ run ci                                   work.run.id, cicd.pipeline.result
 
 Each span carries standard semantic-convention attributes where they exist — `cicd.*`
 for the run/job (it maps cleanly onto the CI/CD conventions), `gen_ai.*` for AI calls,
-`host.image.*` for the micro-VM image — plus a `work.*` namespace for engine specifics
+`host.image.*` for the micro-VM image, plus a `work.*` namespace for engine specifics
 (`work.run.id`, `work.job.name`, `work.step.kind`, …). A failed step is an `ERROR` span
 with `error.type`; a `continue-on-error` step shows that error while its job still rolls
 up `success`.

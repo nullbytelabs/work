@@ -1,11 +1,11 @@
 # Dogfooding: the engine checks itself
 
 work is built with work. The repository ships a `.workflows/ci.yaml` that runs the
-project's own checks, tests, and an agent code review — every job in its own
+project's own checks, tests, and an agent code review, every job in its own
 gondolin micro-VM, on the same engine you run.
 
 It's a useful example precisely because it's real. The pipeline leans on the
-features you'd reach for in your own workflows — reusable workflows (nested two
+features you'd reach for in your own workflows: reusable workflows (nested two
 levels deep), a `needs` DAG that threads outputs between jobs, parallel fan-out,
 and AI agent steps running inside the sandbox. The `test` job goes furthest: it runs
 the engine's **own e2e suite in nested micro-VMs**, so `work` exercises its VM layer
@@ -43,7 +43,7 @@ jobs:
 
 `review` is itself composition: it fans out to **four focused subsystem reviews**
 (`compiler-review`, `runtime-review`, `security-review`, `web-review`), each its own
-reusable workflow. So a single `work run ci` inlines everything into one flat DAG —
+reusable workflow. So a single `work run ci` inlines everything into one flat DAG,
 the actual output of `work graph ci --format mermaid`. Every box is a real job in its
 own micro-VM:
 
@@ -80,22 +80,22 @@ flowchart TD
 ```
 
 Read it in three bands. `checks` → `test` run first. Then each focused review is a
-**scan → collect** pair — a reviewer reads one subsystem, a per-subsystem editor
-verifies and caps it — and the four verified reviews fan into the top-level
+**scan → collect** pair (a reviewer reads one subsystem, a per-subsystem editor
+verifies and caps it), and the four verified reviews fan into the top-level
 `review__collect`, which merges them. The four `scan` jobs sit behind both `checks`
 and `test` because `review` as a whole `needs` them; only the final `collect`
 actually reads the tools' outcomes (threaded in as inputs, below).
 
 ## checks: run the tools, forward the verdict
 
-`checks` runs the project's static tooling — `lint`, `typecheck`, `knip`, `fan-in` —
+`checks` runs the project's static tooling (`lint`, `typecheck`, `knip`, `fan-in`),
 each as its own step marked
 [`continue-on-error`](../reference/workflow-syntax#steps), after a single `npm ci`.
 A failing tool doesn't fail the job; the run carries on so every tool's result still
 reaches the review.
 
 What it forwards is the **outcome**, not the log. Each step exposes the engine's
-built-in per-step verdict — `success`/`failure`/`skipped` — via
+built-in per-step verdict (`success`/`failure`/`skipped`) via
 [`steps.<id>.outcome`](../reference/workflow-syntax#step-context), and that's what
 becomes the job output. No `$WORK_OUTPUT` plumbing, and no LLM in the loop for "did
 it pass": the pass/fail signal is already authoritative. The failed step's own output
@@ -133,8 +133,8 @@ directly and fails the build. The dogfood pipeline is a demonstration, not the g
 
 ## test: the suite runs itself, nested
 
-`test` is the most pointed piece of dogfooding: it runs the **entire** test suite —
-including the real-VM e2e tier — **self-hosted**. The job runs on `work:nested` (a
+`test` is the most pointed piece of dogfooding: it runs the **entire** test suite,
+including the real-VM e2e tier, **self-hosted**. The job runs on `work:nested` (a
 custom image that is just `work:base` plus `qemu-system-aarch64` and `qemu-img`), and
 its `npm test` step boots the e2e examples in **nested gondolin micro-VMs**.
 
@@ -142,7 +142,7 @@ No special engine support is needed for the nesting. Inside a guest there's no
 `/dev/kvm`, so gondolin's accelerator selection falls back to **TCG** (software
 emulation) on its own. The inner VMs fetch their guest image once over the job's
 egress and reuse it for the whole run. So `work` exercises its own VM layer
-end-to-end — compile → boot → run a job in a VM — on one machine, no external CI:
+end-to-end (compile → boot → run a job in a VM) on one machine, no external CI:
 
 ```yaml
 # .workflows/test.yaml
@@ -173,7 +173,7 @@ jobs:
 
 ## review: focused reviewers, verified then merged
 
-`review` is where the agent steps come in — and it's where the pipeline shows off
+`review` is where the agent steps come in, and where the pipeline shows off
 nesting. Rather than one big reviewer, it's **pure composition** of four focused,
 self-contained reusable workflows, one per subsystem:
 
@@ -187,9 +187,9 @@ self-contained reusable workflows, one per subsystem:
 Each one is a **scan → collect** pair. `scan` is a single
 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) agent
 (`uses: work/agent`) that reads its subsystem straight from the checkout. `collect`
-is an editor agent that **verifies every candidate against the source** — it opens
+is an editor agent that **verifies every candidate against the source**: it opens
 each cited file, confirms the issue is real with a concrete failure scenario, drops
-anything in `.review/accepted.md`, and caps the list to four — then emits
+anything in `.review/accepted.md`, and caps the list to four, then emits
 machine-readable JSON between scope-labeled sentinels:
 
 ```yaml
@@ -229,7 +229,7 @@ jobs:
 ```
 
 Because each focused review verifies and caps on its own, it stays a small,
-narrow-context job — and it runs standalone too (`work run compiler-review`) for a
+narrow-context job, and it runs standalone too (`work run compiler-review`) for a
 fast, focused loop. The top-level `review.yaml` just wires the four together and adds
 the merge editor:
 
@@ -267,13 +267,13 @@ jobs:
 
 The split is deliberate: **verification happens once, per subsystem, in the focused
 collects**; the top-level editor only folds the four already-distilled reviews into
-one — so it works over a handful of small JSON blocks, not raw scanner dumps.
+one, so it works over a handful of small JSON blocks, not raw scanner dumps.
 
 The tooling outcomes ride in **explicitly**. `ci.yaml` maps the `checks`/`test` job
 outcomes onto `review`'s declared `inputs:` via `with:`, so the data flow is visible
 at the call site. The merge editor leads its summary with any `failure`, and the
 `show review` step prints a deterministic tooling banner computed straight from the
-outcomes — a broken build is surfaced for certain, not left to the model's
+outcomes, so a broken build is surfaced for certain, not left to the model's
 discretion. There's no agent re-narrating logs; the failure detail already lives in
 the `checks`/`test` step output in the run.
 

@@ -1,15 +1,15 @@
 # Configuration
 
 `work.json` declares the **providers** and **models** that
-[agent steps](../guide/agent-steps) use, and — optionally — the **datasources** a
+[agent steps](../guide/agent-steps) use, and optionally the **datasources** a
 `run:` step may reach and the **webhooks** that can trigger a workflow. You only
 need it if your workflows run `uses: work/agent` steps, call out to a declared
-datasource, or accept webhook triggers — plain `run:` workflows need no config at
+datasource, or accept webhook triggers; plain `run:` workflows need no config at
 all.
 
 ## File resolution
 
-Config is loaded in **two layers** — a machine-wide global file, then one project
+Config is loaded in **two layers**: a machine-wide global file, then one project
 layer that overrides it:
 
 1. **Global** (lowest precedence) — `~/.config/work/work.json`
@@ -38,12 +38,12 @@ The two layers are **deep-merged**, with the project layer winning:
   collision the project layer's entry **replaces** the global one wholesale (no
   field-level merging).
 - `defaultModel` is last-writer-wins (the project layer's, if set).
-- An omitted or empty map inherits the lower layer — so a project config can shrink
+- An omitted or empty map inherits the lower layer, so a project config can shrink
   to just `{ "defaultModel": "kimi" }` once the global file supplies the catalog.
 
 Cross-references are validated **after** merging, not per file. That's what lets a
 project layer reference a model whose `provider` is declared only in the global
-file — a layer that looks "incomplete" on its own is still valid once merged.
+file. A layer that looks "incomplete" on its own is still valid once merged.
 
 ## Shape
 
@@ -101,7 +101,7 @@ A map of datasource name → an external HTTP service a plain `run:` step is all
 to reach, with a header secret injected **host-side**. Like a provider's `apiKey`,
 the `token` is operator-owned and supports `$VAR` / `${VAR}` expansion, so the file
 need not hold it. Egress is **deny-by-default**: only the host derived from
-`baseUrl` is allowlisted, and the guest sees a placeholder env var — never the real
+`baseUrl` is allowlisted, and the guest sees a placeholder env var, never the real
 token.
 
 ```json
@@ -162,7 +162,7 @@ config alone can't make a workflow webhook-triggerable.
 
 The receiver is **fail-closed**: a delivery is rejected unless the workflow opted
 in, a matching hook exists, and the request authenticates. Deliveries are de-duped
-(replay protection), size-capped, and parsed only after auth — and the audit log
+(replay protection), size-capped, and parsed only after auth, and the audit log
 the console shows never stores the payload or the secret. See the
 [serve host guide](../guide/web-ui#webhook-triggers) for the end-to-end flow.
 
@@ -208,15 +208,15 @@ need not hold any secret:
 
 ::: danger Don't commit literal keys
 Always reference an environment variable rather than pasting a literal key into the
-file. A key committed to git is a leaked key — rotate it if that happens.
+file. A key committed to git is a leaked key; rotate it if that happens.
 :::
 
 ## How the key reaches the model
 
 For an agent step, the host resolves the model endpoint, allowlists it through the
 sandbox's mediated egress, and injects the API key **host-side**. The key is never
-written into the guest, so it isn't visible to anything running inside the micro-VM
-— including the agent's own tools. See [How it works](../guide/how-it-works#agent-steps).
+written into the guest, so it isn't visible to anything running inside the micro-VM,
+including the agent's own tools. See [How it works](../guide/how-it-works#agent-steps).
 
 ## Example
 

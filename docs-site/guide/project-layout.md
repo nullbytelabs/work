@@ -16,7 +16,7 @@ my-project/
 
 ::: tip Scaffold it
 `work init` creates this layout (a starter workflow + config), and
-`work create workflow <name>` adds another workflow — `--template agent-action` also writes
+`work create workflow <name>` adds another workflow, and `--template agent-action` also writes
 an `actions/<name>/` composite action (wrapping [`work/agent`](./agent-steps)) like
 the one above. See the [CLI reference](../reference/cli#work-init).
 :::
@@ -38,13 +38,13 @@ from inside the project you can just `work run verify`).
 This is the key behavior to understand:
 
 - When a workflow lives in **`.workflows/`**, the **project root** (the parent of
-  `.workflows/`) is what gets checked out into each job's workspace — so
+  `.workflows/`) is what gets checked out into each job's workspace, so
   `package.json`, your source, `npm install`, and friends are all there.
 - A standalone **`workflow.yaml` outside `.workflows/`** uses its own folder as the
   checkout instead.
 
 Each job gets its own **fresh copy** of the checkout. `.git/` and `node_modules/`
-are never staged, so every job installs its own dependencies — keeping jobs
+are never staged, so every job installs its own dependencies, keeping jobs
 hermetic and independent.
 
 ```yaml

@@ -1,6 +1,6 @@
 # Actions
 
-An **action** is a reusable **step** you own — the step-level sibling of a
+An **action** is a reusable **step** you own, the step-level sibling of a
 [reusable workflow](./reusable-workflows). It lives in your project under
 `.workflows/actions/<name>/` and you call it with `uses: action/<name>`. There are
 two kinds:
@@ -22,9 +22,9 @@ The `uses:` forms at a glance:
 
 ## JavaScript actions
 
-A JavaScript action runs arbitrary Node in the sandbox — the home for bespoke logic
-the engine never needs to know about: shape inputs, call out, parse a result into
-structured fields.
+A JavaScript action runs arbitrary Node in the sandbox: the home for bespoke logic
+the engine never needs to know about, such as shaping inputs, calling out, or parsing a
+result into structured fields.
 
 ```
 .workflows/actions/greet/
@@ -51,7 +51,7 @@ runs:
 ```
 
 **`index.mjs`** — your code. It reads typed inputs from `INPUT_<NAME>` env vars and
-writes declared outputs to the `$WORK_OUTPUT` file — the **same ABI** a `run:` step
+writes declared outputs to the `$WORK_OUTPUT` file, the **same ABI** a `run:` step
 uses, lifted straight from GitHub Actions so it's already familiar:
 
 ```js
@@ -75,7 +75,7 @@ jobs:
       - run: echo "${{ steps.g.outputs.greeting }}"   # → hello, workflows
 ```
 
-Only the action's **declared** outputs are surfaced as `steps.<id>.outputs.*` — the
+Only the action's **declared** outputs are surfaced as `steps.<id>.outputs.*`; the
 manifest stays the contract.
 
 ### Dependencies
@@ -93,7 +93,7 @@ action can pull in libraries:
 
 ## How a JS action runs
 
-It runs **in the job's micro-VM** — never on your host. The engine stages the action
+It runs **in the job's micro-VM**, never on your host. The engine stages the action
 directory into the sandbox, installs its deps if any, then runs `node <main>` with
 `INPUT_*` set and `$WORK_OUTPUT` captured, and reads the declared outputs back. Like
 every `uses:` step it gets mediated egress (a plain `run:`-only job is

@@ -40,7 +40,7 @@ jobs:
 
 `jobs:` is a map of named jobs. Each job has ordered `steps:`. A step is either:
 
-- a **`run:`** command — a shell command or multi-line script, or
+- a **`run:`** command (a shell command or multi-line script), or
 - a **`uses:`** step — the built-in [`work/agent`](./agent-steps) AI agent, a
   [built-in action](./builtin-actions) (`work/checkout`, `work/install-node`), or
   a user-space [action](./actions) (`action/<name>`).
@@ -81,7 +81,7 @@ jobs:
 ```
 
 `work:base` (and any custom image) is **built on first use** on each machine, then
-reused — so the first run that needs it takes a few minutes; later runs boot
+reused, so the first run that needs it takes a few minutes; later runs boot
 instantly. You can also define your own images with whatever toolchain your jobs
 need — see [Custom images](./custom-images).
 
@@ -93,7 +93,7 @@ at the top level or directly under `jobs:`.
 
 ## `machine` — sizing the VM
 
-`machine` sets how big a job's micro-VM is — its vCPU count and RAM. Pick a
+`machine` sets how big a job's micro-VM is: its vCPU count and RAM. Pick a
 **named type** from the built-in catalog, or specify dimensions **inline**.
 Omitting `machine:` uses `medium`.
 
@@ -138,11 +138,11 @@ jobs:
     steps: [{ run: echo "shipping" }]
 ```
 
-This `needs` graph is what drives the scheduler — and what `work graph` renders.
+This `needs` graph is what drives the scheduler, and what `work graph` renders.
 
 ## `env`
 
-Environment variables can be declared at three levels — **workflow**, **job**, and
+Environment variables can be declared at three levels: **workflow**, **job**, and
 **step**. Inner scopes override outer ones. Values are always strings.
 
 ```yaml
@@ -189,8 +189,8 @@ work greet.yaml --inputs '{"name":"ada","excited":true}'
 ```
 
 ::: tip Shorthand
-`name:` (a null value) is shorthand for an optional string input. A scalar —
-`age: 36` — is shorthand for a typed input with that default. See the
+`name:` (a null value) is shorthand for an optional string input. A scalar
+(`age: 36`) is shorthand for a typed input with that default. See the
 [reference](../reference/workflow-syntax#inputs) for the full shape and validation
 rules.
 :::
@@ -224,7 +224,7 @@ the `steps.<id>.outputs.<key>` context. Across jobs, go through
 ### Forwarding a command's output
 
 `$WORK_OUTPUT` is for values you choose to expose. To forward a command's **raw
-output** you don't need to capture it by hand — every step with an `id` already
+output** you don't need to capture it by hand. Every step with an `id` already
 exposes what the engine captured:
 
 | Accessor | Value |
@@ -273,7 +273,7 @@ jobs:
       - run: echo "node=${{ matrix.node }} os=${{ matrix.os }}"
 ```
 
-Each leg is its own job — so a downstream `needs: [test]` waits for **every** leg.
+Each leg is its own job, so a downstream `needs: [test]` waits for **every** leg.
 All legs run in parallel, up to the engine's worker concurrency.
 
 ## Conditionals
@@ -300,7 +300,7 @@ Use `if` or `when`, but not both on the same step/job.
 
 By default a step that exits non-zero fails its job and skips the remaining
 steps. Mark a step `continue-on-error: true` and a non-zero exit no longer gates
-the job — the run continues and the job can still succeed. The step's real
+the job; the run continues and the job can still succeed. The step's real
 outcome is still recorded (it reads `failure` via <code v-pre>${{ steps.&lt;id&gt;.outcome }}</code>),
 and its `$WORK_OUTPUT` and <code v-pre>${{ steps.&lt;id&gt;.logs }}</code> are captured either way, so a
 later step or a downstream job can inspect what happened.

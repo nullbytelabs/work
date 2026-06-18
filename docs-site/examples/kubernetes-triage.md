@@ -36,7 +36,7 @@ datasource, and the run opts in with `--datasources k8s`:
 ```
 
 The hostname is just a label. The demo cluster lives on the engine host's
-loopback (kind's default), which no DNS can name — so the datasource pins it
+loopback (kind's default), which no DNS can name, so the datasource pins it
 with `resolve`, exactly like `curl --resolve`: the engine rewrites the host to
 the pinned address before its policy checks and the dial. Pinning is an
 explicit grant, so it also lifts the sandbox's private-address block for that
@@ -111,7 +111,7 @@ key from `db_url` to `database_url` so it matches the key the Deployment expects
 
 ## Remote clusters (EKS, GKE, AKS)
 
-The workflow is cluster-agnostic — the server URL is an input and auth is a
+The workflow is cluster-agnostic: the server URL is an input and auth is a
 bearer token, which is exactly how managed clusters authenticate. Pointing the
 triage at a remote cluster means changing only `work.json`:
 
@@ -123,14 +123,14 @@ triage at a remote cluster means changing only `work.json`:
 ```
 
 and the local-only scaffolding drops away: a managed cluster has a real DNS
-name, so there is no `resolve` pin — the datasource is a hostname and a token,
+name, so there is no `resolve` pin: the datasource is a hostname and a token,
 nothing else. The pin (the same knob any loopback upstream would use — a local
 Postgres, a docker-published port, an SSH tunnel) is the only thing that made
 the laptop case special.
 
 In both cases TLS is two hops: in-guest, kubectl verifies the sandbox's egress
 CA (exported as `$NODE_EXTRA_CA_CERTS` inside the guest); host-side, the engine
-verifies the cluster's real CA — hand it over with `NODE_EXTRA_CA_CERTS` on the
+verifies the cluster's real CA. Hand it over with `NODE_EXTRA_CA_CERTS` on the
 `work` process, the same CA you'd put in a kubeconfig. For kind that's the CA
-`setup.sh` exports, verified against the pinned `127.0.0.1` — a name kind's
+`setup.sh` exports, verified against the pinned `127.0.0.1`, a name kind's
 default API server certificate already carries.
