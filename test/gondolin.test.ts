@@ -26,6 +26,13 @@ describe("GondolinTarget — unit (no VM)", () => {
     const t = new GondolinTarget({ workdir: "/tmp/x" });
     await assert.rejects(() => t.run("echo hi"), /before provision/);
   });
+
+  it("dispose() before provision() is a safe no-op (never loads the SDK)", async () => {
+    // The runtime always calls dispose() in a finally; the documented contract is
+    // "must be idempotent / always safe to call". An un-provisioned target holds no
+    // VM, so dispose must resolve without touching the optional gondolin SDK.
+    await assert.doesNotReject(() => new GondolinTarget({ workdir: "/tmp/x" }).dispose());
+  });
 });
 
 describe("makeResolveHook — host pin rewrite (no VM)", () => {
@@ -54,9 +61,8 @@ describe("makeResolveHook — host pin rewrite (no VM)", () => {
 
 /**
  * Real micro-VM execution. Needs Node >= 23.6, QEMU, and the optional
- * @earendil-works/gondolin package. Self-skips without QEMU (or under
- * WORK_SKIP_VM, the non-qemu `test:unit` target); the full `npm test` runs it
- * wherever QEMU is installed.
+ * @earendil-works/gondolin package. `npm test` always runs it; the only opt-out
+ * is WORK_SKIP_VM, the explicit `test:unit` fast inner loop.
  */
 describe("GondolinTarget — VM smoke", { skip: vmTestSkip() }, () => {
   it("runs the test/e2e/hello-world-gondolin/workflow.yaml workflow in a VM", async () => {
@@ -77,6 +83,30 @@ describe("GondolinTarget — VM smoke", { skip: vmTestSkip() }, () => {
     } finally {
       await runtime.close();
       await rm(workRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Contract behaviors of the real target that the HostTarget double can't prove:
+ * a non-zero guest exit surfaces as ok:false (the runtime keys step failure off
+ * `ok`), and dispose() after a real provision is idempotent (calling it twice
+ * must not double-close the QEMU process).
+ */
+describe("GondolinTarget — lifecycle (VM)", { skip: vmTestSkip() }, () => {
+  it("surfaces a non-zero exit as ok:false and disposes idempotently", async () => {
+    const workdir = await mkdtemp(join(tmpdir(), "gondolin-life-"));
+    const t = new GondolinTarget({ workdir });
+    try {
+      await t.provision();
+      const r = await t.run("echo to-stderr 1>&2; exit 3");
+      assert.equal(r.ok, false);
+      assert.equal(r.exitCode, 3);
+      assert.match(r.stderr, /to-stderr/);
+    } finally {
+      await t.dispose();
+      await t.dispose(); // second close must be a safe no-op (idempotent)
+      await rm(workdir, { recursive: true, force: true });
     }
   });
 });

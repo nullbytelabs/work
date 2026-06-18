@@ -11,7 +11,7 @@
  *
  * Mapping to the documented SDK (docs/gondolin-secure-execution.md):
  *   provision -> VM.create({ memory, cpus, env, vfs, httpHooks? })
- *   run       -> vm.exec(["/bin/sh","-lc",cmd], { cwd, env, signal })
+ *   run       -> vm.exec(["/bin/sh","-lc",cmd], { cwd, env })
  *   dispose   -> vm.close()   (REQUIRED, or the QEMU process leaks)
  */
 import { mkdir } from "node:fs/promises";
@@ -205,7 +205,6 @@ export class GondolinTarget implements ExecutionTarget {
     const execOpts: Record<string, unknown> = {
       cwd: opts.cwd ?? GUEST_WORKSPACE,
       env: opts.env,
-      signal: opts.signal,
     };
     // In "pipe" mode Gondolin does not also buffer into the final result, so we
     // accumulate stdout/stderr ourselves while forwarding chunks live.

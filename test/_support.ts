@@ -2,9 +2,8 @@
 // file and hand out AbsurdRuntime instances bound to it, so we don't re-apply
 // the schema for every workflow run. Not a *.test.ts file, so the runner ignores it.
 import { before, after } from "node:test";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { qemuBinaryFor } from "../src/doctor/checks.ts";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunContext, type WorkflowResult } from "../src/runtime/index.ts";
 import { parseRunsOn, type ExecutionPlan } from "../src/compiler/index.ts";
 import { resolveImageConfig, ensureImageTag } from "../src/images/index.ts";
@@ -15,18 +14,14 @@ import type { UsesHandler } from "../src/runtime/index.ts";
 
 /**
  * Skip reason for the real-VM (QEMU) test tiers, or `false` to run them. Pass it
- * to `describe(name, { skip: vmTestSkip() }, …)` so the e2e / VM-smoke suites
- * self-skip where booting a micro-VM isn't possible:
- *   - `WORK_SKIP_VM=1` — the non-QEMU `test:unit` target (and the in-guest CI tier,
- *     where nested QEMU isn't available), and
- *   - any host without `qemu-system-*` on PATH.
- * The full suite (`npm test`) still boots real VMs wherever QEMU is installed.
+ * to `describe(name, { skip: vmTestSkip() }, …)` so the e2e / VM-smoke suites can
+ * opt out of booting a micro-VM. The *only* opt-out is the explicit `WORK_SKIP_VM`
+ * env var, which backs the fast `test:unit` inner loop. The full suite (`npm test`)
+ * always boots real VMs — there is no auto-skip, so a run can never silently pass
+ * by quietly dropping the VM tier.
  */
 export function vmTestSkip(): string | false {
-  if (process.env["WORK_SKIP_VM"]) return "WORK_SKIP_VM set (non-qemu tier)";
-  const bin = qemuBinaryFor(process.arch);
-  const probe = spawnSync(bin, ["--version"], { stdio: "ignore" });
-  return probe.status === 0 ? false : `${bin} not found on PATH`;
+  return process.env["WORK_SKIP_VM"] ? "WORK_SKIP_VM set (fast unit tier)" : false;
 }
 
 /** Deterministic agent runner for tests — no network. Echoes a canned summary. */
@@ -65,12 +60,10 @@ export class HostTarget implements ExecutionTarget {
       const child = spawn("/bin/bash", ["-lc", command], {
         cwd: opts.cwd ?? this.workdir,
         env: { ...process.env, ...opts.env },
-        signal: opts.signal,
       });
 
       let stdout = "";
       let stderr = "";
-      const timer = opts.timeoutMs ? setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs) : undefined;
 
       child.stdout.on("data", (b: Buffer) => {
         const t = b.toString();
@@ -83,12 +76,8 @@ export class HostTarget implements ExecutionTarget {
         opts.onOutput?.({ stream: "stderr", text: t });
       });
 
-      child.on("error", (err) => {
-        if (timer) clearTimeout(timer);
-        reject(err);
-      });
+      child.on("error", (err) => reject(err));
       child.on("close", (code) => {
-        if (timer) clearTimeout(timer);
         const exitCode = code ?? -1;
         resolve({ exitCode, stdout, stderr, ok: exitCode === 0 });
       });
