@@ -48,6 +48,7 @@ All commands accept `--workdir <dir>` (scratch dir), `--quiet`, `--no-global`
 | `… run <name> --resume <id>` | Resume a specific prior run id into this run. |
 | `work [--workspace <dir>] resume <id>` | Continue an interrupted run — **reuses finished jobs** (workflow+inputs from history). |
 | `work [--workspace <dir>] rerun <id>` | Re-run a past run **fresh**, same inputs. |
+| `work [--workspace <dir>] retry <id>` | Re-run only a `failure` run's **failed jobs** (same id) — reuses the jobs that passed. GitHub-style “re-run failed jobs”. |
 | `work [--workspace <dir>] runs [--status …]` | Run history, newest-first. `--status queued\|running\|success\|failure\|interrupted`. |
 | `work [--workspace <dir>] logs <id>` | Replay a past run's stored log (web-run logs; id by short prefix). |
 | `work graph <file.yaml> [--format mermaid\|dot\|json\|ascii] [--steps]` | Emit the compiled DAG instead of running. `--steps` expands step-level detail. |
@@ -76,7 +77,9 @@ cap, each job in its own micro-VM. Everything is journaled to PGLite under
 - **After a run**: `work runs` (or the `work_runs` tool) for the verdict + id;
   `work logs <id>` replays a web run. Unfinished runs (`interrupted`/`running`/
   `queued`) are the actionable ones — resume them.
-- **Recovery**: `work resume <id>` continues (reuses finished jobs); `work rerun <id>`
+- **Recovery**: `work resume <id>` continues (reuses finished jobs); `work retry <id>`
+  re-runs only a failed run's failed jobs (reusing the passing ones — the flaky-failure
+  tactic); `work rerun <id>`
   starts fresh. Ids come from `work runs` (short prefix is fine).
 
 ## The project's own pipelines (dogfood)

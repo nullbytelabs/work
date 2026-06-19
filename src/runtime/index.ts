@@ -20,3 +20,6 @@ export {
   SILENT_LOG,
   ABSURD_SCHEMA_VERSION,
 } from "./absurd/engine.ts";
+// "Re-run failed jobs" — clear a prior run's failed-job journal so a same-runId
+// re-drive re-runs only those, reusing the jobs that already passed.
+export { resetFailedJobs, type RetryResetResult } from "./absurd/retry-failed.ts";

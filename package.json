@@ -28,6 +28,7 @@
     "hello": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts ./test/e2e/hello-world-gondolin/workflow.yaml",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test-isolation=none --test test/*.test.ts",
     "test:unit": "WORK_SKIP_VM=1 node --experimental-strip-types --disable-warning=ExperimentalWarning --test-isolation=none --test test/*.test.ts",
+    "test:web": "playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "knip": "knip",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "^1.61.0",
     "@types/node": "24.13.2",
     "@types/pg": "8.20.0",
     "esbuild": "0.28.1",

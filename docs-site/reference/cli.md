@@ -27,9 +27,11 @@ work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--dat
 # list run history (filter by status)
 work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
 
-# continue an interrupted run, or re-run a past one fresh (by id, from `work runs`)
+# continue an interrupted run, re-run a past one fresh, or re-run just its failed
+# jobs (by id, from `work runs`)
 work [--workspace <dir>] resume <id>
 work [--workspace <dir>] rerun <id>
+work [--workspace <dir>] retry <id>
 
 # print the job DAG instead of running it
 work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
@@ -319,23 +321,32 @@ work runs --status interrupted
 Each row shows the run id, workflow, status, and when it started. A run shown as
 **interrupted** is resumable, and the listing prints the exact `resume` command.
 
-### `work resume` / `work rerun`
+### `work resume` / `work rerun` / `work retry`
 
 ```bash
 work [--workspace <dir>] resume <id>   # continue an interrupted run
 work [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs
+work [--workspace <dir>] retry <id>    # re-run only a failed run's failed jobs
 ```
 
-Both recover a past run **by id** (copy it from `work runs`); the workflow and
-inputs come from history, so you don't retype them:
+All three recover a past run **by id** (copy the short id from `work runs` — a
+unique prefix is fine); the workflow and inputs come from history, so you don't
+retype them:
 
 - **`resume`** continues the *same* run: jobs that already finished are reused,
   not re-executed, and the run picks up from where it stopped. This is how an
   interrupted run is driven to completion. Equivalent to `work run <name> --resume <id>`.
 - **`rerun`** starts a *fresh* run with the same inputs (a new run id), re-executing
-  everything — handy for a flaky job or re-triggering a report.
+  everything — handy for re-triggering a report from scratch.
+- **`retry`** re-runs only the **failed** jobs of a prior `failure` run, under the
+  *same* id: the jobs that already passed are reused (picking up where they left
+  off), and just the failed ones run again. This is the “re-run failed jobs” tactic
+  from GitHub Actions — the quick way to tell a flaky failure from a real one
+  without redoing the work that already succeeded. It errors if the run had no
+  failed jobs (use `rerun` to re-run a green run), and downstream jobs that were
+  skipped by the failure are re-evaluated by the re-walk.
 
-`--inputs` overrides the stored inputs for either.
+`--inputs` overrides the stored inputs for any of them.
 
 ### `work graph`
 
@@ -434,7 +445,7 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 |---|---|---|
 | `--workspace <dir>` | `run`, `graph`, `serve` | Project root for resolving a workflow by name / serving the host (default: current directory). |
 | `--port <n>` | `serve` | Port the host binds (default `4280`; `1`–`65535`). |
-| `--inputs '<json>'` | `run`, file, `resume`, `rerun` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`, overrides the inputs stored in history. |
+| `--inputs '<json>'` | `run`, file, `resume`, `rerun`, `retry` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`/`retry`, overrides the inputs stored in history. |
 | `--config <file>` | `run`, file | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
 | `--datasources <a,b>` | `run`, file | [Datasources](./configuration#datasources) this run's jobs may reach (comma-separated; the CLI counterpart of a webhook's `datasources` scope). Deny-by-default when omitted. |
 | `--no-global` | `run`, file | Skip the machine-wide global config layer, for a hermetic, reproducible run. |

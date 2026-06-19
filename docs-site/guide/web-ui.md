@@ -35,6 +35,12 @@ console instead, never by opening its database from another process.
 
 ## What it gives you
 
+Every page has its own URL, so you can **bookmark, share, and refresh** any view —
+a specific run (`/runs/<id>`), a workflow's trigger form (`/workflows/<name>`), or
+`/history`, `/webhooks`, `/schedules`. Back/forward navigate as you'd expect, and a
+link to a finished run replays its full output. (Paste a run URL to a teammate and
+they land on exactly that run.)
+
 The console has four pages, all backed by the real engine:
 
 | Page | What it does |
@@ -70,7 +76,13 @@ The same view replays from history after the run finishes.
 Every run is recorded durably (see [Where data lives](#where-data-lives)), so the
 **History** page survives restarts of the server. Open any past run to read its
 full output again, or hit **Re-run** to launch a fresh run with the same workflow
-and inputs, handy for retrying a flaky job or re-triggering a report.
+and inputs, handy for re-triggering a report.
+
+When a run ends in **failure**, a **Retry failed** button also appears: it re-runs
+*only* the jobs that failed — reusing the ones that already passed — under the same
+run id, picking up where the passing jobs left off. It's the quickest way to tell a
+flaky failure from a real one without redoing work that already succeeded (the
+console equivalent of [`work retry`](../reference/cli#work-resume-work-rerun-work-retry)).
 
 ![The History page listing recent runs with status badges and timing](/screenshots/console-history.png)
 

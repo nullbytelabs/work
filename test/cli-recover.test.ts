@@ -41,6 +41,15 @@ describe("work resume / rerun — recovery resolution", () => {
       assert.equal(noArg.status, 2);
       assert.match(noArg.stderr, /rerun requires a run id/);
 
+      // `retry` shares the same resolution: missing arg + unknown id error cleanly.
+      const retryNoArg = cli(ws, "retry");
+      assert.equal(retryNoArg.status, 2);
+      assert.match(retryNoArg.stderr, /retry requires a run id/);
+
+      const retryNoSuch = cli(ws, "retry", "does-not-exist");
+      assert.equal(retryNoSuch.status, 2);
+      assert.match(retryNoSuch.stderr, /no run "does-not-exist" found in history/);
+
       // Resolves the id → workflow name from history, then fails to find the
       // workflow (a clean UserFacingError → exit 1, like `run vanished` would).
       const gone = cli(ws, "resume", "ghost-run");
