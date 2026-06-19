@@ -83,6 +83,21 @@ describe("reusable — multi-job inlining", () => {
     assert.deepEqual(p.jobs["call__produce"]!.needs, []);
   });
 
+  // Regression: the `needs.<id>` rewrite must only touch `${{ }}` spans — a bare
+  // literal `needs.produce` in shell text (or a prompt) is not an expression and
+  // must be left verbatim, while the real `${{ needs.produce.outputs.x }}` is
+  // namespaced.
+  it("rewrites needs.* only inside ${{ }}, not bare literal text in run", () => {
+    const p = plan(`name: caller\njobs:\n  call:\n    uses: workflow/lib`, {
+      lib: `name: lib\non: workflow_call\njobs:\n  produce:\n    steps:\n      - id: m\n        run: 'echo "x=1" >> "$WORK_OUTPUT"'\n    outputs:\n      x: "\${{ steps.m.outputs.x }}"\n  consume:\n    needs: [produce]\n    steps:\n      - run: 'echo "see needs.produce docs: \${{ needs.produce.outputs.x }}"'`,
+    });
+    const run = p.jobs["call__consume"]!.steps[0]!.run!;
+    // The expression is namespaced…
+    assert.match(run, /\$\{\{ needs\.call__produce\.outputs\.x \}\}/);
+    // …but the literal prose `needs.produce` (outside ${{ }}) is untouched.
+    assert.match(run, /see needs\.produce docs/);
+  });
+
   it("attaches a downstream needs to the callee's leaf and rewrites its output ref onto the producer", () => {
     const p = plan(
       `name: caller\njobs:\n  build:\n    uses: workflow/lib\n  deploy:\n    needs: [build]\n    steps:\n      - run: 'echo "\${{ needs.build.outputs.x }}"'`,
@@ -162,6 +177,26 @@ describe("reusable — matrix on the call", () => {
     assert.equal(p.jobs["dep::env-staging"]!.steps[0]!.run, 'echo "staging"');
     assert.equal(p.jobs["dep::env-prod"]!.steps[0]!.run, 'echo "prod"');
   });
+
+  // Regression: a dotted cell value (e.g. version 1.5) becomes a reusable-namespace
+  // prefix that must stay expression-grammar-safe (`[A-Za-z_][\w-]*`, no `.`) — a
+  // multi-job callee's namespaced `${{ needs.<id>.outputs.* }}` would otherwise
+  // reference an id the runtime resolver rejects at runtime.
+  it("sanitizes a dotted cell value so namespaced needs.* ids stay resolvable", () => {
+    const p = plan(
+      `name: caller\njobs:\n  build:\n    strategy:\n      matrix:\n        ver: ["1.5"]\n    uses: workflow/lib\n    with:\n      v: "\${{ matrix.ver }}"`,
+      {
+        lib: `name: lib\non: workflow_call\ninputs:\n  v: { required: true }\njobs:\n  produce:\n    steps:\n      - id: m\n        run: 'echo "x=1" >> "$WORK_OUTPUT"'\n    outputs:\n      x: "\${{ steps.m.outputs.x }}"\n  consume:\n    needs: [produce]\n    steps:\n      - run: 'echo "\${{ needs.produce.outputs.x }}"'`,
+      },
+    );
+    // Every job id (and the namespaced needs reference) is expression-grammar-safe.
+    for (const id of Object.keys(p.jobs)) {
+      assert.doesNotMatch(id, /\./, `job id ${id} must not contain a dot`);
+    }
+    const consume = Object.entries(p.jobs).find(([id]) => id.includes("consume"))![1];
+    const m = /needs\.([\w-]+)\.outputs\.x/.exec(consume.steps[0]!.run!)!;
+    assert.doesNotMatch(m[1]!, /\./, "namespaced needs id must be dot-free");
+  });
 });
 
 describe("reusable — guards", () => {
@@ -213,6 +248,58 @@ describe("reusable — guards", () => {
     assert.throws(
       () => compile(parseWorkflow(`name: caller\njobs:\n  a:\n    uses: workflow/x`)),
       (e) => e instanceof WorkflowCompileError && /not available in this context/.test(e.message),
+    );
+  });
+
+  // Regression: `jobId in W.jobs` walked the prototype, so a producer named after an
+  // Object.prototype member (`toString`, `constructor`, …) slipped past as "known"
+  // and later crashed topoSort with a raw TypeError instead of a clean error.
+  it("rejects a workflow_call.outputs producer named after a prototype member (no prototype walk)", () => {
+    assert.throws(
+      () =>
+        plan(`name: caller\njobs:\n  call:\n    uses: workflow/lib`, {
+          lib: `name: lib\non:\n  workflow_call:\n    outputs:\n      v: "\${{ jobs.toString.outputs.x }}"\njobs:\n  a:\n    steps: [{ run: "true" }]\n  b:\n    needs: [a]\n    steps: [{ run: "true" }]`,
+        }),
+      (e) => e instanceof WorkflowCompileError && /references unknown job "toString"/.test(e.message),
+    );
+  });
+
+  // Regression: a multi-job callee exposing an output whose producer doesn't declare
+  // the key compiled silently and failed late at runtime; reject it at compile time.
+  it("rejects a multi-job callee output referencing an undeclared producer key", () => {
+    assert.throws(
+      () =>
+        plan(`name: caller\njobs:\n  call:\n    uses: workflow/lib`, {
+          lib: `name: lib\non:\n  workflow_call:\n    outputs:\n      v: "\${{ jobs.a.outputs.nope }}"\njobs:\n  a:\n    steps: [{ run: "true" }]\n  b:\n    needs: [a]\n    steps: [{ run: "true" }]`,
+        }),
+      (e) => e instanceof WorkflowCompileError && /does not declare output "nope"/.test(e.message),
+    );
+  });
+
+  // Regression: a matrix-fanned call can't expose outputs unambiguously (one set per
+  // cell); reject at compile time instead of failing late at runtime.
+  // Regression: a workflow_call.outputs value must be exactly ONE ${{ }} expression
+  // — multiple were silently collapsed to the last, yielding a wrong plan.
+  it("rejects a workflow_call.outputs value composed of multiple ${{ }} expressions", () => {
+    assert.throws(
+      () =>
+        plan(`name: caller\njobs:\n  call:\n    uses: workflow/lib`, {
+          lib: `name: lib\non:\n  workflow_call:\n    outputs:\n      url: "\${{ jobs.a.outputs.host }}/\${{ jobs.a.outputs.path }}"\njobs:\n  a:\n    steps:\n      - id: m\n        run: 'true'\n    outputs:\n      host: "\${{ steps.m.outputs.host }}"\n      path: "\${{ steps.m.outputs.path }}"`,
+        }),
+      (e) => e instanceof WorkflowCompileError && /must be a single \$\{\{ \}\} expression/.test(e.message),
+    );
+  });
+
+  it("rejects a matrix uses: call whose callee exposes workflow_call.outputs", () => {
+    assert.throws(
+      () =>
+        plan(
+          `name: caller\njobs:\n  call:\n    strategy:\n      matrix:\n        env: [staging, prod]\n    uses: workflow/lib\n    with:\n      target: "\${{ matrix.env }}"`,
+          {
+            lib: `name: lib\non:\n  workflow_call:\n    inputs:\n      target: { type: string }\n    outputs:\n      v: "\${{ jobs.run.outputs.version }}"\njobs:\n  run:\n    steps:\n      - id: meta\n        run: 'echo "version=1" >> "$WORK_OUTPUT"'\n    outputs:\n      version: "\${{ steps.meta.outputs.version }}"`,
+          },
+        ),
+      (e) => e instanceof WorkflowCompileError && /matrix .*cannot expose workflow_call.outputs/.test(e.message),
     );
   });
 });

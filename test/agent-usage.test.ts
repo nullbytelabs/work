@@ -101,7 +101,7 @@ describe("agent token-usage capture", () => {
     // Fake exec: ok the npm install, and for the wrapper run write a result JSON
     // (with usage) to the host side of the result path the command names.
     const exec = async (command: string) => {
-      if (command.startsWith("npm install")) return { exitCode: 0, stdout: "", stderr: "", ok: true };
+      if (command.includes("npm install")) return { exitCode: 0, stdout: "", stderr: "", ok: true };
       const guestRes = command.split(" ").at(-1)!; // `node <wrapper> <req> <res>`
       const hostRes = guestRes.replace(guestDir, hostDir);
       await writeFile(hostRes, JSON.stringify({ text: "ok", finishReason: "stop", usage: { inputTokens: 123, outputTokens: 45, requests: 2 } }));

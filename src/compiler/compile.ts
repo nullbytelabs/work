@@ -217,6 +217,13 @@ export function topoSort(jobs: Record<string, PlannedJob>): string[] {
 
   for (const id of ids) {
     for (const dep of jobs[id]!.needs) {
+      // A `needs` leg must point at a real job. `dependents` is keyed only by the
+      // job ids, so a dangling reference (e.g. a reusable-output rewrite that
+      // namespaced a non-existent producer) would otherwise blow up with a raw
+      // `undefined.push` TypeError escaping compile(); surface it as a clean error.
+      if (!dependents.has(dep)) {
+        throw new WorkflowCompileError(`job "${id}" needs unknown job "${dep}"`);
+      }
       indegree.set(id, (indegree.get(id) ?? 0) + 1);
       dependents.get(dep)!.push(id);
     }

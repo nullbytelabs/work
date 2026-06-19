@@ -190,7 +190,7 @@ export class RunManager {
     // insert so it can't race ahead of the row's creation.
     const inserted = this.runStore
       ? this.runStore
-          .insert({ id, name: opts.name, status: record.status, trigger: record.trigger, startedAt: record.startedAt, inputs: opts.plan.inputs })
+          .insert({ id, name: opts.name, status: record.status, trigger: record.trigger, startedAt: record.startedAt, inputs: opts.plan.inputs, event: opts.plan.event })
           .catch(() => {})
       : Promise.resolve();
 
@@ -365,11 +365,15 @@ export class RunManager {
    * inputs it was dispatched with). Delegates to the durable run store; returns
    * undefined when there's no store (in-memory/injected-engine path) or no row.
    */
-  async getStored(runId: string): Promise<{ name: string; inputs?: Record<string, unknown> } | undefined> {
+  async getStored(runId: string): Promise<{ name: string; inputs?: Record<string, unknown>; event?: Record<string, unknown> } | undefined> {
     if (!this.runStore) return undefined;
     const row = await this.runStore.get(runId);
     if (!row) return undefined;
-    return { name: row.name, ...(row.inputs !== undefined ? { inputs: row.inputs } : {}) };
+    return {
+      name: row.name,
+      ...(row.inputs !== undefined ? { inputs: row.inputs } : {}),
+      ...(row.event !== undefined ? { event: row.event } : {}),
+    };
   }
 
   /**

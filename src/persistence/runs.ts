@@ -31,6 +31,9 @@ export interface RunRow {
   /** epoch ms; absent while still running/queued */
   finishedAt?: number;
   inputs?: Record<string, unknown>;
+  /** The resolved trigger payload (`${{ event.* }}`); persisted so a resume/rerun
+   *  recompiles with the same event instead of dropping event-gated jobs. */
+  event?: Record<string, unknown>;
   error?: string;
 }
 
@@ -43,6 +46,7 @@ interface RawRow {
   started_at: string | number;
   finished_at: string | number | null;
   inputs: unknown;
+  event: unknown;
   error: string | null;
 }
 
@@ -65,9 +69,13 @@ export class RunRepository {
          started_at  bigint not null,
          finished_at bigint,
          inputs      jsonb,
+         event       jsonb,
          error       text
        )`,
     );
+    // Migrate older DBs that predate the `event` column (persisted so a webhook
+    // run's `${{ event.* }}` survives a resume/rerun instead of resolving empty).
+    await this.engine.query("alter table work.runs add column if not exists event jsonb");
   }
 
   /** Record a newly dispatched run. `on conflict do nothing` makes retries safe. */
@@ -78,12 +86,13 @@ export class RunRepository {
     trigger: RunTrigger;
     startedAt: number;
     inputs?: Record<string, unknown> | undefined;
+    event?: Record<string, unknown> | undefined;
   }): Promise<void> {
     await this.engine.query(
-      `insert into work.runs (run_id, workflow, status, trigger, started_at, inputs)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into work.runs (run_id, workflow, status, trigger, started_at, inputs, event)
+       values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (run_id) do nothing`,
-      [row.id, row.name, row.status, row.trigger, row.startedAt, row.inputs ? JSON.stringify(row.inputs) : null],
+      [row.id, row.name, row.status, row.trigger, row.startedAt, row.inputs ? JSON.stringify(row.inputs) : null, row.event ? JSON.stringify(row.event) : null],
     );
   }
 
@@ -102,16 +111,27 @@ export class RunRepository {
   /** Runs newest-first (the history list). */
   async list(limit = 200): Promise<RunRow[]> {
     const rows = await this.engine.query<RawRow>(
-      `select run_id, workflow, status, trigger, started_at, finished_at, inputs, error
+      `select run_id, workflow, status, trigger, started_at, finished_at, inputs, event, error
          from work.runs order by started_at desc limit $1`,
       [limit],
     );
     return rows.map(toRunRow);
   }
 
+  /** Every non-terminal run (running/queued/interrupted), oldest-first, with NO row
+   *  limit — for boot reconciliation, which must see EVERY in-flight run, not just
+   *  the newest page (a long job started many runs ago would otherwise be missed). */
+  async listNonTerminal(): Promise<RunRow[]> {
+    const rows = await this.engine.query<RawRow>(
+      `select run_id, workflow, status, trigger, started_at, finished_at, inputs, event, error
+         from work.runs where status in ('running', 'queued', 'interrupted') order by started_at asc`,
+    );
+    return rows.map(toRunRow);
+  }
+
   async get(id: string): Promise<RunRow | undefined> {
     const rows = await this.engine.query<RawRow>(
-      `select run_id, workflow, status, trigger, started_at, finished_at, inputs, error
+      `select run_id, workflow, status, trigger, started_at, finished_at, inputs, event, error
          from work.runs where run_id = $1`,
       [id],
     );
@@ -131,6 +151,9 @@ function toRunRow(r: RawRow): RunRow {
   if (r.error !== null && r.error !== undefined) row.error = r.error;
   if (r.inputs !== null && r.inputs !== undefined) {
     row.inputs = typeof r.inputs === "string" ? (JSON.parse(r.inputs) as Record<string, unknown>) : (r.inputs as Record<string, unknown>);
+  }
+  if (r.event !== null && r.event !== undefined) {
+    row.event = typeof r.event === "string" ? (JSON.parse(r.event) as Record<string, unknown>) : (r.event as Record<string, unknown>);
   }
   return row;
 }

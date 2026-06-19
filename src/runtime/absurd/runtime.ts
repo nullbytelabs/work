@@ -42,6 +42,7 @@ import {
 import { createAbsurdEngine, JOBS_QUEUE, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
 import type { JobHookMeta, JobResult, RunContext, Runtime, StepHookMeta, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
+import { StepInterrupted } from "../types.ts";
 import { parseOutputFile } from "../output.ts";
 
 /** The orchestrator task's queue. Job tasks run on a *separate* queue
@@ -84,13 +85,21 @@ class JobInterrupted extends Error {
   }
 }
 
-/** Convert a needs/steps output map into condition bags (outputs + result). */
+/** Convert a needs/steps output map into condition bags. Carries the step-only
+ *  `outcome`/`exitCode`/`logs` through too, so `if:`/`when:` can read the same
+ *  `steps.<id>.<field>` the interpolation engine exposes in `run:` (a job-output
+ *  bag simply has none of those fields). */
 function toConditionBags(
-  src: Record<string, OutputBag & { result?: string }>,
+  src: Record<string, OutputBag & { result?: string; outcome?: string; exitCode?: number; logs?: string }>,
 ): Record<string, ConditionBag> {
   const out: Record<string, ConditionBag> = {};
   for (const [k, v] of Object.entries(src)) {
-    out[k] = v.result !== undefined ? { outputs: v.outputs, result: v.result } : { outputs: v.outputs };
+    const bag: ConditionBag = { outputs: v.outputs };
+    if (v.result !== undefined) bag.result = v.result;
+    if (v.outcome !== undefined) bag.outcome = v.outcome;
+    if (v.exitCode !== undefined) bag.exitCode = v.exitCode;
+    if (v.logs !== undefined) bag.logs = v.logs;
+    out[k] = bag;
   }
   return out;
 }
@@ -250,11 +259,15 @@ export class AbsurdRuntime implements Runtime {
     const jobCount = Object.keys(plan.jobs).length;
     const concurrency = Math.max(1, this.maxConcurrency ?? Math.min(jobCount, DEFAULT_MAX_CONCURRENCY));
     // A worker on each queue — separate pools so an orchestrator awaiting jobs can
-    // never deadlock the jobs it's waiting on.
+    // never deadlock the jobs it's waiting on. Both starts live INSIDE the try so a
+    // throw from the second can't orphan the first (the finally closes whichever
+    // started); in the shared-engine web path runtime.close() is a no-op, so a
+    // leaked worker would otherwise poll the jobs queue until server shutdown.
     const jobsWorker = await jobsApp.startWorker({ concurrency, batchSize: concurrency, claimTimeout: CLAIM_TIMEOUT_S, pollInterval: 0.05 });
-    const orchWorker = await app.startWorker({ concurrency, batchSize: concurrency, claimTimeout: CLAIM_TIMEOUT_S, pollInterval: 0.05 });
+    let orchWorker: Awaited<ReturnType<typeof app.startWorker>> | undefined;
 
     try {
+      orchWorker = await app.startWorker({ concurrency, batchSize: concurrency, claimTimeout: CLAIM_TIMEOUT_S, pollInterval: 0.05 });
       // Spawn the orchestrator (idempotent on runId) and await its result — the
       // WorkflowResult. Resume: a pre-existing *failed* orchestrator (a run
       // interrupted mid-flight) is re-driven via retryTask, which re-walks the DAG,
@@ -283,7 +296,7 @@ export class AbsurdRuntime implements Runtime {
       ctx.hooks?.onWorkflowEnd?.(result);
       return result;
     } finally {
-      await orchWorker.close();
+      if (orchWorker) await orchWorker.close();
       await jobsWorker.close();
     }
   }
@@ -591,7 +604,18 @@ async function runSteps(
       recordStep(step, result);
     }
   } finally {
-    await target.dispose();
+    // A dispose throw must NEVER replace the in-flight exception. If a step was torn
+    // out, `JobInterrupted` is propagating here; were a `vm.close()` failure to
+    // overwrite it, runJobInTask's catch would see a non-JobInterrupted error,
+    // RETURN a terminal `failure` instead of re-throwing, and the run would be
+    // recorded non-resumable — silently breaking durable resume. (Symmetrically, a
+    // dispose throw after a clean run would mislabel a success as failure.) Swallow
+    // it (best-effort teardown); the VM is already going away.
+    try {
+      await target.dispose();
+    } catch {
+      /* best-effort teardown — never clobber an in-flight throw or a success */
+    }
   }
 
   return { steps, stepOutputs, failed };
@@ -757,7 +781,17 @@ async function runUsesStep(
       runsOn: job.runsOn,
       sandboxed: true, // every job runs in the gondolin sandbox — there is no host execution
       workspacePath: target.workspacePath,
-      exec: (command, opts) => target.run(command, opts ?? {}),
+      // Wrap exec so a `target.run` REJECTION (a VM tear-out, not a non-zero exit)
+      // surfaces as StepInterrupted instead of being swallowed by a handler's catch.
+      // This gives `uses:` steps the same resumable interruption path `run:` steps
+      // get (runShellStep lets target.run rejections propagate unguarded).
+      exec: async (command, opts) => {
+        try {
+          return await target.run(command, opts ?? {});
+        } catch (err) {
+          throw new StepInterrupted(err);
+        }
+      },
       emit,
     });
     return {
@@ -770,7 +804,10 @@ async function runUsesStep(
       ...(res.agent ? { agent: res.agent } : {}),
     };
   } catch (err) {
-    // Handlers shouldn't throw, but never let one crash the job task.
+    // A torn-out target/exec must stay resumable: re-throw so runSteps wraps it as
+    // JobInterrupted (the run is recorded `interrupted`, not a terminal `failure`).
+    if (err instanceof StepInterrupted) throw err;
+    // Handlers shouldn't otherwise throw, but never let one crash the job task.
     return fail(`uses handler "${scheme}" threw: ${(err as Error).message}`);
   }
 }

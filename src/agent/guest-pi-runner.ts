@@ -28,7 +28,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { constants } from "node:fs";
-import { mkdir, readFile, writeFile, rm, copyFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rm, copyFile, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { UserFacingError } from "../errors.ts";
 import type { AgentRequest, AgentResult, AgentRunner } from "./index.ts";
@@ -113,7 +113,16 @@ export class GuestPiRunner implements AgentRunner {
     }
     const { exec, hostDir, guestDir, emit } = this.deps;
     const id = randomUUID().slice(0, 8);
-    const hostStage = join(hostDir, STAGE_DIR);
+    // Per-invocation, UNPREDICTABLE staging DIRECTORY — not a constant. The checkout
+    // is attacker-controlled and lands in this same mount, so a constant `.pi-agent`
+    // lets a hostile repo pre-plant the prefix: (a) as a symlink to a host dir, so
+    // mkdir-recursive no-ops and the host's writes escape through it; or (b) as a
+    // real dir holding a malicious `.npmrc` (registry redirect) / `node_modules`,
+    // which the in-guest `npm install --prefix` and the wrapper's require.resolve
+    // would then trust. Randomizing only the file *names* (below) is not enough —
+    // the directory itself must be unguessable so it can't be pre-planted at all.
+    const stageName = `${STAGE_DIR}-${id}`;
+    const hostStage = join(hostDir, stageName);
     await mkdir(hostStage, { recursive: true });
 
     // Per-invocation, unpredictable name. The wrapper lands in the workspace mount
@@ -149,20 +158,32 @@ export class GuestPiRunner implements AgentRunner {
     // COPYFILE_EXCL: fail loudly if the destination already exists (e.g. a guest
     // pre-planted symlink) instead of writing *through* it to a host file.
     await copyFile(wrapperSrc, hostWrapper, constants.COPYFILE_EXCL);
-    await writeFile(hostReq, JSON.stringify(request), "utf-8");
+    // `wx` (O_CREAT|O_EXCL) like the wrapper's COPYFILE_EXCL above: refuse to write
+    // THROUGH a symlink a hostile process could plant at this path inside the shared
+    // mount (which would redirect the request — carrying the prompt — to an arbitrary
+    // host file). EEXIST fails the step loudly instead.
+    await writeFile(hostReq, JSON.stringify(request), { encoding: "utf-8", flag: "wx" });
     await rm(hostRes, { force: true });
 
     // Guest-visible paths (same files via the shared mount).
-    const gStage = `${guestDir}/${STAGE_DIR}`;
+    const gStage = `${guestDir}/${stageName}`;
     const gWrapper = `${gStage}/guest-runner-${id}.mjs`;
     const gReq = `${gStage}/req-${id}.json`;
     const gRes = `${gStage}/res-${id}.json`;
 
-    // Install the Pi package into the guest (idempotent — npm no-ops if present),
-    // so the wrapper resolves it from the staging dir's node_modules. This runs
-    // in-guest, so native deps build for the guest platform.
+    // Install the Pi package into the guest (runs in-guest, so native deps build
+    // for the guest platform). Hardened against a hostile checkout:
+    //   * `cd ${gStage}` runs npm with its project dir = the unguessable stage dir,
+    //     so npm reads only THAT dir's `.npmrc` (which the checkout can't plant) —
+    //     never a `.npmrc` sitting at the checkout root.
+    //   * `--ignore-scripts` blocks lifecycle-script code-exec from any fetched
+    //     package, defense in depth.
     const install = await exec(
-      `npm install --prefix ${gStage} --no-save --no-audit --no-fund ${PI_PACKAGE}`,
+      // `--registry` pins the default registry on the CLI (overrides any `.npmrc`
+      // registry= a hostile process could plant in the stage dir), so the wrapper
+      // can't be tricked into loading an attacker-served Pi package. `--ignore-scripts`
+      // blocks lifecycle-script execution as defense in depth.
+      `cd ${gStage} && npm install --prefix ${gStage} --registry=https://registry.npmjs.org/ --no-save --no-audit --no-fund --ignore-scripts ${PI_PACKAGE}`,
       { ...(emit ? { onOutput: emit } : {}) },
     );
     if (!install.ok) {
@@ -177,16 +198,14 @@ export class GuestPiRunner implements AgentRunner {
       ...(emit ? { onOutput: emit } : {}),
     });
 
-    let resultText: string | undefined;
-    try {
-      resultText = await readFile(hostRes, "utf-8");
-    } catch {
-      /* no result file — fall through to the error below */
-    }
+    const resultText = await readResultFile(hostRes);
     // Best-effort cleanup of the per-invocation wrapper/request/result.
     await rm(hostWrapper, { force: true });
     await rm(hostReq, { force: true });
     await rm(hostRes, { force: true });
+    // Remove the per-invocation staging dir itself (it carries the installed Pi
+    // package). Best-effort: ignore failures (e.g. a guest still holding a handle).
+    await rm(hostStage, { recursive: true, force: true }).catch(() => {});
 
     if (resultText) {
       let parsed: { text?: string; finishReason?: string; usage?: AgentResult["usage"]; error?: string };
@@ -208,4 +227,22 @@ export class GuestPiRunner implements AgentRunner {
       `in-guest agent produced no result (exit ${run.exitCode})${run.stderr ? `: ${run.stderr.slice(0, 300)}` : ""}`,
     );
   }
+}
+
+/** Read the in-guest result, refusing to follow a symlink at the result path: a
+ *  prompt-injected agent (full toolset over the shared mount) could plant
+ *  `res-<id>.json -> <host file>` mid-run so the wrapper's write / our read escape
+ *  the workspace. The wrapper only ever creates a regular file, so a symlink is
+ *  hostile. Returns undefined when no result was produced. */
+async function readResultFile(hostRes: string): Promise<string | undefined> {
+  let st;
+  try {
+    st = await lstat(hostRes);
+  } catch {
+    return undefined; // no result file
+  }
+  if (st.isSymbolicLink()) {
+    throw new UserFacingError("in-guest agent result path is a symlink (refusing to follow it out of the workspace)");
+  }
+  return readFile(hostRes, "utf-8").catch(() => undefined);
 }

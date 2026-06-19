@@ -29,9 +29,25 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
-import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine } from "../src/runtime/index.ts";
+import { AbsurdRuntime, createAbsurdEngine, StepInterrupted, type AbsurdEngine, type UsesHandler } from "../src/runtime/index.ts";
 import type { ExecutionTarget, TargetFactory } from "../src/targets/index.ts";
 import { HostTarget, hostTargetFactory } from "./_support.ts";
+
+// A well-behaved `uses:` handler: it calls `ctx.exec` (so a torn-out target makes
+// the runtime-wrapped exec throw StepInterrupted) and re-throws StepInterrupted per
+// the handler contract — mirroring the fixed work/agent + action handlers.
+const probeUsesHandler: UsesHandler = {
+  scheme: "probe",
+  async run(ctx) {
+    try {
+      await ctx.exec("true");
+      return { status: "success", outputs: { ran: "yes" } };
+    } catch (err) {
+      if (err instanceof StepInterrupted) throw err; // resumable tear-out, not a failure
+      return { status: "failure", stderr: String(err) };
+    }
+  },
+};
 
 // Quiet the Absurd client: phase 1 intentionally fails a job, which would
 // otherwise log noisily.
@@ -68,6 +84,23 @@ const crashSecond: TargetFactory = (_runsOn, ctx) => {
     provision: () => host.provision(),
     run: () => Promise.reject(new Error("PLATFORM STOPPED mid-job (simulated)")),
     dispose: () => host.dispose(),
+  };
+  return crashing;
+};
+
+// Like crashSecond, but the torn-out job's `dispose()` ALSO throws (a dead VM's
+// close failing). A bare `finally { await dispose() }` would let that throw
+// overwrite the in-flight JobInterrupted, mislabeling the run as a non-resumable
+// `failure`. The runtime must swallow the dispose error and preserve resumability.
+const crashSecondThrowingDispose: TargetFactory = (_runsOn, ctx) => {
+  const host = new HostTarget(ctx.workdir);
+  if (basename(ctx.workdir) !== "second") return host;
+  const crashing: ExecutionTarget = {
+    kind: "host",
+    workspacePath: host.workspacePath,
+    provision: () => host.provision(),
+    run: () => Promise.reject(new Error("PLATFORM STOPPED mid-job (simulated)")),
+    dispose: () => Promise.reject(new Error("vm.close() failed on an already-dead VM")),
   };
   return crashing;
 };
@@ -110,6 +143,108 @@ describe("durable execution — whole-workflow crash-resume", () => {
       assert.equal(res2.status, "success", "the resumed run should complete successfully");
       assert.equal(await byteLen(join(sideDir, "first")), 1, "a finished job must NOT re-run on resume");
       assert.equal(await byteLen(join(sideDir, "second")), 1, "the interrupted job must run to completion on resume");
+    } finally {
+      if (e1) await e1.close().catch(() => {});
+      if (e2) await e2.close().catch(() => {});
+      await rm(dataDir, { recursive: true, force: true });
+      await rm(workRoot, { recursive: true, force: true });
+      await rm(sideDir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: a dispose() throw during an interruption must NOT downgrade the run
+  // from resumable `interrupted` to terminal `failure`. Without the fix, the dispose
+  // error replaces JobInterrupted in the finally, runJobInTask returns a failure
+  // result instead of re-throwing, and the run is recorded non-resumable.
+  it("keeps an interrupted run resumable even when the job's dispose() throws", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "pi-wf-disp-db-"));
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-disp-wr-"));
+    const sideDir = await mkdtemp(join(tmpdir(), "pi-wf-disp-fx-"));
+    const runId = "dispose-throw-run";
+    const plan = compile(parseWorkflow(WORKFLOW), { inputs: { dir: sideDir } });
+
+    let e1: AbsurdEngine | undefined;
+    let e2: AbsurdEngine | undefined;
+    try {
+      // Phase 1 — `second` is torn out AND its dispose throws.
+      e1 = await createAbsurdEngine({ dataDir, log: SILENT });
+      const res1 = await new AbsurdRuntime({ engine: e1, makeTarget: crashSecondThrowingDispose }).run(plan, { runId, workRoot });
+      await e1.close();
+      e1 = undefined;
+      // The dispose throw must not mask the interruption.
+      assert.equal(res1.status, "interrupted", "a dispose throw must not downgrade interrupted → failure");
+
+      // Phase 2 — restart with a healthy target: the run resumes to success.
+      e2 = await createAbsurdEngine({ dataDir, log: SILENT });
+      const res2 = await new AbsurdRuntime({ engine: e2, makeTarget: hostTargetFactory }).run(plan, { runId, workRoot });
+      await e2.close();
+      e2 = undefined;
+      assert.equal(res2.status, "success", "the resumed run should complete successfully");
+      assert.equal(await byteLen(join(sideDir, "first")), 1, "a finished job must NOT re-run on resume");
+      assert.equal(await byteLen(join(sideDir, "second")), 1, "the interrupted job runs to completion on resume");
+    } finally {
+      if (e1) await e1.close().catch(() => {});
+      if (e2) await e2.close().catch(() => {});
+      await rm(dataDir, { recursive: true, force: true });
+      await rm(workRoot, { recursive: true, force: true });
+      await rm(sideDir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: a `uses:` step torn out mid-execution must be resumable too — the
+  // same durability `run:` steps get. Before the fix, a uses-handler swallowed the
+  // target/exec rejection into a terminal failure, so the run was recorded
+  // non-resumable `failure` and `resume` never retried the step.
+  it("resumes a uses: step torn out mid-execution (parity with run: steps)", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "pi-wf-uses-db-"));
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-uses-wr-"));
+    const sideDir = await mkdtemp(join(tmpdir(), "pi-wf-uses-fx-"));
+    const runId = "uses-resume-run";
+    const plan = compile(
+      parseWorkflow(`name: durable-uses
+inputs:
+  dir: { type: string, required: true }
+jobs:
+  first:
+    steps:
+      - run: 'printf x >> "\${{ inputs.dir }}/first"'
+  probe:
+    needs: [first]
+    steps:
+      - uses: probe/run
+`),
+      { inputs: { dir: sideDir } },
+    );
+    // Tear out the `probe` job's target (its exec rejects), like a platform stop.
+    const crashProbe: TargetFactory = (_runsOn, ctx) => {
+      const host = new HostTarget(ctx.workdir);
+      if (basename(ctx.workdir) !== "probe") return host;
+      return {
+        kind: "host",
+        workspacePath: host.workspacePath,
+        provision: () => host.provision(),
+        run: () => Promise.reject(new Error("PLATFORM STOPPED mid-uses (simulated)")),
+        dispose: () => host.dispose(),
+      };
+    };
+
+    let e1: AbsurdEngine | undefined;
+    let e2: AbsurdEngine | undefined;
+    try {
+      e1 = await createAbsurdEngine({ dataDir, log: SILENT });
+      const res1 = await new AbsurdRuntime({ engine: e1, makeTarget: crashProbe, usesHandlers: [probeUsesHandler] }).run(plan, { runId, workRoot });
+      await e1.close();
+      e1 = undefined;
+      // The symptom this fixes: a torn-out uses: step is resumable, not terminal.
+      assert.equal(res1.status, "interrupted", "a uses: tear-out must be interrupted (resumable), not failure");
+
+      // Resume with a healthy target: `first` is not redone, `probe` completes.
+      e2 = await createAbsurdEngine({ dataDir, log: SILENT });
+      const res2 = await new AbsurdRuntime({ engine: e2, makeTarget: hostTargetFactory, usesHandlers: [probeUsesHandler] }).run(plan, { runId, workRoot });
+      await e2.close();
+      e2 = undefined;
+      assert.equal(res2.status, "success", "the resumed run completes the uses: step");
+      assert.equal(await byteLen(join(sideDir, "first")), 1, "the finished run: job is not re-run on resume");
     } finally {
       if (e1) await e1.close().catch(() => {});
       if (e2) await e2.close().catch(() => {});

@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkHandler, type AgentRunner, type AgentRequest } from "../src/agent/index.ts";
-import type { UsesContext } from "../src/runtime/index.ts";
+import { StepInterrupted, type UsesContext } from "../src/runtime/index.ts";
 
 // The dumb `work/agent` primitive: `with:` is the AgentRequest. These tests drive
 // the handler directly with a recording runner (no inference), asserting prompt
@@ -92,6 +92,20 @@ describe("work/agent primitive", () => {
     }
   });
 
+  // Regression: a StepInterrupted (a target/exec tear-out) must propagate, never be
+  // swallowed into a failure result — otherwise a torn-out work/agent step is
+  // recorded as a non-resumable failure (durable-resume parity with run: steps).
+  it("re-throws StepInterrupted from the runner instead of swallowing it", async () => {
+    const runner: AgentRunner = { async run() { throw new StepInterrupted(new Error("vm torn out")); } };
+    const dir = await mkdtemp(join(tmpdir(), "wa-"));
+    try {
+      const { ctx } = makeCtx({ with: { prompt: "x" }, workdir: dir });
+      await assert.rejects(() => createWorkHandler({ runner }).run(ctx), (e) => e instanceof StepInterrupted);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects any work/<x> other than work/agent", async () => {
     const { runner } = recordingRunner();
     const dir = await mkdtemp(join(tmpdir(), "wa-"));
@@ -113,6 +127,46 @@ describe("work/agent primitive", () => {
       const res = await createWorkHandler({ runner }).run(ctx);
       assert.equal(res.status, "failure");
       assert.match(res.stderr ?? "", /escapes the workspace/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: a hostile checkout plants a symlink whose lexical path has no `..`
+  // but resolves to an arbitrary host file (a secret). The containment check must
+  // resolve symlinks, not just `relative(join())`, so the host secret never becomes
+  // the agent's prompt.
+  it("rejects a promptFile that is a symlink escaping the workspace", async () => {
+    const { runner, calls } = recordingRunner();
+    const dir = await mkdtemp(join(tmpdir(), "wa-"));
+    const secretDir = await mkdtemp(join(tmpdir(), "wa-secret-"));
+    try {
+      const secret = join(secretDir, "id_rsa");
+      await writeFile(secret, "PRIVATE-HOST-KEY\n");
+      await symlink(secret, join(dir, "leak.md"));
+      const { ctx } = makeCtx({ with: { promptFile: "leak.md" }, workdir: dir });
+      const res = await createWorkHandler({ runner }).run(ctx);
+      assert.equal(res.status, "failure");
+      assert.match(res.stderr ?? "", /escapes the workspace/);
+      // The runner must never have seen the host secret.
+      assert.equal(calls.length, 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(secretDir, { recursive: true, force: true });
+    }
+  });
+
+  // A symlink that stays INSIDE the workspace is still fine to read.
+  it("reads a promptFile symlink that resolves within the workspace", async () => {
+    const { runner, calls } = recordingRunner();
+    const dir = await mkdtemp(join(tmpdir(), "wa-"));
+    try {
+      await writeFile(join(dir, "real.md"), "Inside task.\n");
+      await symlink(join(dir, "real.md"), join(dir, "task.md"));
+      const { ctx } = makeCtx({ with: { promptFile: "task.md" }, workdir: dir });
+      const res = await createWorkHandler({ runner }).run(ctx);
+      assert.equal(res.status, "success");
+      assert.equal(calls[0]!.prompt, "Inside task.");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
