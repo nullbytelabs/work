@@ -459,7 +459,7 @@ property of the resolver, not the sandbox.** Closing it = a config-driven resolv
 a per-job spec surface to declare `allowedHosts`/`secrets`; **no sandbox change.**
 This is the highest-value enabler for real pipelines and should be validated against
 a **real gondolin run** (the header-swap lives in real Gondolin httpHooks, not the
-test double — per the project's "verify against demo.sh" rule).
+test double — per the project's verify-against-a-real-run rule).
 
 **Capability map:**
 

@@ -243,7 +243,7 @@ marginal since it's copy-from-docs pure YAML with no ABI or footgun.
 ### 4.4 Custom-image scaffold (LOW–MEDIUM)
 
 A custom `runs-on` target is `.workflows/images/<variant>/build-config.json`
-(gondolin build-config, passed through opaquely — `examples/k8s-triage/.workflows/images/k8s/build-config.json`).
+(gondolin build-config, passed through opaquely).
 Niche, but the path convention and JSON shape are undiscoverable without an
 example; a `create image <name>` skeleton would be a small, high-clarity win for
 the users who need it. See [`gondolin-custom-images.md`](gondolin-custom-images.md).

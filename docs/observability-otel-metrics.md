@@ -450,7 +450,7 @@ Closing it is a vertical slice:
 **Testing.** The stub `AgentRunner` tests inject (never mock the *real* runner, per project
 memory) can return `usage`, so the whole `work-handler → UsesResult → StepResult → onStepEnd`
 path is unit-testable with no VM. The only part that needs a real guest+model is the one
-`getSessionStats()` call in the wrapper — verify it against `demo.sh` and a real `work run`
+`getSessionStats()` call in the wrapper — verify it against a real `work run`
 (e.g. `compiler-review`), not just the suite. Sequence this slice early if token accounting is a
 priority; until it ships, `work_agent_tokens_total` and `gen_ai.usage.*` read zero.
 
@@ -659,7 +659,7 @@ per test.
    (`vmTestSkip()`): a real `work run compiler-review` with telemetry → the in-process OTLP
    receiver, asserting **non-zero** `gen_ai.usage.input_tokens`. The only place the real Pi
    `getSessionStats()` against a real model is exercised end-to-end — it confirms the layer-3c
-   fake-Pi assumptions match reality. Also reachable via `demo.sh`.
+   fake-Pi assumptions match reality.
 
 Phase mapping: phase 1 → layers 1, 2, 5; phase 2 → layer 3; phase 3 → layers 1–2 (metric
 assertions, cardinality guard); phase 4 → layer 4; real-run smoke → layer 6. Cross-cutting:

@@ -40,8 +40,8 @@ node --experimental-strip-types --disable-warning=ExperimentalWarning --test tes
 node --experimental-strip-types --disable-warning=ExperimentalWarning --test --test-name-pattern "matrix" test/compiler.test.ts
 ```
 
-`demo.sh` exercises the graph + run paths against `test/e2e/agent-project`. Per the project
-memory, verify agent/runtime changes against `demo.sh` and a real run — not just the test suite.
+Per the project memory, verify agent/runtime changes against a real run — the graph + run
+paths against `test/e2e/agent-project`, not just the test suite.
 
 ### dist/ and publishing
 

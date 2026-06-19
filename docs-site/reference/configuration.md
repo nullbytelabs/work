@@ -123,7 +123,7 @@ token.
 | `token` | string | Secret token; literal, or `$VAR` / `${VAR}`. Injected into the outbound request host-side. |
 | `tokenHeader` | string | Outbound header the token rides in (defaults to the target's default, e.g. `Authorization`). |
 | `tokenEnv` | string | Env-var name the `run:` step references for the placeholder (defaults to `<NAME>_TOKEN`). |
-| `resolve` | string | Pin the address the engine dials, like `curl --resolve` — an IP literal the `baseUrl` hostname maps to host-side. For an upstream public DNS can't name: a local Postgres on loopback, a docker-published port, an SSH tunnel, a [local kind cluster](../examples/kubernetes-triage). Pinning is an explicit grant, so it also lifts the sandbox's private-address block for the pinned IP. |
+| `resolve` | string | Pin the address the engine dials, like `curl --resolve` — an IP literal the `baseUrl` hostname maps to host-side. For an upstream public DNS can't name: a local Postgres on loopback, a docker-published port, an SSH tunnel, a local kind cluster. Pinning is an explicit grant, so it also lifts the sandbox's private-address block for the pinned IP. |
 
 Scoping is per run: a webhook-triggered run gets the hook's `datasources` list; a
 CLI run opts in with `--datasources <a,b>`. Without either, jobs get no datasource

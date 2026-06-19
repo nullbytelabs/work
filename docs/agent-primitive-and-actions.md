@@ -467,7 +467,7 @@ not core behavior.
 > `buildAgentPrompt`/`agentOutputs` move *out* of the engine and into a shipped
 > action where they're just one possible convention — not the only one. Per
 > project memory, agent steps must keep running real Pi and be verified against
-> `demo.sh` + a real run, not just the suite: the reimplementation is validated
+> a real run, not just the suite: the reimplementation is validated
 > the same way before the old path is removed.
 
 ## 11. Phasing

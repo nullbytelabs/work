@@ -24,7 +24,7 @@ Three things are worth acting on, in order:
 
 1. **The green suite does not prove the VM/agent path works** — and it exits
    green anyway on a host without QEMU. This is the central trust gap, and it is
-   exactly what the project memory's "verify against `demo.sh` and a real run"
+   exactly what the project memory's "verify against a real run"
    rule exists to backstop. It should be surfaced structurally, not held as tribal
    knowledge.
 2. **A real robustness bug surfaced during the audit**: the scheduler `tick`
@@ -103,7 +103,7 @@ tested against a fake Pi SDK, and the key-never-enters-guest property is verifie
 on a real VM (`egress-e2e.test.ts:103`). But note the consequence: even the
 real-VM `agent-project` review example runs the mock runner (no inference), as
 its own YAML comment states. Real inference is exercised **only** by
-`demo.sh run review` against the live `work.json` — manual, never in `npm test`.
+a manual `work run review` against the live `work.json` — never in `npm test`.
 
 Combine these with the CI/skip story and the trust gap becomes concrete:
 
@@ -113,7 +113,7 @@ Combine these with the CI/skip story and the trust gap becomes concrete:
 > and still exits green.** CI does install QEMU and run the full tier as the hard
 > gate (good), but the local signal is misleading. A passing `npm test` on a
 > no-QEMU dev box is not evidence the VM/agent path works — which is the entire
-> reason `demo.sh` + a real run exist.
+> reason a real run exists.
 
 Speed itself is not a problem: pure unit tests are ~0.1s/file, `tsc --noEmit` is
 sub-second, no test hits a live LLM (all use injected runners + `sk-test`
@@ -238,7 +238,7 @@ of the reusable-namespacing code rather than calling the real function, and
   the next PBT gap is `${{ }}` resolver dispatch (defer-don't-error / throw-on-
   unknown-root), then spec-parser totality.
 - Add real-`GondolinTarget` dispose/timeout/crash coverage, or explicitly
-  document that this confidence lives in `demo.sh` + a real run and accept it.
+  document that this confidence lives in a real run and accept it.
 
 **P2 — trim and de-brittle (mechanical, low-risk):**
 - Hoist the SSE readers / `postHook` / shared YAML fixtures into `_support.ts`.

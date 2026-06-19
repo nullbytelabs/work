@@ -320,7 +320,7 @@ auth niceties → cloud-KMS optional adapters → (later) dynamic secrets.
 2. **Validate non-agent secrets against a real gondolin run** — egress is "agent-only
    today, a property of the resolver not the sandbox," and the **test double doesn't
    implement the header-swap** (webhook doc §12.5). Per the standing rule, secrets-into-
-   `run`-step work must be checked against `demo.sh`/a real VM, not just the suite.
+   `run`-step work must be checked against a real VM run, not just the suite.
 3. **Keep `secrets` out of `if:`** (`condition.ts` ROOTS) — confirm as a deliberate
    no-leak decision.
 4. **Auth posture per shape** — which backends ship OIDC vs SA tokens first; OS-keychain

@@ -39,8 +39,8 @@ node --experimental-strip-types --disable-warning=ExperimentalWarning --test --t
    (`test/_support.ts`). No QEMU. Fast. Proves logic, **not** target behavior.
 3. **`npm test`** — everything, real micro-VMs. Needs QEMU. This is what CI
    (`.github/workflows/ci.yml`) gates on.
-4. **A real run** — `./demo.sh` (graph + run + agent + built-in actions against
-   `test/e2e/agent-project`), or the specific e2e example touching your
+4. **A real run** — `work` graph + run + agent + built-in actions against
+   `test/e2e/agent-project`, or the specific e2e example touching your
    change. **Per project memory, agent/runtime changes are not verified until
    a real run passes** — the test doubles can't catch staging, egress, or
    guest-side issues.
