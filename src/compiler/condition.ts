@@ -35,10 +35,16 @@ export interface ConditionStatus {
   cancelled?: boolean;
 }
 
-/** Outputs (+ optional result) exposed by a dependency job or a prior step. */
+/** Outputs (+ optional result/outcome/exitCode/logs) exposed by a dependency job
+ *  or a prior step. The step fields mirror the expression engine's `StepBag` so a
+ *  condition like `if: steps.lint.outcome == 'failure'` reads the same values that
+ *  `${{ steps.lint.outcome }}` resolves in `run:` (rather than silently undefined). */
 export interface ConditionBag {
   result?: string;
   outputs: Record<string, string>;
+  outcome?: string;
+  exitCode?: number;
+  logs?: string;
 }
 
 /** Everything a condition may read. Missing contexts default to empty. */
@@ -313,6 +319,9 @@ function truthy(v: Value): boolean {
   if (typeof v === "boolean") return v;
   if (typeof v === "number") return v !== 0 && !Number.isNaN(v);
   if (typeof v === "string") return v.length > 0;
+  // A non-null object/array is truthy (as in GitHub Actions), so `if: ${{ event.alerts }}`
+  // gates on presence of the payload rather than always evaluating false.
+  if (typeof v === "object" && v !== null) return true;
   return false; // null / undefined
 }
 

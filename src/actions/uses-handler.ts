@@ -14,6 +14,7 @@
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import type { UsesHandler, UsesContext, UsesResult } from "../runtime/types.ts";
+import { StepInterrupted } from "../runtime/types.ts";
 import { resolveInputs, WorkflowCompileError } from "../compiler/index.ts";
 import { parseActionUses, loadAction, type LoadedAction } from "./load.ts";
 import { runGuestNode } from "./guest-node.ts";
@@ -109,6 +110,8 @@ export function createActionUsesHandler(opts: ActionUsesHandlerOptions = {}): Us
         const action = await loadAction(name, actionsDir);
         return await runAction(ctx, action, opts.dispatch);
       } catch (err) {
+        // A target/exec tear-out stays a resumable interruption — don't swallow it.
+        if (err instanceof StepInterrupted) throw err;
         return fail((err as Error).message);
       }
     },

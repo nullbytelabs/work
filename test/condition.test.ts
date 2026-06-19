@@ -23,6 +23,16 @@ describe("evaluateCondition — literals and truthiness", () => {
     assert.equal(T("null"), false);
   });
 
+  // Regression: a non-empty array/object is truthy (GHA semantics) — so a webhook
+  // gate like `if: ${{ event.alerts }}` fires on a present payload instead of always
+  // evaluating false.
+  it("treats a non-null object/array as truthy (a present payload gates true)", () => {
+    assert.equal(T("event.alerts", { event: { alerts: [{ severity: "page" }] } }), true);
+    assert.equal(T("event.alerts", { event: { alerts: [] } }), true); // empty array is still an object
+    assert.equal(T("event.payload", { event: { payload: { a: 1 } } }), true);
+    assert.equal(T("event.missing", { event: {} }), false); // absent → false
+  });
+
   it("unescapes a doubled quote inside a string literal (GHA-style ''→')", () => {
     // The literal 'a''b' is the 3-char string a'b — not two adjacent strings.
     assert.equal(T("inputs.s == 'a''b'", { inputs: { s: "a'b" } }), true);
@@ -62,6 +72,16 @@ describe("evaluateCondition — contexts", () => {
     assert.equal(T("needs.build.result == 'success'", ctx), true);
     assert.equal(T("needs.build.outputs.dist == './out'", ctx), true);
     assert.equal(T("steps.compile.outputs.ok == 'yes'", ctx), true);
+  });
+
+  // Regression: `steps.<id>.outcome` / `.exitCode` / `.logs` must be readable in
+  // if:/when: (they were stripped from the condition context, so the condition was
+  // silently always-false even when the step failed).
+  it("reads steps.<id>.outcome / .exitCode in conditions", () => {
+    const ctx = { steps: { lint: { outcome: "failure", exitCode: 2, result: "failure", outputs: {} } } };
+    assert.equal(T("steps.lint.outcome == 'failure'", ctx), true);
+    assert.equal(T("steps.lint.outcome == 'success'", ctx), false);
+    assert.equal(T("steps.lint.exitCode == 2", ctx), true);
   });
 
   it("returns false for a missing context member rather than throwing", () => {

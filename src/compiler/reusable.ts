@@ -111,6 +111,10 @@ export function inlineCall(p: InlineParams): InlineResult {
   if (!wc) {
     throw new WorkflowCompileError(`job "${p.baseId}": workflow "${W.name}" is not callable — add 'on: workflow_call' to ${file}`);
   }
+  // A matrix-fanned call produces one output set PER cell, so `needs.<call>.outputs.*`
+  // is ambiguous across legs and is never rewritten (see D2 below). Reject it at
+  // compile time rather than letting the plan compile and fail late at runtime.
+  if (p.leg.cell) assertNoMatrixOutputs(p.baseId, W, wc);
 
   // B. Bind `with:`: resolve compile-time roots now; carry runtime (`needs.*`)
   //    values through as deferred input expressions.
@@ -247,6 +251,17 @@ function bindWith(p: InlineParams, W: WorkflowSpec): { boundWith: Record<string,
   return { boundWith, deferred };
 }
 
+/** A matrix-fanned `uses:` call can't expose outputs unambiguously (one set per
+ *  cell), so reject a callee that declares `workflow_call.outputs` when invoked via
+ *  matrix — a clean compile-time error instead of a late runtime `missing output`. */
+function assertNoMatrixOutputs(baseId: string, W: WorkflowSpec, wc: WorkflowCallSpec | boolean): void {
+  if (typeof wc !== "object" || !wc.outputs || Object.keys(wc.outputs).length === 0) return;
+  throw new WorkflowCompileError(
+    `job "${baseId}": a matrix "uses:" call cannot expose workflow_call.outputs ` +
+      `(workflow "${W.name}" declares outputs, but a matrix call has one set per cell — ambiguous across legs)`,
+  );
+}
+
 /** Parse a `workflow_call.outputs` value, which must be `${{ jobs.<id>.outputs.<key> }}`,
  *  into `{ jobId, key }`. Throws (citing `name`) on any other shape or unknown/matrix job. */
 function parseOutputProducer(
@@ -254,30 +269,35 @@ function parseOutputProducer(
   name: string,
   W: WorkflowSpec,
 ): { jobId: string; key: string } {
-  let result: { jobId: string; key: string } | undefined;
-  replaceExpressions(expr, (body) => {
-    const m = /^jobs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(body);
-    if (!m) {
-      throw new WorkflowCompileError(
-        `workflow "${W.name}" workflow_call.outputs.${name}: only "\${{ jobs.<id>.outputs.<key> }}" is allowed (got "\${{ ${body} }}")`,
-      );
-    }
-    const jobId = m[1]!;
-    if (!(jobId in W.jobs)) {
-      throw new WorkflowCompileError(`workflow "${W.name}" workflow_call.outputs.${name} references unknown job "${jobId}"`);
-    }
-    if (W.jobs[jobId]!.strategy?.matrix) {
-      throw new WorkflowCompileError(
-        `workflow "${W.name}" workflow_call.outputs.${name} cannot reference matrix job "${jobId}" (ambiguous across legs)`,
-      );
-    }
-    result = { jobId, key: m[2]! };
-    return body;
-  });
-  if (!result) {
+  // Exactly ONE `${{ }}` expression — not zero, and not several composed together.
+  // (A previous `replaceExpressions` accumulator silently kept only the LAST span,
+  // turning `${{ jobs.a.outputs.host }}/${{ jobs.a.outputs.path }}` into a wrong
+  // plan instead of an error.)
+  const bodies = expressionBodies(expr);
+  if (bodies.length !== 1) {
     throw new WorkflowCompileError(`workflow "${W.name}" workflow_call.outputs.${name} must be a single \${{ }} expression`);
   }
-  return result;
+  const body = bodies[0]!;
+  const m = /^jobs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)$/.exec(body);
+  if (!m) {
+    throw new WorkflowCompileError(
+      `workflow "${W.name}" workflow_call.outputs.${name}: only "\${{ jobs.<id>.outputs.<key> }}" is allowed (got "\${{ ${body} }}")`,
+    );
+  }
+  const jobId = m[1]!;
+  // `Object.hasOwn`, not `in` — `in` walks the prototype, so a producer named
+  // `toString`/`constructor`/etc. would resolve to an Object.prototype member and
+  // slip past as a "known" job (then crash later in topoSort with a raw TypeError).
+  // Mirrors the convention in spec/parse.ts and compile.ts.
+  if (!Object.hasOwn(W.jobs, jobId)) {
+    throw new WorkflowCompileError(`workflow "${W.name}" workflow_call.outputs.${name} references unknown job "${jobId}"`);
+  }
+  if (W.jobs[jobId]!.strategy?.matrix) {
+    throw new WorkflowCompileError(
+      `workflow "${W.name}" workflow_call.outputs.${name} cannot reference matrix job "${jobId}" (ambiguous across legs)`,
+    );
+  }
+  return { jobId, key: m[2]! };
 }
 
 /**
@@ -326,6 +346,14 @@ function buildOutputRewrites(
   const producers = new Set<string>();
   for (const [name, expr] of Object.entries(wc.outputs)) {
     const { jobId, key } = parseOutputProducer(expr, name, W);
+    // Verify the producer job actually declares the referenced output key — mirrors
+    // curateSingleOutputs's single-job check, so a typo'd `jobs.<id>.outputs.<key>`
+    // is a clean compile-time error instead of a late runtime "missing output".
+    if (!Object.hasOwn(W.jobs[jobId]!.outputs ?? {}, key)) {
+      throw new WorkflowCompileError(
+        `workflow "${W.name}" workflow_call.outputs.${name}: job "${jobId}" does not declare output "${key}"`,
+      );
+    }
     const producer = ns(jobId);
     producers.add(producer);
     outputRewrites[name] = `needs.${producer}.outputs.${key}`;
@@ -349,7 +377,7 @@ function renameJob(
     title: `${titlePrefix} / ${sj.title ?? sj.id}`,
     steps: sj.steps.map((st) => renameStep(st, sj.id, newId, rename)),
   };
-  if (sj.outputs) out.outputs = mapStr(sj.outputs, (v) => renameNeeds(v, rename));
+  if (sj.outputs) out.outputs = mapStr(sj.outputs, (v) => renameNeedsInExpr(v, rename));
   if (sj.if !== undefined) out.if = renameNeeds(sj.if, rename);
   return out;
 }
@@ -366,12 +394,16 @@ function renameStep(
   if (st.name.startsWith(`${oldJobId}/`)) {
     out.name = `${newJobId}/${st.name.slice(oldJobId.length + 1)}`;
   }
-  if (st.run !== undefined) out.run = renameNeeds(st.run, rename);
-  out.env = mapStr(st.env, (v) => renameNeeds(v, rename));
+  // run/env/with/outputs: rewrite `needs.<id>` ONLY inside ${{ }} spans — a bare
+  // `needs.build` in literal shell text or a prompt is not an expression and must
+  // not be corrupted. `if:` is the exception (it supports bare conditions), so it
+  // keeps the blanket rewrite.
+  if (st.run !== undefined) out.run = renameNeedsInExpr(st.run, rename);
+  out.env = mapStr(st.env, (v) => renameNeedsInExpr(v, rename));
   if (st.if !== undefined) out.if = renameNeeds(st.if, rename);
   if (st.with !== undefined) {
     const w: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(st.with)) w[k] = typeof v === "string" ? renameNeeds(v, rename) : v;
+    for (const [k, v] of Object.entries(st.with)) w[k] = typeof v === "string" ? renameNeedsInExpr(v, rename) : v;
     out.with = w;
   }
   return out;
@@ -385,6 +417,15 @@ function renameNeeds(s: string, rename: (id: string) => string | undefined): str
     const renamed = rename(id);
     return renamed ? `needs.${renamed}` : whole;
   });
+}
+
+/** Like `renameNeeds` but only inside `${{ }}` spans — for `run`/`env`/`with`/`outputs`
+ *  values, where a bare `needs.x` is literal text (a shell token, a prompt) that
+ *  must be left untouched. `if:` keeps the blanket `renameNeeds` (bare conditions). */
+function renameNeedsInExpr(s: string, rename: (id: string) => string | undefined): string {
+  // replaceExpressions' callback returns the FULL replacement (incl. the wrapper),
+  // so re-wrap the rewritten body in `${{ }}`.
+  return replaceExpressions(s, (body) => "${{ " + renameNeeds(body, rename) + " }}");
 }
 
 function mapStr(obj: Record<string, string>, fn: (v: string) => string): Record<string, string> {

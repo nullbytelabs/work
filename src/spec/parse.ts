@@ -341,7 +341,15 @@ function parseStep(raw: unknown, path: string): StepSpec {
   if (typeof raw.id === "string") step.id = raw.id;
   if (hasRun) step.run = raw.run as string;
   if (hasUses) step.uses = raw.uses as string;
-  if (isPlainObject(raw.with)) step.with = raw.with;
+  // A `with:` must be a mapping — fail fast on a typo (array/string) instead of
+  // silently dropping every input and surfacing a confusing runtime error. Mirrors
+  // parseUsesJob's identical check on a `uses:` job.
+  if (raw.with !== undefined) {
+    if (!isPlainObject(raw.with)) {
+      throw new WorkflowParseError("with must be a mapping of input -> value", `${path}.with`);
+    }
+    step.with = raw.with;
+  }
   const cond = parseCondition(raw, path);
   if (cond !== undefined) step.if = cond;
   const coe = raw["continue-on-error"] ?? raw.continueOnError;
@@ -416,9 +424,20 @@ function parseStepsJob(raw: Record<string, unknown>, path: string): JobSpec {
   if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
     throw new WorkflowParseError("job must have a non-empty steps array", `${path}.steps`);
   }
-  const job: JobSpec = {
-    steps: raw.steps.map((s, i) => parseStep(s, `${path}.steps[${i}]`)),
-  };
+  const steps = raw.steps.map((s, i) => parseStep(s, `${path}.steps[${i}]`));
+  // Step ids must be unique within a job: a duplicate id compiles to a duplicate
+  // durable checkpoint name (`<job>/<id>`), and the runtime memoizes by name — so
+  // the second step would silently never run and return the first's cached result.
+  // Reject at parse time (as GitHub Actions does) rather than corrupt silently.
+  const seenIds = new Set<string>();
+  for (const s of steps) {
+    if (s.id === undefined) continue;
+    if (seenIds.has(s.id)) {
+      throw new WorkflowParseError(`duplicate step id "${s.id}" — step ids must be unique within a job`, `${path}.steps`);
+    }
+    seenIds.add(s.id);
+  }
+  const job: JobSpec = { steps };
 
   const cond = parseCondition(raw, path);
   if (cond !== undefined) job.if = cond;

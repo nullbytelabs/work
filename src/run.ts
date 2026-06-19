@@ -9,7 +9,7 @@
  * presenter hooks, or the web presenter's SSE sink) and starts/finishes around
  * the call. Keeping presentation out means the web layer reuses this untouched.
  */
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -90,14 +90,26 @@ export interface StartRunOptions {
  * for an injected `engine`, so this is safe for both the per-run-engine CLI path
  * and the shared-engine web path.
  */
+/**
+ * Resolve the per-run work root. A caller-provided `workdir` is theirs to keep; a
+ * temp one we mint is keyed by runId (stable across a resume) — NOT a fresh mkdtemp
+ * — because a resumed job re-stages only the checkout and fast-forwards
+ * already-completed steps without re-running them, so the filesystem side-effects of
+ * those steps (build/, etc.) must still be on disk. `startRun` keeps a minted dir
+ * for an `interrupted` (resumable) run and removes it only on a terminal outcome.
+ */
+async function prepareWorkRoot(workdir: string | undefined, runId: string): Promise<{ workRoot: string; ownsWorkRoot: boolean }> {
+  if (workdir !== undefined) return { workRoot: resolve(workdir), ownsWorkRoot: false };
+  const workRoot = join(tmpdir(), `work-${runId}`);
+  await mkdir(workRoot, { recursive: true });
+  return { workRoot, ownsWorkRoot: true };
+}
+
 export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
-  // A caller-provided `workdir` is theirs to keep; a temp one we mint is ours to
-  // remove in `finally` (otherwise every run — especially on the long-lived web
-  // server — leaks a `work-*` dir full of job workspaces under tmp).
-  const ownsWorkRoot = opts.workdir === undefined;
-  const workRoot = opts.workdir
-    ? resolve(opts.workdir)
-    : await mkdtemp(join(tmpdir(), "work-"));
+  // Resolve the run id up front so the journal, the history row, the runtime, AND
+  // the work dir all key on the same id (a `--resume` reuses every one of them).
+  const runId = opts.runId ?? randomUUID();
+  const { workRoot, ownsWorkRoot } = await prepareWorkRoot(opts.workdir, runId);
 
   // Compose the `uses:` handlers into the (agent-agnostic) runtime. A composite
   // action's inner `uses:` sub-steps route through a late-bound dispatcher that
@@ -132,10 +144,6 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
   if (persistent) await mkdir(opts.dataDir!, { recursive: true });
   const engine = opts.engine ?? (await createAbsurdEngine(opts.dataDir ? { dataDir: opts.dataDir } : {}));
 
-  // Resolve the run id up front so the journal, the history row, and the runtime
-  // all key on the same id (and a `--resume` reuses it).
-  const runId = opts.runId ?? randomUUID();
-
   // Telemetry hooks (caller's presenter + the emitter); flush is a no-op for an
   // injected handle.
   const { hooks: telemetryHooks, flush } = await composeTelemetry(opts);
@@ -169,6 +177,9 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
     ...(opts.makeTarget ? { makeTarget: opts.makeTarget } : {}),
   });
 
+  // An `interrupted` run is resumable, so its work dir must survive to the next
+  // invocation; a terminal run's dir is ours to remove.
+  let resumable = false;
   try {
     const result = await runtime.run(opts.plan, {
       workRoot,
@@ -177,6 +188,7 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
       hooks,
       runId,
     });
+    resumable = result.status === "interrupted";
     if (runStore) await runStore.setStatus(runId, result.status, { finishedAt: Date.now() });
     recorder?.finish(result); // the `run-end` frame (terminal status)
     return result;
@@ -193,7 +205,9 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
     await runtime.close(); // no-op for the injected (web) engine
     await Promise.allSettled(eventWrites); // ensure the event log (incl. run-end) landed before close
     if (ownsEngine) await engine.close();
-    if (ownsWorkRoot) await rm(workRoot, { recursive: true, force: true });
+    // Keep a resumable (interrupted) run's work dir so `resume` finds completed
+    // steps' filesystem side-effects; clean up only on a terminal outcome.
+    if (ownsWorkRoot && !resumable) await rm(workRoot, { recursive: true, force: true });
   }
 }
 

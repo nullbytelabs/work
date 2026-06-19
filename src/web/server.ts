@@ -287,7 +287,9 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     }
 
     // (3) CSRF token on every mutating UI request (hooks carry their own auth).
-    if (method === "POST" && !isHook && req.headers["x-work-token"] !== token) {
+    // Constant-time compare (like the bearer/HMAC paths) so a guessed token can't
+    // be recovered byte-by-byte via early-exit timing.
+    if (method === "POST" && !isHook && !constantTimeEqual(String(req.headers["x-work-token"] ?? ""), token)) {
       sendJson(res, 403, { error: "missing or invalid X-Work-Token" });
       return;
     }
@@ -455,7 +457,12 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
   async function getEvents(_req: IncomingMessage, res: ServerResponse, p: string[]): Promise<void> {
     const runId = p[0]!;
 
-    if (runManager.get(runId)) {
+    const record = runManager.get(runId);
+    // Only tail the in-memory ring for a still-RUNNING run. A finished run is served
+    // from the durable full log below — the ring drops its oldest frames past
+    // RING_CAP (including run-init), so a chatty finished run would otherwise replay
+    // a truncated, inconsistent history that depends on whether the process restarted.
+    if (record && (record.status === "running" || record.status === "queued")) {
       // Live, in-memory run: replay the ring then tail live (unchanged path).
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -500,7 +507,8 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     let plan;
     try {
       const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
-      plan = compile(spec, { inputs: stored.inputs ?? {}, ...reusableOpts(layout) });
+      // Recompile a rerun with the original trigger event, not just its inputs.
+      plan = compile(spec, { inputs: stored.inputs ?? {}, ...(stored.event ? { event: stored.event } : {}), ...reusableOpts(layout) });
     } catch (err) {
       sendCompileError(res, err);
       return;
@@ -881,9 +889,10 @@ async function reconcileInterruptedRuns(deps: {
   // Non-terminal rows a prior process left behind: `running`/`queued` zombies (a
   // hard kill before the terminal write) and `interrupted` (the run reported it
   // didn't finish). All are resumable; a genuine `failure`/`success` is not touched.
-  const interrupted = (await deps.runStore.list()).filter(
-    (r) => r.status === "running" || r.status === "queued" || r.status === "interrupted",
-  );
+  // Unbounded, non-terminal-only query — NOT list()'s newest-200 page, which would
+  // miss a long-running job started more than 200 runs ago (exactly the in-flight
+  // work that most needs resuming).
+  const interrupted = await deps.runStore.listNonTerminal();
   for (const r of interrupted) {
     const layout = await findWorkflowByName(deps.workspace, r.name).catch(() => undefined);
     if (!layout) {
@@ -893,7 +902,9 @@ async function reconcileInterruptedRuns(deps: {
     let plan;
     try {
       const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
-      plan = compile(spec, { inputs: r.inputs ?? {}, ...reusableOpts(layout) });
+      // Restore the persisted trigger event so a resumed webhook run recompiles with
+      // the same `${{ event.* }}` (else event-gated jobs skip / interpolate empty).
+      plan = compile(spec, { inputs: r.inputs ?? {}, ...(r.event ? { event: r.event } : {}), ...reusableOpts(layout) });
     } catch (err) {
       await deps.runStore.setStatus(r.id, "failure", { finishedAt: Date.now(), error: `interrupted: ${(err as Error).message}` });
       continue;

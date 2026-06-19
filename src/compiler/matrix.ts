@@ -69,9 +69,13 @@ export function expandMatrix(matrix: MatrixSpec): MatrixCell[] {
   return cells;
 }
 
-/** Sanitize a value into a path-safe fragment for a leg id. */
+/** Sanitize a value into a leg-id fragment. The keep set is the intersection of
+ *  path-safe AND expression-grammar-safe (`[A-Za-z_][\w-]*`): a leg id becomes a
+ *  reusable-call namespace prefix that appears in `${{ needs.<id>.outputs.* }}`
+ *  expressions, so a `.` (e.g. a version cell `1.5`) must be replaced — the runtime
+ *  `needs.*` resolver's grammar has no `.` and would reject the namespaced id. */
 function safe(v: MatrixValue): string {
-  return String(v).replace(/[^A-Za-z0-9.-]+/g, "-");
+  return String(v).replace(/[^A-Za-z0-9-]+/g, "-");
 }
 
 /**

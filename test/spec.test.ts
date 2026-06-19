@@ -144,6 +144,23 @@ describe("parseWorkflow — validation", () => {
     assert.match(e.message, /cannot define both/);
   });
 
+  // Regression: duplicate step ids would compile to the same durable checkpoint
+  // name, and the runtime memoizes by name — the second step would silently never
+  // run. Reject at parse time (as GHA does).
+  it("rejects duplicate step ids within a job", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - id: build\n        run: x\n      - id: build\n        run: y`);
+    assert.equal(e.path, "jobs.a.steps");
+    assert.match(e.message, /duplicate step id "build"/);
+  });
+
+  // Regression: a non-mapping `with:` on a step was silently dropped (losing all
+  // inputs) and failed late at runtime; reject at parse time like a uses: job does.
+  it("rejects a step with: that isn't a mapping", () => {
+    const e = err(`name: w\njobs:\n  a:\n    steps:\n      - uses: work/agent\n        with: "just a string"`);
+    assert.equal(e.path, "jobs.a.steps[0].with");
+    assert.match(e.message, /with must be a mapping/);
+  });
+
   it("rejects needs that points at an unknown job", () => {
     const e = err(`name: w\njobs:\n  a:\n    needs: ghost\n    steps: [{ run: x }]`);
     assert.equal(e.path, "jobs.a.needs");

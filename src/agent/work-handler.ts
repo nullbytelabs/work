@@ -15,8 +15,9 @@
  * `action/<name>` handler) — not in the engine.
  */
 import { isAbsolute, join, relative } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import type { UsesHandler, UsesContext, UsesResult } from "../runtime/types.ts";
+import { StepInterrupted } from "../runtime/types.ts";
 import { resolveModel, type PiWorkflowsConfig } from "../config/index.ts";
 import type { AgentRunner } from "./index.ts";
 import { GuestPiRunner } from "./guest-pi-runner.ts";
@@ -51,12 +52,38 @@ function selectRunner(runner: AgentRunner | undefined, ctx: UsesContext): AgentR
 /**
  * Read a workspace-relative prompt file from the host side of the staged checkout
  * (`ctx.workdir`). Rejects absolute paths and any path that escapes the workspace.
+ *
+ * Containment is enforced on the *real* (symlink-resolved) paths, not a lexical
+ * `relative()` over `join()`: the checkout is attacker-controlled (a hostile repo
+ * may plant a symlink whose lexical path has no `..` yet resolves to an arbitrary
+ * host file like ~/.ssh/id_rsa), and `fs.cp` stages symlinks verbatim. A lexical
+ * check would pass and `readFile` would follow the link, turning a host secret
+ * into the agent's prompt. So we realpath both sides and require the target to sit
+ * within the workspace.
  */
 async function readWorkspaceFile(workdir: string, file: string): Promise<string> {
   if (isAbsolute(file)) throw new Error(`prompt file "${file}" must be a workspace-relative path, not absolute`);
   const resolved = join(workdir, file);
   if (relative(workdir, resolved).startsWith("..")) throw new Error(`prompt file "${file}" escapes the workspace`);
-  return readFile(resolved, "utf-8");
+  // Resolve symlinks on both the workspace root and the target, then re-check
+  // containment on the real paths so a planted symlink can't escape the checkout.
+  let realWorkdir: string;
+  try {
+    realWorkdir = await realpath(workdir);
+  } catch {
+    realWorkdir = workdir;
+  }
+  let realResolved: string;
+  try {
+    realResolved = await realpath(resolved);
+  } catch {
+    throw new Error(`prompt file "${file}" does not exist in the workspace`);
+  }
+  const rel = relative(realWorkdir, realResolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`prompt file "${file}" escapes the workspace`);
+  }
+  return readFile(realResolved, "utf-8");
 }
 
 /** Resolve the prompt from `with:`: inline `prompt:`, or `promptFile:` (a file in
@@ -127,6 +154,9 @@ export function createWorkHandler(opts: WorkHandlerOptions = {}): UsesHandler {
           `unsupported work built-in "${ctx.uses}" — available: agent, ${BUILTIN_ACTIONS.join(", ")}`,
         );
       } catch (err) {
+        // A target/exec tear-out must propagate (resumable interruption), not be
+        // swallowed into a step failure — mirrors the run: path's durability.
+        if (err instanceof StepInterrupted) throw err;
         return fail((err as Error).message);
       }
     },

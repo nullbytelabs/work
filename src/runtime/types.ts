@@ -211,6 +211,27 @@ export interface UsesResult {
 export interface UsesHandler {
   /** The `uses:` scheme this handles (the segment before the first `/`), e.g. "agent". */
   readonly scheme: string;
-  /** Should not throw — return a failure result (and `emit` the reason) instead. */
+  /** Should not throw — return a failure result (and `emit` the reason) instead.
+   *  The ONE exception: a `StepInterrupted` (a target/exec tear-out) must be
+   *  re-thrown, never swallowed into a failure, so the run stays resumable. */
   run(ctx: UsesContext): Promise<UsesResult>;
+}
+
+/**
+ * Raised when a step's target/`exec` is torn out mid-execution (a VM tear-out) —
+ * as distinct from a step that *ran* and exited non-zero. A `run:` step gets this
+ * resumable path for free (a `target.run` rejection propagates and becomes a
+ * `JobInterrupted`); a `uses:` step's handler would otherwise swallow the same
+ * rejection into a terminal failure. So the `uses:` dispatcher wraps `exec` to
+ * throw this on a `target.run` rejection, and every handler's catch re-throws it
+ * (never `fail()`s it) so the run is recorded `interrupted` (resumable), not
+ * `failure`. Mirrors the `run:`/`uses:` symmetry the durable runtime depends on.
+ */
+export class StepInterrupted extends Error {
+  override readonly cause: unknown;
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "StepInterrupted";
+    this.cause = cause;
+  }
 }

@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseWorkflow } from "../src/spec/index.ts";
@@ -98,13 +98,53 @@ describe("GuestPiRunner", () => {
     assert.ok(commands.some((c) => /npm install .*@earendil-works\/pi-coding-agent/.test(c)), "should npm install Pi");
     assert.ok(commands.some((c) => /node .*guest-runner-\w+\.mjs/.test(c)), "should run the wrapper");
 
-    // The per-invocation wrapper uses an unpredictable name (so a malicious guest
-    // can't pre-plant a symlink at a known path) and is cleaned up after the run,
-    // along with the request/result files.
-    const stage = join(dir, ".pi-agent");
-    const files = await readdir(stage);
-    assert.ok(!files.some((f) => /^guest-runner-\w+\.mjs$/.test(f)), "wrapper should be cleaned up");
-    assert.ok(!files.some((f) => /^req-/.test(f) || /^res-/.test(f)), "request/result should be cleaned up");
+    // The per-invocation staging dir uses an UNPREDICTABLE name (`.pi-agent-<id>`,
+    // not a constant) so a hostile checkout can't pre-plant a symlink or a
+    // malicious `.npmrc`/`node_modules` at a known prefix, and it's removed wholesale
+    // after the run.
+    const entries = await readdir(dir);
+    const stages = entries.filter((e) => /^\.pi-agent(-|$)/.test(e));
+    assert.deepEqual(stages, [], "per-invocation staging dir should be cleaned up");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Regression: a hostile checkout can pre-plant a constant staging prefix
+  // (`.pi-agent`) as a symlink (host-write escape) or a real dir with a malicious
+  // `.npmrc`/`node_modules` (registry redirect → in-guest code-exec). The staging
+  // dir must be UNPREDICTABLE per invocation, npm must run with its project dir IN
+  // that dir (so a checkout-root `.npmrc` is ignored), and `--ignore-scripts` must
+  // block lifecycle-script execution.
+  it("stages into an unpredictable per-invocation dir and hardens the in-guest install", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
+    const stageDirs: string[] = [];
+    let installCmd = "";
+    const exec = async (command: string) => {
+      const cd = /cd (\S+\/(\.pi-agent-\w+)) &&/.exec(command);
+      if (cd) stageDirs.push(cd[2] as string);
+      if (/npm install/.test(command)) installCmd = command;
+      const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+      if (m) {
+        const { writeFile } = await import("node:fs/promises");
+        await writeFile(m[2] as string, JSON.stringify({ text: "ok" }));
+      }
+      return { exitCode: 0, stdout: "", stderr: "", ok: true };
+    };
+    const runner = new GuestPiRunner({ exec, hostDir: dir, guestDir: dir });
+    const model = { baseUrl: "https://model.example.com/v1", apiKey: "k", model: "m" } as const;
+    await runner.run({ system: "s", prompt: "p", model });
+    const firstStage = stageDirs[0];
+    await runner.run({ system: "s", prompt: "p", model });
+    const secondStage = stageDirs[1];
+
+    // The prefix is never the constant `.pi-agent` and differs across invocations.
+    assert.ok(firstStage && /^\.pi-agent-\w+$/.test(firstStage), "stage dir must be `.pi-agent-<id>`");
+    assert.notEqual(firstStage, ".pi-agent");
+    assert.notEqual(firstStage, secondStage, "stage dir must be unpredictable per invocation");
+    // The install runs inside the unguessable dir, pins the registry (so a planted
+    // .npmrc can't redirect it), and ignores lifecycle scripts.
+    assert.match(installCmd, /cd \S+\/\.pi-agent-\w+ && npm install/);
+    assert.match(installCmd, /--registry=https:\/\/registry\.npmjs\.org\//);
+    assert.match(installCmd, /--ignore-scripts/);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -129,6 +169,34 @@ describe("GuestPiRunner", () => {
     assert.doesNotMatch(capturedReq, /SUPER-SECRET-KEY/, "request file must not leak the key");
     assert.match(capturedReq, new RegExp(GUEST_MODEL_KEY_ENV), "request names the key env var instead");
     await rm(dir, { recursive: true, force: true });
+  });
+
+  // Regression: a prompt-injected agent could plant the result path as a symlink to
+  // a host file (the shared mount follows symlinks), turning the wrapper's result
+  // write into an arbitrary host-file overwrite. The host read must refuse to follow
+  // a symlink at the result path.
+  it("refuses to read a result file that is a symlink (sandbox write/read escape)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
+    const secretDir = await mkdtemp(join(tmpdir(), "pi-wf-secret-"));
+    try {
+      const secret = join(secretDir, "host-secret");
+      await writeFile(secret, "HOST DATA");
+      // Fake exec: instead of writing a regular result file, plant a symlink to a
+      // host file at the result path (what a hostile in-guest actor would do).
+      const exec = async (command: string) => {
+        const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+        if (m) await symlink(secret, m[2] as string);
+        return { exitCode: 0, stdout: "", stderr: "", ok: true };
+      };
+      const runner = new GuestPiRunner({ exec, hostDir: dir, guestDir: dir });
+      await assert.rejects(
+        () => runner.run({ prompt: "p", model: { baseUrl: "https://m.example.com/v1", apiKey: "k", model: "m" } }),
+        /result path is a symlink/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(secretDir, { recursive: true, force: true });
+    }
   });
 
   it("fails clearly when the in-guest install fails", async () => {

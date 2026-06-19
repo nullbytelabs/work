@@ -95,4 +95,50 @@ describe("web boot reconciliation", () => {
       await check.close();
     }
   });
+
+  // Regression: boot reconciliation must see EVERY non-terminal run, not just the
+  // newest 200 — a long job started many runs ago would otherwise be a stranded
+  // zombie. listNonTerminal() ignores the list() page cap.
+  it("listNonTerminal returns all non-terminal runs regardless of the 200-row page cap", async () => {
+    const engine = await createAbsurdEngine({ dataDir });
+    try {
+      const runs = new RunRepository(engine);
+      await runs.ensureSchema();
+      // An old running zombie, then 250 terminal rows newer than it.
+      await runs.insert({ id: "old-zombie", name: "echo", status: "running", trigger: "dispatch", startedAt: 1 });
+      for (let i = 0; i < 250; i++) {
+        await runs.insert({ id: `done-${i}`, name: "echo", status: "success", trigger: "dispatch", startedAt: 100 + i });
+      }
+      const nonTerminal = await runs.listNonTerminal();
+      assert.ok(nonTerminal.some((r) => r.id === "old-zombie"), "the >200-old zombie must still be seen");
+      assert.ok(nonTerminal.every((r) => r.status !== "success"), "only non-terminal rows are returned");
+      // list()'s default page would have hidden it behind the 250 newer terminal rows.
+      const page = await runs.list();
+      assert.ok(!page.some((r) => r.id === "old-zombie"), "the default list() page does NOT include it (why listNonTerminal exists)");
+    } finally {
+      await engine.close();
+    }
+  });
+
+  // Regression: a webhook run's trigger `event` payload must be persisted alongside
+  // its inputs, so a resume/rerun recompiles with the same `${{ event.* }}` instead
+  // of dropping event-gated jobs / interpolating empty.
+  it("persists and restores the trigger event payload", async () => {
+    const engine = await createAbsurdEngine({ dataDir });
+    try {
+      const runs = new RunRepository(engine);
+      await runs.ensureSchema();
+      const event = { action: "opened", number: 42, pull_request: { title: "Fix" } };
+      await runs.insert({ id: "evt-1", name: "echo", status: "running", trigger: "webhook", startedAt: Date.now(), inputs: { a: "1" }, event });
+      const row = await runs.get("evt-1");
+      assert.deepEqual(row!.event, event, "the trigger event must round-trip through the store");
+      assert.deepEqual(row!.inputs, { a: "1" });
+      // A run with no event leaves the column null/absent.
+      await runs.insert({ id: "evt-none", name: "echo", status: "running", trigger: "dispatch", startedAt: Date.now() });
+      const none = await runs.get("evt-none");
+      assert.equal(none!.event, undefined, "a non-webhook run has no event");
+    } finally {
+      await engine.close();
+    }
+  });
 });

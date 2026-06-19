@@ -19,7 +19,7 @@
  * which Gondolin populates with a placeholder and swaps into the outbound
  * Authorization header host-side (the real key never enters the guest).
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, lstat, unlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const PI_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -141,13 +141,28 @@ async function main() {
   const result = { text };
   if (finishReason) result.finishReason = finishReason;
   if (usage) result.usage = usage;
-  await writeFile(resultPath, JSON.stringify(result));
+  await writeResultFile(resultPath, JSON.stringify(result));
+}
+
+// The host removed this path before the run and expects us to create a regular
+// file. If a symlink exists here, a prompt-injected agent planted it (during the
+// session, with the full toolset over the shared mount) to redirect our write out
+// of the workspace and overwrite a host file. Remove the link itself (never its
+// target) before writing a fresh regular file.
+async function writeResultFile(path, data) {
+  try {
+    const st = await lstat(path);
+    if (st.isSymbolicLink()) await unlink(path);
+  } catch {
+    /* nothing at the path — fine */
+  }
+  await writeFile(path, data);
 }
 
 main().catch(async (err) => {
   const resultPath = process.argv[3];
   const payload = JSON.stringify({ error: err?.message ?? String(err) });
-  if (resultPath) await writeFile(resultPath, payload).catch(() => {});
+  if (resultPath) await writeResultFile(resultPath, payload).catch(() => {});
   process.stderr.write((err?.message ?? String(err)) + "\n");
   process.exit(1);
 });
