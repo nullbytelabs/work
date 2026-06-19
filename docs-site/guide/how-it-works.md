@@ -15,7 +15,7 @@ Those checkpoints are journaled to an **in-process Postgres**
 database, no services to run. Because every step is recorded, the engine always
 knows exactly what already executed, so a run that's interrupted mid-flight can
 be **resumed** from where it stopped, reusing finished work instead of redoing it
-(see [`work resume`](../reference/cli#work-resume-work-rerun)).
+(see [`work resume`](../reference/cli#work-resume-work-rerun-work-retry)).
 
 ```
 workflow.yaml

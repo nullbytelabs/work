@@ -63,6 +63,15 @@ export class RunEventRepository {
     );
   }
 
+  /** Drop every recorded frame for a run. Used by `retry`, which re-runs a prior
+   *  run's failed jobs under the SAME runId: clearing the old attempt's log lets the
+   *  retry record its own from `seq` 0 (appends are `(run_id, seq)`-keyed, so stale
+   *  rows would otherwise win the conflict and `work logs <id>` would show the old
+   *  attempt). */
+  async clear(runId: string): Promise<void> {
+    await this.engine.query(`delete from work.run_events where run_id = $1`, [runId]);
+  }
+
   /** Every persisted frame for a run, in emit (`seq`) order — the replay stream. */
   async list(runId: string): Promise<StoredFrame[]> {
     const rows = await this.engine.query<RawEventRow>(

@@ -301,6 +301,14 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       await route.handler(req, res, m.slice(1).map((s) => decodeURIComponent(s)));
       return;
     }
+    // History-API fallback: any unmatched, non-API, non-hook GET serves the SPA
+    // shell, so a deep link (/runs/:id, /workflows/:name, /history, …) can be
+    // refreshed, shared, and opened directly — the client reads location.pathname
+    // and renders the matching view. API/hook misses stay honest JSON 404s.
+    if (method === "GET" && !path.startsWith("/api/") && !isHook) {
+      serveShell(req, res);
+      return;
+    }
     sendJson(res, 404, { error: `not found: ${method} ${path}` });
   }
 
@@ -321,6 +329,7 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     { method: "GET", pattern: /^\/api\/schedules$/, handler: getSchedules },
     { method: "GET", pattern: /^\/api\/runs\/([^/]+)\/events$/, handler: getEvents },
     { method: "POST", pattern: /^\/api\/runs\/([^/]+)\/rerun$/, handler: postRerun },
+    { method: "POST", pattern: /^\/api\/runs\/([^/]+)\/retry$/, handler: postRetry },
   ];
 
   // GET / → the HTML shell.
@@ -521,6 +530,49 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     });
     if (!result.accepted) { sendJson(res, 429, { error: "server at run capacity — retry shortly" }); return; }
     sendJson(res, 202, { runId: result.record.id });
+  }
+
+  // POST /api/runs/:id/retry → re-run ONLY a past `failure` run's failed jobs, under
+  // the SAME run id (reusing the jobs that passed). Clears the failed jobs from the
+  // durable journal, then re-dispatches with `runId: id` so the journal resumes.
+  async function postRetry(_req: IncomingMessage, res: ServerResponse, p: string[]): Promise<void> {
+    const id = p[0]!;
+    const stored = await runManager.getStored(id);
+    if (!stored) { sendJson(res, 404, { error: `no run "${id}"` }); return; }
+
+    const layout = await resolveLayout(stored.name);
+    if (!layout) { sendJson(res, 404, { error: `no workflow named "${stored.name}"` }); return; }
+
+    let plan;
+    try {
+      const spec = parseWorkflow(await readFile(layout.file, "utf-8"));
+      // Recompile with the same inputs + original trigger event, exactly like rerun —
+      // the plan must match the prior run so the surviving job tasks' keys line up.
+      plan = compile(spec, { inputs: stored.inputs ?? {}, ...(stored.event ? { event: stored.event } : {}), ...reusableOpts(layout) });
+    } catch (err) {
+      sendCompileError(res, err);
+      return;
+    }
+
+    // Clear the failed jobs (+ orchestrator) from the journal. Nothing cleared means
+    // the run had no failed jobs to retry — answer 409 and dispatch nothing.
+    const { jobsReset } = await runManager.prepareRetry(id);
+    if (jobsReset.length === 0) {
+      sendJson(res, 409, { error: `run "${id}" has no failed jobs to retry` });
+      return;
+    }
+
+    // Same run id → the durable journal resumes: the cleared failed jobs re-run, the
+    // surviving successful ones are reused.
+    const result = runManager.dispatch({
+      name: stored.name,
+      layout: layoutFields(layout),
+      plan,
+      runId: id,
+      trigger: "dispatch",
+    });
+    if (!result.accepted) { sendJson(res, 429, { error: "server at run capacity — retry shortly" }); return; }
+    sendJson(res, 202, { runId: result.record.id, jobsReset });
   }
 
   /** Resolve a workflow name to its layout, or undefined if absent. */

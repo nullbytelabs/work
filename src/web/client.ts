@@ -370,6 +370,7 @@ button.ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--ac
    ======================================================================== */
 .run-head { display: flex; align-items: flex-start; gap: var(--space-4); flex-wrap: wrap; margin: 0 0 var(--space-5); }
 .run-head .grow { min-width: 0; }
+.run-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 h1.run-state {
   margin: 0; display: flex; align-items: center; gap: var(--space-3);
   font-size: var(--text-2xl); font-weight: var(--weight-bold);
@@ -694,6 +695,44 @@ const routeLive = document.getElementById('route-live');
 let activeEs = null;
 function closeActiveEs() { if (activeEs) { activeEs.close(); activeEs = null; } }
 
+// ---- routing (deep linking) -------------------------------------------
+// Every view has a real, shareable URL. The server serves the SPA shell for any
+// non-API path (a history-API fallback), so refreshing or opening a deep link
+// lands here and route() renders from location.pathname. navigate() is the in-app
+// push; the browser's back/forward fire popstate -> route().
+const runPath = (id) => '/runs/' + encodeURIComponent(id);
+const wfPath = (name) => '/workflows/' + encodeURIComponent(name);
+
+function navigate(path) {
+  // Same path: don't stack a duplicate history entry, but still re-render (e.g. a
+  // retry re-runs under the same run id and wants a fresh view).
+  if (path !== location.pathname) history.pushState(null, '', path);
+  route();
+}
+function route() {
+  const [section, param] = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  if (section === 'runs' && param) { viewRun(param); return; }
+  if (section === 'webhooks') { viewWebhooks(); return; }
+  if (section === 'schedules') { viewSchedules(); return; }
+  if (section === 'history') { viewHistory(); return; }
+  if (section === 'workflows' && param) { viewTrigger(param); return; }
+  // '/', '/workflows', or anything unrecognized -> the workflows home.
+  viewWorkflows();
+}
+// Turn an <a> into an SPA link: a real href (so middle-click / cmd-click still
+// open a new tab and the URL shows on hover), but a plain left-click routes in
+// place instead of reloading.
+function linkTo(el, path) {
+  if (!el) return;
+  el.setAttribute('href', path);
+  el.addEventListener('click', (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    navigate(path);
+  });
+}
+window.addEventListener('popstate', route);
+
 // ---- helpers -----------------------------------------------------------
 const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const GLYPH = { success:'✓', failure:'✗', skipped:'⊘', running:'◌', pending:'○' };
@@ -719,6 +758,9 @@ function mount(routeName) {
     h1.setAttribute('tabindex', '-1');
     h1.focus({ preventScroll: false });
   }
+  // Keep the document title in sync with the route so a deep link's browser tab
+  // and history entry are meaningful (recognition over recall when sharing).
+  document.title = routeName ? routeName + ' · work' : 'work';
   if (routeName && routeLive) routeLive.textContent = routeName;
 }
 
@@ -811,7 +853,7 @@ async function viewWorkflows() {
       '<span class="body"><span class="t">' + esc(wf.name) + '</span>' +
       '<span class="m">Configure &amp; trigger</span></span>' +
       '<span class="chev">' + ICON.chevron + '</span>';
-    btn.onclick = () => viewTrigger(wf.name);
+    btn.onclick = () => navigate(wfPath(wf.name));
     ul.appendChild(btn);
   }
 }
@@ -936,7 +978,7 @@ function hookCard(h) {
 
   // Workflow affordance (optional) — jump to that workflow's trigger page.
   const wfLink = card.querySelector('.wf-link');
-  if (wfLink) wfLink.onclick = (e) => { e.preventDefault(); viewTrigger(h.workflow); };
+  if (wfLink) linkTo(wfLink, wfPath(h.workflow));
 
   // Copy endpoint URL to clipboard, with a graceful fallback + brief affirmation.
   const copyBtn = card.querySelector('.copy-btn');
@@ -967,7 +1009,7 @@ function hookCard(h) {
         return;
       }
       const { runId } = await r.json();
-      if (runId) { viewRun(runId); return; }
+      if (runId) { navigate(runPath(runId)); return; }
       testErr.textContent = 'Test accepted but no run id was returned.';
       testBtn.disabled = false;
     } catch (e) { testErr.textContent = e.message; testBtn.disabled = false; }
@@ -1005,8 +1047,8 @@ async function loadDeliveries(name, target) {
       row.setAttribute('aria-label',
         'Delivery ' + d.result + ', HTTP ' + status + ', ' + fmtWhen(d.ts) + ' — open run ' + String(d.runId).slice(0, 8));
       row.tabIndex = 0;
-      row.onclick = () => viewRun(d.runId);
-      row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); viewRun(d.runId); } };
+      row.onclick = () => navigate(runPath(d.runId));
+      row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(runPath(d.runId)); } };
     }
     target.appendChild(row);
   }
@@ -1112,7 +1154,7 @@ async function viewTrigger(name) {
       });
       if (!r.ok) { errBox.textContent = (await r.text()) || ('HTTP ' + r.status); btn.disabled = false; return; }
       const { runId } = await r.json();
-      viewRun(runId);
+      navigate(runPath(runId));
     } catch (e) { errBox.textContent = e.message; btn.disabled = false; }
   };
 }
@@ -1235,7 +1277,10 @@ function viewRun(runId) {
           '<span class="elapsed" id="run-elapsed">0.0s</span>' +
         '</p>' +
       '</div>' +
-      '<button class="ghost" id="rerun" title="Re-run with the same inputs">↻ Re-run</button>' +
+      '<div class="run-actions">' +
+        '<button class="ghost" id="retry" title="Re-run only the jobs that failed, reusing the ones that passed" hidden>↻ Retry failed</button>' +
+        '<button class="ghost" id="rerun" title="Re-run with the same inputs">↻ Re-run</button>' +
+      '</div>' +
     '</div>' +
     '<p class="err boxed" id="run-err"></p>' +
     '<div class="run-grid">' +
@@ -1264,6 +1309,7 @@ function viewRun(runId) {
   const elapsedEl = document.getElementById('run-elapsed');
   const errEl = document.getElementById('run-err');
   const rerunBtn = document.getElementById('rerun');
+  const retryBtn = document.getElementById('retry');
   const runLive = document.getElementById('run-live');
   const started = Date.now();
   // 250ms is plenty for a human-readable elapsed clock and calmer than 100ms.
@@ -1281,8 +1327,26 @@ function viewRun(runId) {
       });
       if (!r.ok) { errEl.textContent = (await r.text()) || ('HTTP ' + r.status); rerunBtn.disabled = false; return; }
       const { runId: newId } = await r.json();
-      viewRun(newId);
+      navigate(runPath(newId));
     } catch (e) { errEl.textContent = e.message; rerunBtn.disabled = false; }
+  };
+
+  // Retry failed: re-run ONLY this run's failed jobs under the SAME id (the passing
+  // jobs are reused). The server clears the failed jobs from the journal, then
+  // re-dispatches; we re-open the same run id to tail the retried attempt. Shown
+  // only once the run ends in failure (revealed in setRunState).
+  retryBtn.onclick = async () => {
+    errEl.textContent = '';
+    retryBtn.disabled = true;
+    try {
+      const r = await fetch('/api/runs/' + encodeURIComponent(runId) + '/retry', {
+        method: 'POST',
+        headers: { 'X-Work-Token': TOKEN },
+      });
+      if (!r.ok) { errEl.textContent = (await r.text()) || ('HTTP ' + r.status); retryBtn.disabled = false; return; }
+      const { runId: sameId } = await r.json();
+      navigate(runPath(sameId));
+    } catch (e) { errEl.textContent = e.message; retryBtn.disabled = false; }
   };
 
   // Per-step durations are derived client-side from frame timestamps (ts).
@@ -1420,6 +1484,9 @@ function viewRun(runId) {
     const g = stateEl.querySelector('.st-glyph');
     g.textContent = GLYPH[status] || '•';
     g.classList.add('just-settled');
+    // Offer "Retry failed" only on a genuine failure (a job ran and failed) — the
+    // re-run-failed-jobs tactic; hidden otherwise.
+    if (retryBtn) retryBtn.hidden = status !== 'failure';
   }
 }
 
@@ -1590,7 +1657,7 @@ async function viewHistory() {
       '<span class="m">' + esc(when) + (r.trigger ? ' · ' + esc(r.trigger) : '') + '</span></span>' +
       '<span class="chev">' + ICON.chevron + '</span>';
     btn.setAttribute('aria-label', r.name + ' — ' + (STATUS_LABEL[r.status] || r.status) + ', ' + when);
-    btn.onclick = () => viewRun(r.id);
+    btn.onclick = () => navigate(runPath(r.id));
     list.appendChild(btn);
   }
 }
@@ -1659,7 +1726,7 @@ function scheduleCard(s, active) {
   // Jump to the workflow's run page from its name.
   const title = card.querySelector('.hname');
   title.style.cursor = 'pointer';
-  title.onclick = () => viewTrigger(s.workflow);
+  title.onclick = () => navigate(wfPath(s.workflow));
   return card;
 }
 
@@ -1686,15 +1753,16 @@ function errorBlock(msg) {
 }
 
 // ---- nav ---------------------------------------------------------------
-function bindNav(id, fn) {
-  document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); fn(); });
+function bindNav(id, path) {
+  linkTo(document.getElementById(id), path);
 }
-bindNav('nav-home', viewWorkflows);
-bindNav('nav-workflows', viewWorkflows);
-bindNav('nav-webhooks', viewWebhooks);
-bindNav('nav-schedules', viewSchedules);
-bindNav('nav-history', viewHistory);
-viewWorkflows();
+bindNav('nav-home', '/');
+bindNav('nav-workflows', '/');
+bindNav('nav-webhooks', '/webhooks');
+bindNav('nav-schedules', '/schedules');
+bindNav('nav-history', '/history');
+// Render the view for the URL we landed on (deep link / refresh / share).
+route();
 </script>
 </body>
 </html>

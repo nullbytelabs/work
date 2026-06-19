@@ -86,6 +86,7 @@ Notes for using them:
   sequential after its own `scan`, so peak concurrency stays at the ~4 scanners.
 - Run history persists in `.workflows/db` (PGLite, gitignored):
   `work runs`, `work resume <id>` (reuse finished jobs), `work rerun <id>`,
+  `work retry <id>` (re-run only a failed run's failed jobs, reusing the passing ones),
   `work --web` for the console + webhook trigger (`ci` is `on: webhook`).
 
 **Use these to advance the project**: after a meaningful engine change, run

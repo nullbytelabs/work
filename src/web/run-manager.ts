@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import type { ExecutionPlan } from "../compiler/index.ts";
+import { resetFailedJobs } from "../runtime/index.ts";
 import type { AbsurdEngine } from "../runtime/index.ts";
 import type { TargetFactory } from "../targets/index.ts";
 import type { PiWorkflowsConfig } from "../config/index.ts";
@@ -374,6 +375,26 @@ export class RunManager {
       ...(row.inputs !== undefined ? { inputs: row.inputs } : {}),
       ...(row.event !== undefined ? { event: row.event } : {}),
     };
+  }
+
+  /**
+   * Prepare a "re-run failed jobs" retry of a past `failure` run: clear its failed
+   * jobs (and the run's orchestrator) from the durable journal so a re-dispatch
+   * under the SAME run id reuses the jobs that passed and re-runs only the failed
+   * ones (the GitHub-Actions tactic; mirrors the CLI's `work retry`). Also clears
+   * the prior attempt's recorded log + flips the run row back to `running` so the
+   * retry records its own. Returns the cleared job ids; an empty list means there
+   * was nothing to retry (the caller answers 409 and dispatches nothing).
+   *
+   * The caller then `dispatch`es with `runId` set to the same id, so the durable
+   * journal resumes — reusing the surviving (successful) job tasks.
+   */
+  async prepareRetry(runId: string): Promise<{ jobsReset: string[] }> {
+    const { jobsReset } = await resetFailedJobs(this.engine, runId);
+    if (jobsReset.length === 0) return { jobsReset };
+    if (this.eventStore) await this.eventStore.clear(runId);
+    if (this.runStore) await this.runStore.setStatus(runId, "running");
+    return { jobsReset };
   }
 
   /**

@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError, type ExecutionPlan } from "./compiler/index.ts";
 import { resolveConfigLayers, loadMergedConfig, PROJECT_CONFIG_FILENAME, type PiWorkflowsConfig } from "./config/index.ts";
-import { createAbsurdEngine } from "./runtime/index.ts";
+import { createAbsurdEngine, resetFailedJobs } from "./runtime/index.ts";
 import { RunRepository, type RunRow, type RunStatus } from "./persistence/runs.ts";
 import { RunEventRepository, type StoredFrame } from "./persistence/run-events.ts";
 import { resolveWorkflowLayout, findWorkflowByName, resolveWorkflowRef, WORKFLOWS_DIR, type WorkflowLayout } from "./project.ts";
@@ -63,8 +63,9 @@ interface CliArgs {
   runs?: boolean;
   /** `runs --status <s>`: filter the history by status. */
   runStatus?: string;
-  /** `resume <id>` / `rerun <id>`: recover a prior run by id (workflow + inputs from history). */
-  recover?: { id: string; mode: "resume" | "rerun" };
+  /** `resume <id>` / `rerun <id>` / `retry <id>`: recover a prior run by id
+   *  (workflow + inputs from history). */
+  recover?: { id: string; mode: "resume" | "rerun" | "retry" };
   /** `logs <id>`: replay a past run's persisted log instead of running a workflow. */
   logs?: { id: string };
 }
@@ -202,6 +203,7 @@ function parseArgs(argv: string[]): CliArgs {
   if (s.status) fail("--status only applies to `runs`");
   if (s.positionals[0] === "resume") return resolveRecover(s, common, "resume");
   if (s.positionals[0] === "rerun") return resolveRecover(s, common, "rerun");
+  if (s.positionals[0] === "retry") return resolveRecover(s, common, "retry");
   if (s.positionals[0] === "logs") return resolveLogs(s, common);
   if (s.positionals[0] === "serve") return resolveServe(s, common);
   if (s.port !== undefined) fail("--port only applies to `serve`");
@@ -210,10 +212,12 @@ function parseArgs(argv: string[]): CliArgs {
   return resolveFile(s, common);
 }
 
-// `resume <id>` / `rerun <id>` — recover a prior run by id (its workflow + inputs
-// come from history). `resume` continues the same run (reuses finished jobs);
-// `rerun` starts fresh with the same inputs. Both resolve to the normal run path.
-function resolveRecover(s: FlagState, common: CommonArgs, mode: "resume" | "rerun"): CliArgs {
+// `resume <id>` / `rerun <id>` / `retry <id>` — recover a prior run by id (its
+// workflow + inputs come from history). `resume` continues the same run (reuses
+// finished jobs); `rerun` starts fresh with the same inputs; `retry` re-runs just
+// the prior run's *failed* jobs under the same id, reusing the ones that passed.
+// All resolve to the normal run path.
+function resolveRecover(s: FlagState, common: CommonArgs, mode: "resume" | "rerun" | "retry"): CliArgs {
   const id = s.positionals[1];
   if (!id) fail(`${mode} requires a run id, e.g. \`${mode} <id>\` (see \`work runs\`)`);
   if (s.positionals.length > 2) fail(`unexpected argument: ${s.positionals[2]}`);
@@ -306,6 +310,7 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] resume <id>   # continue an interrupted run (reuse finished jobs)\n` +
       `  ${prog} [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs\n` +
+      `  ${prog} [--workspace <dir>] retry <id>    # re-run only a past run's failed jobs (reuse the passing ones)\n` +
       `  ${prog} [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]\n` +
       `  ${prog} [--workspace <dir>] logs <id>     # replay a past run's stored log (web-run logs)\n` +
       `  ${prog} [--workspace <dir>] serve [--port <n>]\n` +
@@ -523,33 +528,73 @@ function renderRunLog(frames: StoredFrame[]): void {
   out.write(`\nresult: ${log.endStatus || "unknown"}${log.endError ? ` — ${log.endError}` : ""}\n`);
 }
 
-/** Look up a past run's workflow + inputs from the shared store (for resume/rerun). */
-async function lookupRun(workspace: string, id: string): Promise<{ name: string; inputs?: Record<string, unknown> } | undefined> {
+/** Look up a past run's full id + workflow + inputs from the shared store (for
+ *  resume/rerun/retry). The id may be the short prefix `runs` prints; it's resolved
+ *  to the full run_id (an ambiguous prefix fails clearly). */
+async function lookupRun(workspace: string, id: string): Promise<{ id: string; name: string; inputs?: Record<string, unknown> } | undefined> {
   const dataDir = join(workspace, WORKFLOWS_DIR, "db");
   if (!existsSync(dataDir)) return undefined;
   const engine = await createAbsurdEngine({ dataDir });
   try {
     const repo = new RunRepository(engine);
     await repo.ensureSchema();
-    const row = await repo.get(id);
-    return row ? { name: row.name, ...(row.inputs ? { inputs: row.inputs } : {}) } : undefined;
+    const matches = (await repo.list()).filter((r) => r.id === id || r.id.startsWith(id));
+    if (matches.length > 1) {
+      const prog = process.env["PI_WF_PROG"] ?? "work";
+      fail(`"${id}" matches ${matches.length} runs — use a longer id: ${matches.map((m) => m.id.slice(0, 12)).join(", ")} (see \`${prog} runs\`)`);
+    }
+    const row = matches[0];
+    return row ? { id: row.id, name: row.name, ...(row.inputs ? { inputs: row.inputs } : {}) } : undefined;
   } finally {
     await engine.close();
   }
 }
 
-/** For `resume`/`rerun`: resolve the run id to its workflow + inputs and fold them
- *  into `args` so the normal run path takes over (resume reuses the id). */
+/** For `resume`/`rerun`/`retry`: resolve the run id to its workflow + inputs and
+ *  fold them into `args` so the normal run path takes over. `resume` and `retry`
+ *  reuse the id (re-drive the same run); `retry` additionally clears the prior
+ *  run's failed-job journal so only those re-run. */
 async function applyRecover(args: CliArgs): Promise<void> {
   if (!args.recover) return;
-  const stored = await lookupRun(args.workspace ?? process.cwd(), args.recover.id);
+  const workspace = args.workspace ?? process.cwd();
+  const stored = await lookupRun(workspace, args.recover.id);
   if (!stored) {
     const prog = process.env["PI_WF_PROG"] ?? "work";
     fail(`no run "${args.recover.id}" found in history (see \`${prog} runs\`)`);
   }
   args.name = stored.name;
   if (Object.keys(args.inputs).length === 0 && stored.inputs) args.inputs = stored.inputs;
-  if (args.recover.mode === "resume") args.resume = args.recover.id;
+  // Use the resolved FULL run id (the arg may have been a short prefix) so the
+  // journal/work-dir/history all key on the same id a resume re-drives.
+  if (args.recover.mode === "resume" || args.recover.mode === "retry") args.resume = stored.id;
+  if (args.recover.mode === "retry") await applyRetry(workspace, stored.id);
+}
+
+/** `retry <id>` — clear the prior run's *failed* jobs from the durable journal so a
+ *  same-id re-drive re-runs only those (reusing the jobs that passed), reset the
+ *  recorded log/status for a clean attempt, and report what's being retried. Fails
+ *  cleanly (mutating nothing) when there were no failed jobs. */
+async function applyRetry(workspace: string, id: string): Promise<void> {
+  const dataDir = join(workspace, WORKFLOWS_DIR, "db");
+  const prog = process.env["PI_WF_PROG"] ?? "work";
+  const engine = await createAbsurdEngine({ dataDir });
+  try {
+    const { jobsReset } = await resetFailedJobs(engine, id);
+    if (jobsReset.length === 0) {
+      fail(`run "${id}" has no failed jobs to retry (re-run the whole thing with \`${prog} rerun ${id}\`)`);
+    }
+    // Clear the prior attempt's recorded log + flip the run row back to `running` so
+    // the retry records its own log/status (the history row is reused by id).
+    const events = new RunEventRepository(engine);
+    await events.ensureSchema();
+    await events.clear(id);
+    const runs = new RunRepository(engine);
+    await runs.ensureSchema();
+    await runs.setStatus(id, "running");
+    process.stderr.write(`work: retrying ${jobsReset.length} failed job(s): ${jobsReset.join(", ")}\n`);
+  } finally {
+    await engine.close();
+  }
 }
 
 async function main(): Promise<void> {
@@ -590,9 +635,11 @@ async function main(): Promise<void> {
     return; // keep the event loop alive on the listening server
   }
 
-  // `resume <id>` / `rerun <id>` — fill the workflow + inputs from history, then
-  // fall through to the normal run path. `resume` reuses the run id (continues the
-  // run); `rerun` leaves it unset (a fresh run with the same inputs).
+  // `resume <id>` / `rerun <id>` / `retry <id>` — fill the workflow + inputs from
+  // history, then fall through to the normal run path. `resume` reuses the run id
+  // (continues the run); `rerun` leaves it unset (a fresh run with the same inputs);
+  // `retry` reuses the id but first clears the prior run's failed jobs so only those
+  // re-run (the passing jobs are reused).
   await applyRecover(args);
 
   // Resolve where the workflow lives and what its checkout is. By name:
@@ -708,12 +755,17 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
   presenter.finish(result);
   if (result.status === "success") process.exit(0);
   // An `interrupted` run didn't finish (the platform was torn out) — point at
-  // `--resume`. A genuine `failure` ran to a verdict; the presenter already showed
-  // it, and re-running is the user's call (a `retry` verb is coming).
-  if (persistent && result.status === "interrupted") {
+  // `--resume`. A genuine `failure` ran to a verdict; point at `retry` so the user
+  // can re-run just the failed jobs (the flaky-failure tactic) without redoing the
+  // ones that passed.
+  if (persistent) {
     const prog = process.env["PI_WF_PROG"] ?? "work";
-    const how = args.name !== undefined ? `run ${args.name}` : args.file!;
-    process.stderr.write(`work: run ${runId} was interrupted — resume with: ${prog} ${how} --resume ${runId}\n`);
+    if (result.status === "interrupted") {
+      const how = args.name !== undefined ? `run ${args.name}` : args.file!;
+      process.stderr.write(`work: run ${runId} was interrupted — resume with: ${prog} ${how} --resume ${runId}\n`);
+    } else if (result.status === "failure") {
+      process.stderr.write(`work: run ${runId} had failed jobs — retry just those with: ${prog} retry ${runId}\n`);
+    }
   }
   process.exit(1);
 }

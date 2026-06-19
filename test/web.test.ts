@@ -110,6 +110,22 @@ describe("web server", () => {
     assert.match(html, new RegExp(server.token));
   });
 
+  it("serves the SPA shell for deep-link paths (history-API fallback), so they refresh/share", async () => {
+    for (const path of ["/runs/abc-123", "/workflows/greet", "/history", "/webhooks", "/schedules"]) {
+      const r = await fetch(`${base}${path}`);
+      assert.equal(r.status, 200, `${path} should serve the shell`);
+      assert.match(r.headers.get("content-type") ?? "", /text\/html/, `${path} is HTML`);
+      assert.match(await r.text(), /work-token/, `${path} is the SPA shell`);
+    }
+  });
+
+  it("keeps an unknown /api/* GET an honest JSON 404 (not the shell)", async () => {
+    const r = await fetch(`${base}/api/nope`);
+    assert.equal(r.status, 404);
+    assert.match(r.headers.get("content-type") ?? "", /application\/json/);
+    await r.text();
+  });
+
   it("POST /api/runs without the token is 403", async () => {
     const r = await fetch(`${base}/api/runs`, {
       method: "POST",

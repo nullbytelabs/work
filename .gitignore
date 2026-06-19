@@ -1,10 +1,15 @@
 node_modules/
 dist/
+
+# Playwright web-console e2e artifacts
+test-results/
+playwright-report/
+.playwright/
 *.log
 .DS_Store
 .pi-workflows-work/
 
-# Durable run store: the journal + history that both the web UI (`work --web`)
+# Durable run store: the journal + history that both the web UI (`work serve`)
 # and the CLI (`work run`, resumable via `--resume <id>`) write under a workspace.
 **/.workflows/db/
 
