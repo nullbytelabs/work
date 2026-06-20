@@ -41,6 +41,9 @@ work [--workspace <dir>] serve [--port <n>]
 
 # check the host can run sandboxed jobs
 work doctor [--json]
+
+# print the installed version
+work version
 ```
 
 ## Commands
@@ -434,10 +437,24 @@ It runs these checks:
 | **Config valid** | `work.json` (if present) parses and is well-formed. |
 | **`.workflows/` present** | Whether a project `.workflows/` directory exists. |
 
-Pass `--json` for machine-readable output.
+Pass `--json` for machine-readable output. The output leads with the installed
+version (a `version` field under `--json`) — handy to include when filing an issue.
 
 **Exit codes:** `0` — no hard failures (warnings are allowed); `1` — at least one
 failed check; `2` — a usage error (e.g. an unknown flag).
+
+### `work version`
+
+```bash
+work version       # also: work --version, work -v
+```
+
+Prints the installed version and exits. The output is the bare version string
+(e.g. `0.3.4`), so it reads cleanly in a script:
+
+```bash
+v=$(work version)
+```
 
 ## Flags
 
@@ -457,6 +474,7 @@ failed check; `2` — a usage error (e.g. an unknown flag).
 | `--steps` | `graph` | Expand each job into its ordered steps. |
 | `--json` | `doctor` | Emit machine-readable check results. |
 | `-h`, `--help` | any | Print usage and exit. |
+| `-v`, `--version` | (standalone) | Print the installed version and exit. |
 
 ## Output and exit status
 

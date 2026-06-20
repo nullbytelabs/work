@@ -28,6 +28,7 @@ import { runDoctor } from "./doctor/index.ts";
 import { runCreate } from "./scaffold/index.ts";
 import { runInit } from "./init/index.ts";
 import { UserFacingError } from "./errors.ts";
+import { VERSION } from "./version.ts";
 
 interface CliArgs {
   /** Ad-hoc: a path to a workflow file. */
@@ -316,7 +317,8 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] serve [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
       `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
-      `  ${prog} doctor [--json]\n`,
+      `  ${prog} doctor [--json]\n` +
+      `  ${prog} version\n`,
   );
 }
 
@@ -602,6 +604,13 @@ async function main(): Promise<void> {
   // (`--json`) from run/graph, so it owns its own parsing; everything else flows
   // through the unchanged `parseArgs` (run / graph / bare-file path).
   const argv = process.argv.slice(2);
+  // `version` / `--version` / `-v` — print the bare version and exit. Kept ahead
+  // of every other dispatch so it never depends on a workspace or config being
+  // resolvable, and bare (no prefix) so scripts can read it like `node -v`.
+  if (["version", "--version", "-v"].includes(argv[0]!)) {
+    process.stdout.write(`${VERSION}\n`);
+    process.exit(0);
+  }
   if (argv[0] === "doctor") {
     process.exit(await runDoctor(argv.slice(1)));
   }
