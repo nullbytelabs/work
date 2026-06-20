@@ -12,6 +12,7 @@
 import { CODE, paint, shouldColor } from "../tui/palette.ts";
 import { failUsage, prog } from "../cli-util.ts";
 import { type Check, type CheckStatus, type DoctorProbes, defaultProbes, overallStatus, runChecks } from "./checks.ts";
+import { VERSION } from "../version.ts";
 
 interface DoctorOptions {
   json: boolean;
@@ -76,6 +77,7 @@ export async function runDoctor(argv: string[], probes: DoctorProbes = defaultPr
     process.stdout.write(
       JSON.stringify(
         {
+          version: VERSION,
           ok: status !== "fail",
           status,
           checks: checks.map((c) => ({
@@ -92,7 +94,10 @@ export async function runDoctor(argv: string[], probes: DoctorProbes = defaultPr
     );
   } else {
     // Auto-plain when piped/redirected or --json; honour NO_COLOR/FORCE_COLOR.
-    process.stdout.write(renderText(checks, shouldColor(Boolean(process.stdout.isTTY))));
+    const color = shouldColor(Boolean(process.stdout.isTTY));
+    // Lead with the version so pasted doctor output answers "what version?" up front.
+    process.stdout.write(`  ${paint(color, CODE.dim, `work ${VERSION}`)}\n\n`);
+    process.stdout.write(renderText(checks, color));
   }
 
   return exitCode;
