@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
-import { parseRunsOn, type ExecutionPlan } from "./compiler/index.ts";
+import { parseRunsOn, expressionBodies, type ExecutionPlan } from "./compiler/index.ts";
 import { resolveImageConfig, ensureImageTag } from "./images/index.ts";
 import type { TargetFactory } from "./targets/index.ts";
 import { createWorkHandler, makeAgentEgressResolver } from "./agent/index.ts";
@@ -25,7 +25,8 @@ import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.t
 import { RunRepository } from "./persistence/runs.ts";
 import { RunEventRepository } from "./persistence/run-events.ts";
 import { WebPresenter } from "./web/web-presenter.ts";
-import { expandEnv, type PiWorkflowsConfig } from "./config/index.ts";
+import { expandEnvStrict, type PiWorkflowsConfig } from "./config/index.ts";
+import { UserFacingError } from "./errors.ts";
 import { startTelemetry, createTelemetryHooks, combineRunHooks, type TelemetryHandle } from "./observability/index.ts";
 
 export interface StartRunOptions {
@@ -84,12 +85,60 @@ export interface StartRunOptions {
   telemetry?: TelemetryHandle;
 }
 
+/** Every `secrets.<name>` a plan actually references, across `run:`/`env:`/`with:`. */
+function referencedSecrets(plan: ExecutionPlan): Set<string> {
+  const names = new Set<string>();
+  const scan = (tpl: string | undefined): void => {
+    if (!tpl) return;
+    for (const body of expressionBodies(tpl)) {
+      const m = /^secrets\.([A-Za-z_][\w-]*)$/.exec(body) ?? /^secrets\[\s*['"]([^'"]+)['"]\s*\]$/.exec(body);
+      if (m) names.add(m[1]!);
+    }
+  };
+  for (const job of Object.values(plan.jobs)) {
+    for (const step of job.steps) {
+      scan(step.run);
+      for (const v of Object.values(step.env)) scan(v);
+      for (const v of Object.values(step.with ?? {})) if (typeof v === "string") scan(v);
+    }
+  }
+  return names;
+}
+
 /**
- * Construct the agent-composed `AbsurdRuntime`, run the plan, and close. Returns
- * the `WorkflowResult`. `runtime.close()` always runs in `finally` — it's a no-op
- * for an injected `engine`, so this is safe for both the per-run-engine CLI path
- * and the shared-engine web path.
+ * Resolve the secrets a workflow actually references into a spread-ready runtime
+ * option, **failing fast** if any can't be fulfilled — undeclared in `work.json`,
+ * or declared as a `$VAR` that isn't set. Only *referenced* secrets are checked, so
+ * an unrelated declared secret with an unset var never blocks a run. Returns `{}`
+ * when the workflow references none (the option stays unset; the feature is inert).
  */
+function secretsOption(plan: ExecutionPlan, config?: PiWorkflowsConfig): { secrets?: Record<string, string> } {
+  const referenced = referencedSecrets(plan);
+  if (referenced.size === 0) return {};
+  const declared = config?.secrets ?? {};
+  const secrets: Record<string, string> = {};
+  const unfulfillable: string[] = [];
+  for (const name of referenced) {
+    if (!(name in declared)) {
+      unfulfillable.push(`  - ${name}: not declared in the secrets: block of work.json`);
+      continue;
+    }
+    try {
+      secrets[name] = expandEnvStrict(declared[name]!, `secret "${name}"`);
+    } catch (err) {
+      // expandEnvStrict throws a "$VAR is not set" UserFacingError — fold its
+      // message into the aggregated list so every problem shows at once.
+      unfulfillable.push(`  - ${name}: ${(err as Error).message.replace(/^secret "[^"]*" /, "")}`);
+    }
+  }
+  if (unfulfillable.length > 0) {
+    throw new UserFacingError(
+      `this workflow references secrets that can't be fulfilled:\n${unfulfillable.join("\n")}`,
+    );
+  }
+  return { secrets };
+}
+
 /**
  * Resolve the per-run work root. A caller-provided `workdir` is theirs to keep; a
  * temp one we mint is keyed by runId (stable across a resume) — NOT a fresh mkdtemp
@@ -98,19 +147,6 @@ export interface StartRunOptions {
  * those steps (build/, etc.) must still be on disk. `startRun` keeps a minted dir
  * for an `interrupted` (resumable) run and removes it only on a terminal outcome.
  */
-/**
- * Expand the `work.json` `secrets:` whitelist host-side into name → value, as a
- * spread-ready runtime option (`{}` when none are declared, so the option stays
- * unset and the feature is fully inert). A `$VAR` that isn't set expands to ""
- * (lenient — see the call site).
- */
-function secretsOption(config?: PiWorkflowsConfig): { secrets?: Record<string, string> } {
-  if (!config?.secrets) return {};
-  const secrets: Record<string, string> = {};
-  for (const [name, value] of Object.entries(config.secrets)) secrets[name] = expandEnv(value);
-  return { secrets };
-}
-
 async function prepareWorkRoot(workdir: string | undefined, runId: string): Promise<{ workRoot: string; ownsWorkRoot: boolean }> {
   if (workdir !== undefined) return { workRoot: resolve(workdir), ownsWorkRoot: false };
   const workRoot = join(tmpdir(), `work-${runId}`);
@@ -118,7 +154,18 @@ async function prepareWorkRoot(workdir: string | undefined, runId: string): Prom
   return { workRoot, ownsWorkRoot: true };
 }
 
+/**
+ * Construct the agent-composed `AbsurdRuntime`, run the plan, and close. Returns
+ * the `WorkflowResult`. `runtime.close()` always runs in `finally` — it's a no-op
+ * for an injected `engine`, so this is safe for both the per-run-engine CLI path
+ * and the shared-engine web path.
+ */
 export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
+  // Fail fast — before any work dir or engine — if the workflow references a
+  // `${{ secrets.* }}` that can't be fulfilled (undeclared, or an unset `$VAR`). A
+  // clear up-front error beats a confusing empty credential surfacing mid-run.
+  const secretsOpt = secretsOption(opts.plan, opts.config);
+
   // Resolve the run id up front so the journal, the history row, the runtime, AND
   // the work dir all key on the same id (a `--resume` reuses every one of them).
   const runId = opts.runId ?? randomUUID();
@@ -178,10 +225,10 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
       makeDatasourceEgressResolver(opts.config, opts.datasources ? { datasources: opts.datasources } : {}),
     ),
     // The `work.json` `secrets:` whitelist, `$ENV`-expanded host-side, for
-    // `${{ secrets.* }}` passthrough into a step's guest env (path b). Resolved here
-    // (the composition root) so the value never reaches the durable plan; an unset
-    // `$VAR` expands to "" (lenient, like other config refs — doctor warns later).
-    ...secretsOption(opts.config),
+    // `${{ secrets.* }}` passthrough into a step's guest env (path b). Computed
+    // up-front (above) so the value never reaches the durable plan and an
+    // unfulfillable secret fails the run before it starts.
+    ...secretsOpt,
     // Resolve a job's guest image: a `work:<image>` resolves to a build-config
     // (user images override bundled) and is built on first use, returning the
     // selector to boot; stock `gondolin` resolves to undefined. Tests inject a
