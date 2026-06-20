@@ -95,9 +95,8 @@ action can pull in libraries:
 
 It runs **in the job's micro-VM**, never on your host. The engine stages the action
 directory into the sandbox, installs its deps if any, then runs `node <main>` with
-`INPUT_*` set and `$WORK_OUTPUT` captured, and reads the declared outputs back. Like
-every `uses:` step it gets mediated egress (a plain `run:`-only job is
-deny-by-default).
+`INPUT_*` set and `$WORK_OUTPUT` captured, and reads the declared outputs back. It
+reaches the network freely, like every job (`npm install` for its deps just works).
 
 ::: info Not yet
 **Remote** sourcing (`owner/repo@ref`) and a `./path` reference form are planned;

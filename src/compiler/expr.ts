@@ -9,6 +9,11 @@
  *   - `steps.<id>.logs` / `.outcome` / `.exitCode`
  *                                   (resolved at RUNTIME — the step's captured
  *                                    combined output, result, and exit code)
+ *   - `secrets.<name>`              (resolved at RUNTIME from `work.json`'s
+ *                                    `secrets:` whitelist — a value materialized
+ *                                    into the guest env; see docs/egress-walk-back.md.
+ *                                    Deferred at compile so it never lands in the
+ *                                    durable plan/journal.)
  *   - `event` / `event.a.b.c` / `event.alerts[0].labels.severity`
  *                                   (resolved at COMPILE/INGRESS time from the
  *                                    webhook/dispatch payload — see below)
@@ -52,6 +57,14 @@ export interface ExprContext {
    * it does for `needs`/`steps`, so a later phase can supply it.
    */
   event?: Record<string, unknown>;
+  /**
+   * The `work.json` `secrets:` whitelist, resolved (`$ENV`-expanded) host-side and
+   * supplied only at RUNTIME. Present → `secrets.<name>` resolves to its value;
+   * absent (compile time) → deferred intact, so the value never bakes into the
+   * durable plan. A passthrough into the guest (path b) — for credentials a CLI
+   * must hold to sign (aws/gcloud/kubectl). See docs/egress-walk-back.md.
+   */
+  secrets?: Record<string, string>;
 }
 
 const EXPR = /\$\{\{\s*([^}]*?)\s*\}\}/g;
@@ -168,7 +181,20 @@ const resolveEvent: Resolver = (expr, ctx, whole) => {
   return stringifyValue(value);
 };
 
-const RESOLVERS: Resolver[] = [resolveInputs, resolveMatrix, resolveNeeds, resolveSteps, resolveEvent];
+const resolveSecrets: Resolver = (expr, ctx, whole) => {
+  const m = /^secrets\.([A-Za-z_][\w-]*)$/.exec(expr) ?? /^secrets\[\s*['"]([^'"]+)['"]\s*\]$/.exec(expr);
+  if (!m) return null;
+  if (!ctx.secrets) return whole; // defer to runtime — never bake a secret into the plan
+  const name = m[1]!;
+  if (!Object.prototype.hasOwnProperty.call(ctx.secrets, name)) {
+    throw new WorkflowCompileError(
+      `expression references undeclared secret "${name}" (add it to the secrets: block in work.json)`,
+    );
+  }
+  return ctx.secrets[name]!;
+};
+
+const RESOLVERS: Resolver[] = [resolveInputs, resolveMatrix, resolveNeeds, resolveSteps, resolveEvent, resolveSecrets];
 
 function resolveExpr(expr: string, ctx: ExprContext, whole: string): string {
   for (const resolve of RESOLVERS) {
@@ -176,7 +202,7 @@ function resolveExpr(expr: string, ctx: ExprContext, whole: string): string {
     if (out !== null) return out;
   }
   throw new WorkflowCompileError(
-    `unsupported expression "\${{ ${expr} }}" — supported: inputs.<name>, needs.<job>.outputs.<name>, steps.<id>.outputs.<key>, steps.<id>.(logs|outcome|exitCode), event.<path>`,
+    `unsupported expression "\${{ ${expr} }}" — supported: inputs.<name>, needs.<job>.outputs.<name>, steps.<id>.outputs.<key>, steps.<id>.(logs|outcome|exitCode), event.<path>, secrets.<name>`,
   );
 }
 

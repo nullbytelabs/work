@@ -1,6 +1,12 @@
 # Walk back the egress theater; broker secrets through `work.json`
 
-**Status:** design draft. The companion to
+**Status:** IMPLEMENTED (Slices A + B). Egress is open for every job
+(`src/agent/egress.ts`) and `${{ secrets.* }}` resolves from a `work.json`
+`secrets:` whitelist at runtime (`src/compiler/expr.ts`, `src/config/index.ts`,
+`src/run.ts`, `src/runtime/absurd/runtime.ts`), covered by `test/secrets.test.ts`
+and validated on a real gondolin VM (a pure `run:` job reached the network and read
+a secret in-guest). §4c is decided; §6 Slice C (`work create secret`) and §7's
+nice-to-haves remain. The companion to
 [`secrets-management-and-injection.md`](secrets-management-and-injection.md): that
 doc covers *acquiring* a secret from an external store; this one covers two
 decisions — **(1) stop walling egress on jobs**, and **(2) let `work.json` whitelist

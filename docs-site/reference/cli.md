@@ -153,8 +153,9 @@ work create datasource <name> [--preset <id>] [--url <baseUrl>] [--force] [--dry
 Scaffolds a [`datasources.<name>`](./configuration#datasources) entry, **merged
 into** the project's `work.json` (the rest of the file is preserved). A datasource
 is a named external HTTP service a plain `run:` step can reach with a
-header-injected token it never actually sees: egress is deny-by-default and the
-secret is swapped in host-side, scoped to the datasource's host.
+header-injected token it never actually sees: the secret is swapped in host-side,
+scoped to the datasource's host, so it never enters the guest. (For a credential a
+CLI must hold to sign, use [`secrets`](./configuration#secrets) instead.)
 
 The generated entry is a safe skeleton, not a live connection:
 

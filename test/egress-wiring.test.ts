@@ -73,18 +73,22 @@ async function runAndCapture(datasources?: string[]): Promise<CapturedNet | unde
 }
 
 describe("datasource egress wiring", () => {
-  it("grants a scoped datasource's host + injected token to a plain run job", async () => {
+  it("open egress, yet a scoped datasource's token stays host-scoped", async () => {
+    // Egress is open for every job now (docs/egress-walk-back.md), so the allowlist
+    // is `["*"]` — but the datasource token is STILL injected scoped to its one host
+    // (the header-swap, not the allowlist, is what isolates the credential). That
+    // scoping is the property this asserts: open network, host-pinned secret.
     const net = await runAndCapture(["grafana"]);
     assert.ok(net, "the `fetch` job's target should have been built");
-    assert.deepEqual(net.allowedHosts, ["grafana.internal"]);
+    assert.deepEqual(net.allowedHosts, ["*"]);
     assert.ok(net.secrets, "expected an injected secret");
     assert.deepEqual(net.secrets["GRAFANA_TOKEN"], { hosts: ["grafana.internal"], value: "tok-123" });
   });
 
-  it("deny-by-default: with no datasource scope, a plain run job gets no egress", async () => {
-    const net = await runAndCapture(); // no scope, no agent steps → no network
+  it("a plain run job with no datasource scope gets open egress and no secret", async () => {
+    const net = await runAndCapture(); // no scope, no agent steps
     assert.ok(net, "the `fetch` job's target should still have been built");
-    assert.equal(net.allowedHosts, undefined);
-    assert.equal(net.secrets, undefined);
+    assert.deepEqual(net.allowedHosts, ["*"], "egress is open for every job");
+    assert.equal(net.secrets, undefined, "no datasource scoped → no injected token");
   });
 });

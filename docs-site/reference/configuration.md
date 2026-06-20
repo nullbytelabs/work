@@ -97,12 +97,14 @@ A map of model alias → model definition. The alias is what you reference (and 
 
 ## `datasources`
 
-A map of datasource name → an external HTTP service a plain `run:` step is allowed
-to reach, with a header secret injected **host-side**. Like a provider's `apiKey`,
-the `token` is operator-owned and supports `$VAR` / `${VAR}` expansion, so the file
-need not hold it. Egress is **deny-by-default**: only the host derived from
-`baseUrl` is allowlisted, and the guest sees a placeholder env var, never the real
-token.
+A map of datasource name → an external HTTP service a `run:` step reaches with a
+header secret injected **host-side**. Like a provider's `apiKey`, the `token` is
+operator-owned and supports `$VAR` / `${VAR}` expansion, so the file need not hold
+it. The point is **token isolation**: the guest sees a placeholder env var, never
+the real token — the engine swaps it into the outbound header for the datasource's
+host only. Reach for a datasource when a token must **never** enter the guest; for a
+credential a CLI must hold to sign (`aws`/`kubectl`), use [`secrets`](#secrets)
+instead.
 
 ```json
 {
@@ -119,7 +121,7 @@ token.
 
 | Field | Type | Notes |
 |---|---|---|
-| `baseUrl` | string | **Required.** Its host is the egress allowlist entry for this datasource. |
+| `baseUrl` | string | **Required.** Its host scopes the injected token — the secret rides the outbound header for this host only. |
 | `token` | string | Secret token; literal, or `$VAR` / `${VAR}`. Injected into the outbound request host-side. |
 | `tokenHeader` | string | Outbound header the token rides in (defaults to the target's default, e.g. `Authorization`). |
 | `tokenEnv` | string | Env-var name the `run:` step references for the placeholder (defaults to `<NAME>_TOKEN`). |
@@ -128,6 +130,59 @@ token.
 Scoping is per run: a webhook-triggered run gets the hook's `datasources` list; a
 CLI run opts in with `--datasources <a,b>`. Without either, jobs get no datasource
 access.
+
+## `secrets`
+
+A flat whitelist of host secrets a workflow may address as
+`${{ secrets.<name> }}`. Each value is a literal **or** a `$VAR` / `${VAR}` env
+reference (the same pattern as a model `apiKey` or a datasource `token`), expanded
+host-side at run time. A whitelisted secret is materialized **into the step's guest
+environment** — so a CLI that must hold the credential to sign a request
+(`aws`, `gcloud`, `kubectl`) just works. Only listed names are addressable; the file
+is the explicit boundary between secrets on your host and secrets a guest may see.
+
+```json
+{
+  "secrets": {
+    "AWS_ACCESS_KEY_ID": "$AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY": "$AWS_SECRET_ACCESS_KEY",
+    "DEPLOY_PAT": "ghp_xxx"
+  }
+}
+```
+
+```yaml
+jobs:
+  deploy:
+    steps:
+      - run: aws eks update-kubeconfig --name prod
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - run: kubectl get pods
+```
+
+`${{ secrets.* }}` resolves at run time (it never bakes into the durable plan or run
+history) and works in `run:`, `env:`, and a step's `with:` — including a
+`work/agent` step, when you intentionally hand an agent a credential. It is **not**
+available in `if:` conditions (a condition can't branch on a secret).
+
+::: tip secrets vs datasources
+Both pull a credential from `work.json`. A **datasource** keeps the token *out* of
+the guest (header-swap, host-side) — best when the workload only needs an HTTP call
+made on its behalf. **secrets** put the value *in* the guest — necessary when the
+tool itself must hold the credential (client-side signing: AWS SigV4, kubeconfig).
+The micro-VM still isolates your host either way.
+:::
+
+::: info Egress is open
+Jobs reach the network freely — there's no egress allowlist to maintain. The
+sandbox's job is isolating your **host** (filesystem, processes), and provider
+tokens are kept out of agent calls by the header-swap above; walling off the
+network on a `run:` job you wrote yourself only added friction, so it's gone.
+Reaching *internal/private* addresses still takes an explicit datasource
+[`resolve`](#datasources) pin.
+:::
 
 ## `webhooks`
 

@@ -30,21 +30,23 @@ const safeText = fc.array(fc.constantFrom(...[..."abc XYZ-/.".split("")]), { max
 
 // ── P1: deferred roots are left intact when their context is absent ──────────
 
-// Builders for the three RUNTIME-resolved roots (resolveNeeds/resolveSteps/resolveEvent),
-// each of which defers (returns the verbatim span) when its context is missing.
+// Builders for the RUNTIME-resolved roots (resolveNeeds/resolveSteps/resolveEvent/
+// resolveSecrets), each of which defers (returns the verbatim span) when its
+// context is missing.
 const deferredExpr = fc.oneof(
   fc.tuple(identifier, identifier).map(([job, name]) => `needs.${job}.outputs.${name}`),
   fc.tuple(identifier, identifier).map(([id, key]) => `steps.${id}.outputs.${key}`),
   fc.tuple(identifier, fc.constantFrom("logs", "outcome", "exitCode")).map(([id, b]) => `steps.${id}.${b}`),
   fc.constant("event"),
   fc.tuple(identifier, identifier).map(([a, b]) => `event.${a}.${b}`),
+  identifier.map((name) => `secrets.${name}`),
 );
 
 test("P1 — a deferred root with absent context is left verbatim (defer, don't error)", () => {
   fc.assert(
     fc.property(deferredExpr, safeText, safeText, (expr, pre, post) => {
       const tpl = `${pre}\${{ ${expr} }}${post}`;
-      // ctx supplies none of needs/steps/event → every match must defer, not throw.
+      // ctx supplies none of needs/steps/event/secrets → every match must defer, not throw.
       assert.equal(interpolate(tpl, {}), tpl);
     }),
     { numRuns: 500 },
@@ -53,9 +55,9 @@ test("P1 — a deferred root with absent context is left verbatim (defer, don't 
 
 // ── P2: an unknown root always throws, never silently passes through ─────────
 
-// Roots the resolver chain does NOT recognize. (The five known roots are
-// inputs/matrix/needs/steps/event.)
-const unknownRoot = fc.constantFrom("github", "secrets", "vars", "env", "runner", "job", "strategy", "foo", "bar", "x");
+// Roots the resolver chain does NOT recognize. (The known roots are
+// inputs/matrix/needs/steps/event/secrets.)
+const unknownRoot = fc.constantFrom("github", "vars", "env", "runner", "job", "strategy", "foo", "bar", "x");
 
 test("P2 — an unknown root throws WorkflowCompileError", () => {
   fc.assert(

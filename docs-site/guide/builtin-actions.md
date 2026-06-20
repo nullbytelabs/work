@@ -2,9 +2,9 @@
 
 The engine ships a few actions under the reserved **`work/`** scheme — common
 setup steps you'd otherwise hand-write. They behave like any [action](./actions),
-with two conveniences: they're always available (no `.workflows/actions/` package
-to author), and a job that uses one is **granted mediated egress automatically**
-(most jobs are deny-by-default, but these need the network).
+with one convenience: they're always available (no `.workflows/actions/` package
+to author). Jobs reach the network freely, so these — which need a git/download
+host — work without any egress setup.
 
 | `uses:` | What it does |
 |---|---|

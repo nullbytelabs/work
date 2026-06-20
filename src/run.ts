@@ -25,7 +25,7 @@ import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.t
 import { RunRepository } from "./persistence/runs.ts";
 import { RunEventRepository } from "./persistence/run-events.ts";
 import { WebPresenter } from "./web/web-presenter.ts";
-import type { PiWorkflowsConfig } from "./config/index.ts";
+import { expandEnv, type PiWorkflowsConfig } from "./config/index.ts";
 import { startTelemetry, createTelemetryHooks, combineRunHooks, type TelemetryHandle } from "./observability/index.ts";
 
 export interface StartRunOptions {
@@ -98,6 +98,19 @@ export interface StartRunOptions {
  * those steps (build/, etc.) must still be on disk. `startRun` keeps a minted dir
  * for an `interrupted` (resumable) run and removes it only on a terminal outcome.
  */
+/**
+ * Expand the `work.json` `secrets:` whitelist host-side into name → value, as a
+ * spread-ready runtime option (`{}` when none are declared, so the option stays
+ * unset and the feature is fully inert). A `$VAR` that isn't set expands to ""
+ * (lenient — see the call site).
+ */
+function secretsOption(config?: PiWorkflowsConfig): { secrets?: Record<string, string> } {
+  if (!config?.secrets) return {};
+  const secrets: Record<string, string> = {};
+  for (const [name, value] of Object.entries(config.secrets)) secrets[name] = expandEnv(value);
+  return { secrets };
+}
+
 async function prepareWorkRoot(workdir: string | undefined, runId: string): Promise<{ workRoot: string; ownsWorkRoot: boolean }> {
   if (workdir !== undefined) return { workRoot: resolve(workdir), ownsWorkRoot: false };
   const workRoot = join(tmpdir(), `work-${runId}`);
@@ -164,6 +177,11 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
       makeAgentEgressResolver(opts.config),
       makeDatasourceEgressResolver(opts.config, opts.datasources ? { datasources: opts.datasources } : {}),
     ),
+    // The `work.json` `secrets:` whitelist, `$ENV`-expanded host-side, for
+    // `${{ secrets.* }}` passthrough into a step's guest env (path b). Resolved here
+    // (the composition root) so the value never reaches the durable plan; an unset
+    // `$VAR` expands to "" (lenient, like other config refs — doctor warns later).
+    ...secretsOption(opts.config),
     // Resolve a job's guest image: a `work:<image>` resolves to a build-config
     // (user images override bundled) and is built on first use, returning the
     // selector to boot; stock `gondolin` resolves to undefined. Tests inject a
