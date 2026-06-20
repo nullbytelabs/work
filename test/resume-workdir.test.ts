@@ -16,7 +16,7 @@ import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { startRun } from "../src/run.ts";
 import type { ExecutionTarget, TargetFactory } from "../src/targets/index.ts";
-import { HostTarget } from "./_support.ts";
+import { HostTarget, hostTargetFactory } from "./_support.ts";
 
 // One job, two steps: step 1 writes `build/marker` into the job workdir; step 2
 // reads it back. The target tears step 2 out the FIRST time (platform stop after
@@ -66,8 +66,11 @@ describe("crash-resume preserves the per-job work dir", () => {
       // The work dir must NOT have been cleaned up — resume needs build/marker.
       await assert.doesNotReject(access(join(expectedWorkRoot, "build-test", "build", "marker")), "build/ must survive an interrupted run");
 
-      // Phase 2 — resume on the same dataDir + runId with a healthy target.
-      const res2 = await startRun({ plan, runId, dataDir });
+      // Phase 2 — resume on the same dataDir + runId with a healthy target. Use the
+      // host double (not the default GondolinTarget): this test pins work-dir survival
+      // across the startRun lifecycle, not VM behavior, so resume must not boot/build a
+      // real micro-VM (a nested image build has no lz4 in the work:nested guest).
+      const res2 = await startRun({ plan, runId, dataDir, makeTarget: hostTargetFactory });
       assert.equal(res2.status, "success", "the resumed test step finds build/marker and succeeds");
       const test = res2.jobs[0]!.steps.find((s) => s.name.endsWith("/test"))!;
       assert.equal(test.stdout.trim(), "ok", "the memoized build step's file was present on resume");
