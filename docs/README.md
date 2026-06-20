@@ -38,6 +38,12 @@ the rationale is the point.
 - [`secrets-management-and-injection.md`](secrets-management-and-injection.md) —
   roadmap for brokering secrets from external stores (auth models, backend
   evaluation, phasing).
+- [`egress-walk-back.md`](egress-walk-back.md) — walking back the
+  deny-by-default egress wall (it's theater: agent and checkout jobs already get
+  allow-all, and the host-side header-swap — not the allowlist — is what isolates
+  tokens), plus a `work.json` `secrets:` passthrough whitelist (`${{ secrets.* }}`,
+  plaintext or `$ENV` ref) that finally makes `aws`/`gcloud`/`kubectl` usable
+  in-guest. A control people route around has negative value.
 
 ## Workflow surface
 
