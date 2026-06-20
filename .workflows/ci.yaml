@@ -20,3 +20,8 @@ jobs:
   test:
     needs: [checks]
     uses: workflow/test # ./workflows/test.yaml
+
+  # Render the docs-site in a VM so a markdown break fails the gate, not the deploy.
+  # Independent of checks/test (its own dependency tree), so it runs in parallel.
+  docs:
+    uses: workflow/docs # ./workflows/docs.yaml
