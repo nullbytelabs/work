@@ -139,31 +139,25 @@ This is path (b) from the companion doc (value genuinely in-guest), now with a
 first-class source instead of a hardcoded literal. It's the right and only tool for
 the client-signing CLIs of §3.
 
-### 4c. The one thing to get right about agents
+### 4c. Agents may reference secrets — by intent (DECIDED)
 
 The model/datasource credentials an **agent** uses still ride header-swap and never
 enter its guest — unchanged, automatic, no operator action. The new `secrets:`
 passthrough is a *separate*, operator-whitelisted set (your `aws` keys, a deploy
-PAT) meant for `run:` steps.
+PAT) meant chiefly for `run:` steps.
 
-Open question, and the crux of preserving "provider tokens out of agent calls":
-**should `${{ secrets.* }}` be referenceable inside a `work/agent` step at all?**
-Two postures (decide in §6):
+**Decision: `${{ secrets.* }}` is referenceable anywhere expressions are allowed,
+including inside a `work/agent` step.** Reaching one there is two deliberate acts —
+whitelisting it in `work.json` *and* referencing it — so it's the operator's
+intentional call, not a footgun the engine should pre-empt with a compile error. No
+new ceremony.
 
-- **Allow (operator's call).** It's whitelisted in `work.json` *and* explicitly
-  referenced — that's two deliberate acts. Minimal ceremony; matches "stop the
-  shenanigans." Risk: a raw credential lands in an agent's guest where the agent
-  could misuse or echo it.
-- **Refuse in agent steps (compile-time).** `${{ secrets.* }}` resolves only for
-  `run:`/builtin steps; referencing it from a `work/agent` step is a
-  `UserFacingError`. Keeps raw secrets out of agent guests by construction; the
-  agent still gets brokered credentials via datasource header-swap. One guardrail,
-  not a wall — but it *is* new ceremony.
-
-Recommendation: **allow it, document the header-swap/datasource path as the safer
-default for handing an agent a credential.** Lightest touch; the whitelist is
-already the boundary; the automatic model-key isolation (the thing you actually
-care about) is unaffected either way.
+This doesn't weaken the property we care about: the model key an agent uses is
+isolated by header-swap regardless, and a secret only reaches an agent when an
+operator explicitly hands it over. Docs should still present the datasource
+**header-swap** path as the *recommended* way to give an agent a credential it
+shouldn't see in plaintext (path a) — but referencing `secrets.*` from an agent step
+is a supported, intentional choice when in-guest is genuinely what you want.
 
 ---
 
@@ -212,21 +206,22 @@ Each slice is independently shippable and additive.
 
 ## 7. Open questions
 
-1. **§4c — `${{ secrets.* }}` inside `work/agent` steps:** allow (recommended) or
-   refuse-by-compile? This is the only decision that touches the "tokens out of
-   agents" property; everything else (model key) is safe regardless.
-2. **Plaintext vs `$ENV`-only in `work.json`.** Allow literal plaintext values (his
-   call: yes), or force `$ENV`/store references to discourage committing secrets?
-   `work.json` is gitignored, so plaintext is contained — but a plaintext value is
-   one careless `git add -f` from exposure. Lean: allow plaintext, lint/doctor warns.
-3. **Resolution sites.** Confirm `${{ secrets.* }}` is allowed in `env:`, `run:`,
+> §4c — whether `${{ secrets.* }}` may be referenced inside a `work/agent` step — is
+> **decided: yes, by intent** (see §4c). The items below remain.
+
+1. **Plaintext vs `$ENV`-only in `work.json`.** Allow literal plaintext values
+   (decided: yes), or force `$ENV`/store references to discourage committing
+   secrets? `work.json` is gitignored, so plaintext is contained — but a plaintext
+   value is one careless `git add -f` from exposure. Lean: allow plaintext,
+   lint/doctor warns.
+2. **Resolution sites.** Confirm `${{ secrets.* }}` is allowed in `env:`, `run:`,
    `with:` — and deliberately **not** in `if:`/conditions (companion §6b: a
    condition mustn't branch on a secret and leak it via skip patterns).
-4. **Validate against a real VM.** Egress/secret behavior must be checked on a real
+3. **Validate against a real VM.** Egress/secret behavior must be checked on a real
    gondolin run — the `HostTarget` double implements neither the header-swap nor the
-   deny wall (project rule). A trusted-job `aws`/`kubectl` happy-path e2e is the
+   deny wall (project rule). A `secrets:`-driven `aws`/`kubectl` happy-path e2e is the
    acceptance gate.
-5. **Tailnet reachability is orthogonal.** Reaching `eks-prod.ts.net` means the
+4. **Tailnet reachability is orthogonal.** Reaching `eks-prod.ts.net` means the
    *engine host* dials it after SNI re-resolution — kubectl-against-the-fleet needs
    the engine on the tailnet regardless of this design. "Egress is open" ≠ "the
    target is routable."
