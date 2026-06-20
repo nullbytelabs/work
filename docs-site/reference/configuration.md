@@ -167,6 +167,12 @@ history) and works in `run:`, `env:`, and a step's `with:` — including a
 `work/agent` step, when you intentionally hand an agent a credential. It is **not**
 available in `if:` conditions (a condition can't branch on a secret).
 
+If a workflow references a secret that **can't be fulfilled** — not declared here,
+or declared as a `$VAR` that isn't set in the environment — the run **fails up
+front** with a message naming each one, before any job starts. Only secrets the
+workflow actually references are checked, so an unrelated declared secret with an
+unset var never blocks a run.
+
 ::: tip secrets vs datasources
 Both pull a credential from `work.json`. A **datasource** keeps the token *out* of
 the guest (header-swap, host-side) — best when the workload only needs an HTTP call

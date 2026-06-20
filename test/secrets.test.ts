@@ -24,6 +24,7 @@ import { compile } from "../src/compiler/index.ts";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "../src/runtime/index.ts";
 import { startRun } from "../src/run.ts";
+import { UserFacingError } from "../src/errors.ts";
 import { hostTargetFactory } from "./_support.ts";
 
 describe("secrets — expression resolution", () => {
@@ -121,5 +122,49 @@ jobs:
     } finally {
       await rm(workRoot, { recursive: true, force: true });
     }
+  });
+
+  it("only referenced secrets are checked — an unused, unfulfillable one doesn't block", async () => {
+    // USED is referenced + fulfillable; UNUSED is declared with an unset $VAR but
+    // never referenced, so it must not fail the run.
+    const config = parsePartialConfig({
+      providers: {},
+      models: {},
+      secrets: { USED: "literal-ok", UNUSED: "$DEFINITELY_UNSET_VALIDATION_VAR" },
+    });
+    const plan = compile(parseWorkflow(`name: u\njobs:\n  go:\n    runs-on: gondolin\n    steps: [{ run: 'echo \${{ secrets.USED }}' }]`));
+    const workRoot = await mkdtemp(join(tmpdir(), "pi-wf-sec-"));
+    try {
+      const result = await startRun({ plan, workdir: workRoot, engine, config, makeTarget: hostTargetFactory });
+      assert.equal(result.status, "success");
+    } finally {
+      await rm(workRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("secrets — unfulfillable references fail fast", () => {
+  // The throw is the first thing startRun does, before any engine/work dir — so
+  // these need no engine and leak nothing.
+  const planUsing = (ref: string) =>
+    compile(parseWorkflow(`name: x\njobs:\n  go:\n    runs-on: gondolin\n    steps: [{ run: "echo ${ref}" }]`));
+
+  it("rejects with a clear message when a referenced secret isn't declared", async () => {
+    const config = parsePartialConfig({ providers: {}, models: {}, secrets: {} });
+    await assert.rejects(
+      () => startRun({ plan: planUsing("${{ secrets.MISSING }}"), config, makeTarget: hostTargetFactory }),
+      (err: Error) => err instanceof UserFacingError && /MISSING: not declared in the secrets: block/.test(err.message),
+    );
+  });
+
+  it("rejects with a clear message when a declared secret's $VAR is unset", async () => {
+    const config = parsePartialConfig({ providers: {}, models: {}, secrets: { TOK: "$DEFINITELY_UNSET_VALIDATION_VAR" } });
+    await assert.rejects(
+      () => startRun({ plan: planUsing("${{ secrets.TOK }}"), config, makeTarget: hostTargetFactory }),
+      (err: Error) =>
+        err instanceof UserFacingError &&
+        /can't be fulfilled/.test(err.message) &&
+        /TOK:.*DEFINITELY_UNSET_VALIDATION_VAR.*not set/.test(err.message),
+    );
   });
 });
