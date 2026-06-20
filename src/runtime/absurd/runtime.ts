@@ -141,6 +141,13 @@ export interface AbsurdRuntimeOptions {
    */
   resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
   /**
+   * The `work.json` `secrets:` whitelist, already `$ENV`-expanded host-side by the
+   * composition root. Supplied to step expression resolution at RUNTIME so
+   * `${{ secrets.<name> }}` materializes into a step's guest env (path b) without
+   * the value ever baking into the durable plan/journal. See docs/egress-walk-back.md.
+   */
+  secrets?: Record<string, string>;
+  /**
    * Resolve a job's guest image from its `runs-on` — an image selector for a
    * `work:<image>` (built on first use), or `undefined` for the stock guest. The
    * composition root supplies it (it knows the workspace + builder); the core just
@@ -170,6 +177,8 @@ interface JobDeps {
   event?: Record<string, unknown>;
   /** Optional per-job sandbox network policy (allowlist + secrets). */
   resolveJobNetwork?: (job: PlannedJob) => JobNetwork | undefined;
+  /** Expanded `secrets:` whitelist, for `${{ secrets.* }}` resolution at runtime. */
+  secrets?: Record<string, string>;
   /** Optional resolver for a job's guest image (a `work:<image>` selector). */
   resolveImagePath?: (runsOn: string) => Promise<string | undefined>;
   /** Builds the ExecutionTarget for a job's `runs-on`. */
@@ -184,6 +193,7 @@ export class AbsurdRuntime implements Runtime {
   private readonly maxConcurrency: number | undefined;
   private readonly usesHandlers: UsesHandler[];
   private readonly resolveJobNetwork: ((job: PlannedJob) => JobNetwork | undefined) | undefined;
+  private readonly secrets: Record<string, string> | undefined;
   private readonly resolveImagePath: ((runsOn: string) => Promise<string | undefined>) | undefined;
   private readonly makeTarget: TargetFactory;
 
@@ -194,6 +204,7 @@ export class AbsurdRuntime implements Runtime {
     this.maxConcurrency = opts.maxConcurrency;
     this.usesHandlers = opts.usesHandlers ?? [];
     this.resolveJobNetwork = opts.resolveJobNetwork;
+    this.secrets = opts.secrets;
     this.resolveImagePath = opts.resolveImagePath;
     this.makeTarget = opts.makeTarget ?? defaultMakeTarget;
   }
@@ -213,6 +224,7 @@ export class AbsurdRuntime implements Runtime {
       makeTarget: this.makeTarget,
       ...(plan.event ? { event: plan.event } : {}),
       ...(this.resolveJobNetwork ? { resolveJobNetwork: this.resolveJobNetwork } : {}),
+      ...(this.secrets ? { secrets: this.secrets } : {}),
       ...(this.resolveImagePath ? { resolveImagePath: this.resolveImagePath } : {}),
     };
 
@@ -409,8 +421,13 @@ async function runOrchestration(args: {
   return { name: plan.name, status: jobs.some((j) => j.status === "failure") ? "failure" : "success", jobs };
 }
 
-/** Expression context shape threaded to the step runners (needs + step outputs). */
-type StepExprCtx = { needs: NeedsContext; steps: Record<string, StepBag & { result?: string }> };
+/** Expression context shape threaded to the step runners (needs + step outputs +
+ *  the resolved `secrets:` whitelist for `${{ secrets.* }}`). */
+type StepExprCtx = {
+  needs: NeedsContext;
+  steps: Record<string, StepBag & { result?: string }>;
+  secrets?: Record<string, string>;
+};
 
 /**
  * Stage the job's checkout into `workdir` like a fresh `git checkout`: never carry
@@ -538,7 +555,10 @@ async function runSteps(
   const stepOutputs: Record<string, StepBag & { result?: string }> = {};
   let failed = false;
 
-  const exprCtx = (): StepExprCtx => ({ needs, steps: stepOutputs });
+  // Secrets resolve in run/env/with (path b); deliberately NOT threaded into the
+  // condition context or job-output interpolation, so a secret can't leak via a
+  // skip-pattern branch or persist into a journaled job output.
+  const exprCtx = (): StepExprCtx => ({ needs, steps: stepOutputs, ...(deps.secrets ? { secrets: deps.secrets } : {}) });
 
   /** Build the condition context as of "now" (current failed-state + outputs). */
   const condCtx = (): ConditionContext => ({
@@ -699,7 +719,7 @@ async function runShellStep(
   target: ExecutionTarget,
   workdir: string,
   ctx: RunContext,
-  expr: { needs: NeedsContext; steps: Record<string, StepBag & { result?: string }> },
+  expr: StepExprCtx,
 ): Promise<StepResult> {
   const command = interpolate(step.run!, expr);
   const env: Record<string, string> = {};
@@ -747,7 +767,7 @@ async function runUsesStep(
   target: ExecutionTarget,
   workdir: string,
   deps: JobDeps,
-  expr: { needs: NeedsContext; steps: Record<string, StepBag & { result?: string }> },
+  expr: StepExprCtx,
 ): Promise<StepResult> {
   const emit = (chunk: { stream: "stdout" | "stderr"; text: string }) =>
     deps.ctx.hooks?.onOutput?.(job.id, step.name, chunk);

@@ -255,7 +255,7 @@ jobs:
     });
   });
 
-  it("grants no egress to a job with no uses: step; grants network (but no key) without config", () => {
+  it("grants open egress (but no key) to a job with no uses: step, and without config", () => {
     const resolveWith = makeAgentEgressResolver(config);
     const resolveNoCfg = makeAgentEgressResolver(undefined);
 
@@ -263,8 +263,11 @@ jobs:
       parseWorkflow(`name: w\njobs:\n  go:\n    runs-on: gondolin\n    steps: [{ run: "true" }]`),
     );
 
-    // No uses: step (only run:) → deny-by-default, no mediated egress.
-    assert.equal(resolveWith(noUsesPlan.jobs["go"]!), undefined);
+    // No uses: step (only run:) → open egress, no model key (the wall was walked
+    // back; the header-swap, not the allowlist, is the token control).
+    const plainNet = resolveWith(noUsesPlan.jobs["go"]!);
+    assert.deepEqual(plainNet?.allowedHosts, ["*"]);
+    assert.equal(plainNet?.secrets, undefined);
     // A work/agent job without config still needs network (to npm-install Pi), but
     // there is no model key to inject.
     const net = resolveNoCfg(gondolinAgentPlan().jobs["review"]!);

@@ -68,9 +68,14 @@ describe("agent model-key egress resolution", () => {
     assert.equal(keyForHost(FIREWORKS_HOST), "fireworks-key-FFF", "Fireworks host must carry the Fireworks key");
   });
 
-  it("a job with no uses: steps stays deny-by-default (no network)", () => {
+  it("a plain run: job gets open egress and no injected key", () => {
+    // The egress wall was walked back (docs/egress-walk-back.md): every job gets
+    // allow-all public egress, so a pure `run:` job (aws/kubectl/curl) is no longer
+    // dead-ended. No model step → no injected key (the header-swap stays the control).
     const resolve = makeAgentEgressResolver(config);
     const net = resolve(job("plain", [{ name: "plain/echo", run: "echo hi", env: {} }]));
-    assert.equal(net, undefined, "a pure run: job gets no mediated egress");
+    assert.ok(net, "every job now gets a network");
+    assert.deepEqual(net.allowedHosts, ["*"], "egress is open for every job");
+    assert.equal(net.secrets, undefined, "no model step → no key injected");
   });
 });

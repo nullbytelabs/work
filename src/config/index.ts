@@ -115,6 +115,16 @@ export interface PiWorkflowsConfig {
   defaultModel?: string;
   /** Named external data sources a plain `run:` step may reach (egress + header secret). */
   datasources?: Record<string, DatasourceConfig>;
+  /**
+   * Whitelist of host secrets a workflow may address as `${{ secrets.<name>}}`.
+   * Each value is a literal or a `$VAR`/`${VAR}` env reference (the
+   * `$FIREWORKS_TOKEN`/`$GRAFANA_TOKEN` pattern). Whitelisted secrets flow into the
+   * guest env (path b — for CLIs that must hold the credential to sign, like
+   * aws/gcloud/kubectl); anything not listed is unaddressable. See
+   * docs/egress-walk-back.md. (For a token you want *never* in the guest, prefer a
+   * datasource — host-side header-swap.)
+   */
+  secrets?: Record<string, string>;
   /** Named webhook receivers (operator-owned; referenced by `on: webhook`). */
   webhooks?: Record<string, WebhookConfig>;
   /** OpenTelemetry traces + metrics, pushed over OTLP to a collector. */
@@ -185,6 +195,8 @@ export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
   // in `validateConfig` post-merge, matching the providers/models philosophy.
   const datasources = parseDatasources(raw);
   if (datasources) config.datasources = datasources;
+  const secrets = parseSecrets(raw);
+  if (secrets) config.secrets = secrets;
   const webhooks = parseWebhooks(raw);
   if (webhooks) config.webhooks = webhooks;
   const observability = parseObservability(raw);
@@ -259,6 +271,25 @@ function parseDatasources(raw: Record<string, unknown>): Record<string, Datasour
     datasources[name] = dc;
   }
   return datasources;
+}
+
+/**
+ * `secrets:` — a flat name → value whitelist. Each value is a string (literal or
+ * `$VAR`/`${VAR}` env reference, expanded host-side at run time). Names are the
+ * keys a workflow addresses as `${{ secrets.<name> }}`. Shape-only here; `$ENV`
+ * expansion happens at injection time (`run.ts`), like a datasource token.
+ */
+function parseSecrets(raw: Record<string, unknown>): Record<string, string> | undefined {
+  if (raw.secrets === undefined) return undefined;
+  if (!isObject(raw.secrets)) throw new UserFacingError("config.secrets must be an object of name → value strings");
+  const secrets: Record<string, string> = {};
+  for (const [name, v] of Object.entries(raw.secrets)) {
+    if (typeof v !== "string") {
+      throw new UserFacingError(`config.secrets.${name} must be a string (a literal or a $VAR env reference)`);
+    }
+    secrets[name] = v;
+  }
+  return secrets;
 }
 
 function parseWebhooks(raw: Record<string, unknown>): Record<string, WebhookConfig> | undefined {
@@ -359,6 +390,9 @@ export function mergeConfig(base: PiWorkflowsConfig, over: PiWorkflowsConfig): P
   // set the merged key when at least one layer supplied it).
   if (base.datasources || over.datasources) {
     merged.datasources = { ...base.datasources, ...over.datasources };
+  }
+  if (base.secrets || over.secrets) {
+    merged.secrets = { ...base.secrets, ...over.secrets };
   }
   if (base.webhooks || over.webhooks) {
     merged.webhooks = { ...base.webhooks, ...over.webhooks };
