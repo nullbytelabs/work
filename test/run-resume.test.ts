@@ -16,14 +16,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { startRun } from "../src/run.ts";
 import { createAbsurdEngine } from "../src/runtime/index.ts";
 import { RunRepository } from "../src/persistence/runs.ts";
-import type { ExecutionTarget, TargetFactory } from "../src/targets/index.ts";
-import { HostTarget, hostTargetFactory } from "./_support.ts";
+import { crashTargetFor, hostTargetFactory } from "./_support.ts";
 
 const WORKFLOW = `name: cli-resume
 inputs:
@@ -37,20 +36,6 @@ jobs:
     steps:
       - run: 'printf x >> "\${{ inputs.dir }}/second"'
 `;
-
-/** Tears `second` out mid-step (its `run` rejects) as if the platform died under it. */
-const crashSecond: TargetFactory = (_runsOn, ctx) => {
-  const host = new HostTarget(ctx.workdir);
-  if (basename(ctx.workdir) !== "second") return host;
-  const crashing: ExecutionTarget = {
-    kind: "host",
-    workspacePath: host.workspacePath,
-    provision: () => host.provision(),
-    run: () => Promise.reject(new Error("PLATFORM STOPPED mid-job (simulated)")),
-    dispose: () => host.dispose(),
-  };
-  return crashing;
-};
 
 async function byteLen(path: string): Promise<number> {
   return (await readFile(path, "utf8").catch(() => "")).length;
@@ -66,7 +51,7 @@ describe("startRun — resumable across invocations (the CLI path)", () => {
 
     try {
       // Phase 1 — the run is interrupted under `second`.
-      const res1 = await startRun({ plan, runId, dataDir, workdir, makeTarget: crashSecond });
+      const res1 = await startRun({ plan, runId, dataDir, workdir, makeTarget: crashTargetFor("second") });
       assert.equal(res1.status, "interrupted");
       assert.equal(await byteLen(join(sideDir, "first")), 1, "first ran once in phase 1");
       assert.equal(await byteLen(join(sideDir, "second")), 0, "second was torn out before it ran");

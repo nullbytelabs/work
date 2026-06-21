@@ -9,26 +9,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { AbsurdRuntime, createAbsurdEngine } from "../src/runtime/index.ts";
-import type { ExecutionTarget, TargetFactory } from "../src/targets/index.ts";
-import { HostTarget, hostTargetFactory } from "./_support.ts";
-
-/** Tears `boom` out mid-step (its `run` rejects) — an interruption, not a non-zero exit. */
-const crashBoom: TargetFactory = (_runsOn, ctx) => {
-  const host = new HostTarget(ctx.workdir);
-  if (basename(ctx.workdir) !== "boom") return host;
-  const crashing: ExecutionTarget = {
-    kind: "host",
-    workspacePath: host.workspacePath,
-    provision: () => host.provision(),
-    run: () => Promise.reject(new Error("PLATFORM STOPPED (simulated)")),
-    dispose: () => host.dispose(),
-  };
-  return crashing;
-};
+import type { TargetFactory } from "../src/targets/index.ts";
+import { crashTargetFor, hostTargetFactory } from "./_support.ts";
 
 async function runOne(yaml: string, makeTarget: TargetFactory): Promise<string> {
   return (await runFull(yaml, makeTarget)).status;
@@ -48,7 +34,7 @@ async function runFull(yaml: string, makeTarget: TargetFactory) {
 
 describe("run status — interrupted vs failure", () => {
   it("reports `interrupted` when the run is torn out mid-flight", async () => {
-    const status = await runOne(`name: w\njobs:\n  boom:\n    steps:\n      - run: echo hi`, crashBoom);
+    const status = await runOne(`name: w\njobs:\n  boom:\n    steps:\n      - run: echo hi`, crashTargetFor("boom"));
     assert.equal(status, "interrupted");
   });
 

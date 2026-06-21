@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hostTargetFactory } from "./_support.ts";
+import { awaitRunEnd, collectSseFrames, hostTargetFactory } from "./_support.ts";
 import { startWebServer } from "../src/web/index.ts";
 
 // Prints a known marker line so the replayed step-output can be asserted on.
@@ -38,48 +38,7 @@ after(async () => {
   if (workspace) await rm(workspace, { recursive: true, force: true });
 });
 
-/** Collect SSE frames from a stream until run-end (or timeout), as parsed events. */
-async function collectUntilRunEnd(
-  base: string,
-  runId: string,
-  timeoutMs: number,
-): Promise<{ event: string; data: Record<string, unknown> }[]> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const frames: { event: string; data: Record<string, unknown> }[] = [];
-  try {
-    const res = await fetch(`${base}/api/runs/${runId}/events`, { signal: controller.signal });
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      // Frames are separated by a blank line; parse each complete block.
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) >= 0) {
-        const block = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        let event = "message";
-        let data = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event: ")) event = line.slice(7);
-          else if (line.startsWith("data: ")) data += line.slice(6);
-        }
-        if (data) {
-          frames.push({ event, data: JSON.parse(data) as Record<string, unknown> });
-          if (event === "run-end") { controller.abort(); return frames; }
-        }
-      }
-    }
-  } catch {
-    /* aborted after run-end or timed out — assertions cover correctness */
-  } finally {
-    clearTimeout(timer);
-  }
-  return frames;
-}
+const eventsUrl = (base: string, runId: string) => `${base}/api/runs/${runId}/events`;
 
 async function dispatch(base: string, token: string, name: string): Promise<string> {
   const r = await fetch(`${base}/api/runs`, {
@@ -99,7 +58,7 @@ describe("durable run-log replay + re-run", () => {
     try {
       const base = `http://127.0.0.1:${s1.port}`;
       runId = await dispatch(base, s1.token, "echo");
-      const live = await collectUntilRunEnd(base, runId, 20_000);
+      const live = await collectSseFrames(eventsUrl(base, runId), 20_000);
       assert.equal(live.find((f) => f.event === "run-end")?.data["status"], "success");
     } finally {
       await s1.close(); // release the dataDir for a fresh engine
@@ -110,7 +69,7 @@ describe("durable run-log replay + re-run", () => {
     const s2 = await startWebServer({ workspace, dataDir, port: 0, makeTarget: hostTargetFactory });
     try {
       const base = `http://127.0.0.1:${s2.port}`;
-      const frames = await collectUntilRunEnd(base, runId, 20_000);
+      const frames = await collectSseFrames(eventsUrl(base, runId), 20_000);
 
       assert.ok(frames.some((f) => f.event === "run-init"), "replay includes run-init");
       const output = frames.filter((f) => f.event === "step-output");
@@ -121,6 +80,15 @@ describe("durable run-log replay + re-run", () => {
       const end = frames.find((f) => f.event === "run-end");
       assert.ok(end, "replay includes run-end");
       assert.equal(end!.data["status"], "success");
+
+      // The durable HISTORY survives the restart too: the fresh server lists the
+      // prior run in /api/runs (the Phase-1 contract — formerly its own
+      // web-persistence.test.ts, folded here as the strict superset).
+      const hist = (await (await fetch(`${base}/api/runs`)).json()) as { id: string; name: string; status: string }[];
+      const rec = hist.find((h) => h.id === runId);
+      assert.ok(rec, "a fresh server on the same dataDir still lists the prior run");
+      assert.equal(rec!.name, "echo");
+      assert.equal(rec!.status, "success");
     } finally {
       await s2.close();
     }
@@ -132,7 +100,7 @@ describe("durable run-log replay + re-run", () => {
     try {
       const base = `http://127.0.0.1:${s1.port}`;
       firstId = await dispatch(base, s1.token, "echo");
-      await collectUntilRunEnd(base, firstId, 20_000);
+      await awaitRunEnd(eventsUrl(base, firstId), 20_000);
     } finally {
       await s1.close();
     }
@@ -150,7 +118,7 @@ describe("durable run-log replay + re-run", () => {
       const newId = ((await r.json()) as { runId: string }).runId;
       assert.notEqual(newId, firstId);
 
-      const frames = await collectUntilRunEnd(base, newId, 20_000);
+      const frames = await collectSseFrames(eventsUrl(base, newId), 20_000);
       assert.equal(frames.find((f) => f.event === "run-end")?.data["status"], "success");
 
       const hist = (await (await fetch(`${base}/api/runs`)).json()) as { id: string; name: string; status: string }[];

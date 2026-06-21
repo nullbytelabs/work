@@ -11,12 +11,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { startRun } from "../src/run.ts";
-import type { ExecutionTarget, TargetFactory } from "../src/targets/index.ts";
-import { HostTarget, hostTargetFactory } from "./_support.ts";
+import { crashTargetFor, hostTargetFactory } from "./_support.ts";
 
 // One job, two steps: step 1 writes `build/marker` into the job workdir; step 2
 // reads it back. The target tears step 2 out the FIRST time (platform stop after
@@ -41,23 +40,7 @@ describe("crash-resume preserves the per-job work dir", () => {
     const expectedWorkRoot = join(tmpdir(), `work-${runId}`);
 
     // Tear out the SECOND `run` invocation in the build-test job (step 2) on phase 1.
-    let runs = 0;
-    const crashSecondStep: TargetFactory = (_runsOn, ctx) => {
-      const host = new HostTarget(ctx.workdir);
-      if (basename(ctx.workdir) !== "build-test") return host;
-      const target: ExecutionTarget = {
-        kind: "host",
-        workspacePath: host.workspacePath,
-        provision: () => host.provision(),
-        run: (cmd, opts) => {
-          runs++;
-          if (runs === 2) return Promise.reject(new Error("PLATFORM STOPPED after build (simulated)"));
-          return host.run(cmd, opts);
-        },
-        dispose: () => host.dispose(),
-      };
-      return target;
-    };
+    const crashSecondStep = crashTargetFor("build-test", { onRun: 2 });
 
     try {
       // Phase 1 — build runs, test is torn out → interrupted (resumable).
