@@ -9,8 +9,8 @@
 #              the alpine-base guest image once over the job's egress and reuse it
 #              for the whole run (the cache lives in the outer guest). One `npm ci`,
 #              then `npm test` — a test failure fails the job and the `ci` run (a hard
-#              gate); the step outcome is still carried into `review`. Called by `ci`
-#              via `uses: workflow/test`; also runnable: `work run test`.
+#              gate); the step outcome is also exposed as a workflow_call output. Called
+#              by `ci` via `uses: workflow/test`; also runnable: `work run test`.
 #
 # GitHub Actions CI is unaffected — ci.yml runs `npm test` directly, not `work run`.
 # The mediated-egress secret-injection e2e skips its two on-box-dial assertions when
@@ -29,8 +29,8 @@ jobs:
     runs-on: work:nested
     machine: { cpus: 8, memory: "64G" }   # outer VM hosts the nested e2e VMs
     # `steps.test.outcome` is the engine's deterministic per-step verdict
-    # (success/failure/skipped); a test failure now fails the job (a hard gate) and the
-    # outcome still reaches `review` (which leads with it). Failure detail stays in this
+    # (success/failure/skipped); a test failure fails the job (a hard gate) and the
+    # outcome is also exposed as a workflow_call output. Failure detail stays in this
     # step's output in the run — no agent re-narrates the log.
     outputs:
       test: ${{ steps.test.outcome }}

@@ -4,10 +4,11 @@
 #              failing tool fails the job — and the `ci` run — so this is a hard gate,
 #              not an advisory pass (the run fails fast at the first red tool). fan-in
 #              and sloc are report-only (always exit 0): they print structural numbers
-#              for the log, they don't gate. Each tool's deterministic OUTCOME is still
-#              forwarded to `review` via `steps.<id>.outcome` for a per-tool summary.
-#              GitHub Actions (.github/workflows/ci.yml) runs these tools directly too.
-#              Called by `ci` via `uses: workflow/checks`; also runnable: `work run checks`.
+#              for the log, they don't gate. Each tool's deterministic OUTCOME
+#              (`steps.<id>.outcome`) is also exposed as a workflow_call output for any
+#              caller to consume. GitHub Actions (.github/workflows/ci.yml) runs these
+#              tools directly too. Called by `ci` via `uses: workflow/checks`; also
+#              runnable: `work run checks`.
 ---
 name: checks
 
@@ -23,11 +24,11 @@ on:
 jobs:
   static:
     runs-on: work:base
-    # Forward each tool's deterministic OUTCOME to `review` (success/failure/skipped).
+    # Expose each tool's deterministic OUTCOME as a job output (success/failure/skipped).
     # `steps.<id>.outcome` is the engine's built-in per-step verdict — no logs, no
     # `$WORK_OUTPUT` plumbing, no LLM in the loop for "did it pass". A failing tool
-    # fails the job (hard gate); steps after the first failure don't run, so `review`
-    # sees outcomes up to that point. The failed step's output stays visible in the run.
+    # fails the job (hard gate); steps after the first failure don't run. The failed
+    # step's output stays visible in the run.
     outputs:
       lint: ${{ steps.lint.outcome }}
       typecheck: ${{ steps.typecheck.outcome }}
