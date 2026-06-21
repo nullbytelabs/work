@@ -176,6 +176,15 @@ live browser iteration) and should drive UI changes rather than ad-hoc edits.
 - **`docs-site/`** — the VitePress documentation site (`index.md`, `guide/`, `reference/`,
   custom theme in `.vitepress/`).
 
+> **After editing anything under `docs-site/`, run the docs build before pushing** —
+> `cd docs-site && npm run docs:build`. The main gate (`typecheck`/`lint`/`test`)
+> does **not** cover VitePress, so a markdown break compiles clean locally yet fails
+> CI. The classic footgun: VitePress (Vue) parses `{{ … }}` as an interpolation even
+> inside markdown inline code, so a literal `${{ expr }}` in prose breaks the build
+> (a non-identifier like `${{ secrets.* }}` is a hard parse error). Write it as
+> `<code v-pre>${{ … }}</code>` in prose (escape `<`/`>` as `&lt;`/`&gt;`); fenced
+> code blocks are already safe.
+
 ## Conventions
 
 - ESM throughout, `"type": "module"`. Imports use **explicit `.ts` extensions** (native

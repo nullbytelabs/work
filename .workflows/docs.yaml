@@ -1,0 +1,31 @@
+# docs
+# description: renders the VitePress docs-site in one gondolin VM — `npm ci` then
+#              `npm run docs:build` — so a markdown break (e.g. a literal `${{ }}` in
+#              prose, which VitePress parses as a Vue interpolation) fails the gate
+#              instead of only surfacing on the Pages deploy. docs-site/ has its own
+#              dependency tree, so each step `cd`s into it (the spec has no
+#              working-directory). Mirrors the GitHub Actions `docs` job
+#              (.github/workflows/ci.yml). Called by `ci`; also: `work run docs`.
+---
+name: docs
+
+on:
+  workflow_call:
+    outputs:
+      build: ${{ jobs.site.outputs.build }}
+
+jobs:
+  site:
+    runs-on: work:base
+    # Forward the build's deterministic outcome (success/failure) to a caller/review,
+    # same pattern as `checks`. A failed build fails the job — a hard gate.
+    outputs:
+      build: ${{ steps.build.outcome }}
+    steps:
+      - id: install
+        name: install (docs-site)
+        run: cd docs-site && npm ci
+
+      - id: build
+        name: build (vitepress)
+        run: cd docs-site && npm run docs:build

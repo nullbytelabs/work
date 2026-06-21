@@ -134,7 +134,7 @@ access.
 ## `secrets`
 
 A flat whitelist of host secrets a workflow may address as
-`${{ secrets.<name> }}`. Each value is a literal **or** a `$VAR` / `${VAR}` env
+<code v-pre>${{ secrets.&lt;name&gt; }}</code>. Each value is a literal **or** a `$VAR` / `${VAR}` env
 reference (the same pattern as a model `apiKey` or a datasource `token`), expanded
 host-side at run time. A whitelisted secret is materialized **into the step's guest
 environment** — so a CLI that must hold the credential to sign a request
@@ -162,7 +162,7 @@ jobs:
       - run: kubectl get pods
 ```
 
-`${{ secrets.* }}` resolves at run time (it never bakes into the durable plan or run
+<code v-pre>${{ secrets.* }}</code> resolves at run time (it never bakes into the durable plan or run
 history) and works in `run:`, `env:`, and a step's `with:` — including a
 `work/agent` step, when you intentionally hand an agent a credential. It is **not**
 available in `if:` conditions (a condition can't branch on a secret).

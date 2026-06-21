@@ -33,6 +33,27 @@ jobs:
       # next to the gates. It always exits 0 — we read the tail, we don't fail on it.
       - run: npm run fan-in
 
+  # Render the VitePress docs on every PR. The Docs workflow (docs.yml) only builds
+  # on push-to-main before deploying, so a markdown break (e.g. a literal `${{ }}` in
+  # prose — VitePress parses `{{ }}` as a Vue interpolation) used to slip through PR
+  # CI and only fail after merge. This job catches it on the PR. Isolated dep tree
+  # (docs-site/ has its own package-lock), so it parallels lint/test.
+  docs:
+    name: docs build (vitepress)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+      - run: npm ci
+      - run: npm run docs:build
+
   # One test job runs the whole suite (npm test = non-VM tier + the QEMU tier) in a
   # single pass. We deliberately do NOT also run `test:unit` as a separate gate: it's
   # a strict subset of `npm test`, so it would re-run every non-VM test a second time.
