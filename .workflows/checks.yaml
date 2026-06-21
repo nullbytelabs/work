@@ -1,12 +1,13 @@
 # checks
 # description: reusable static-checks workflow — one gondolin VM, a single `npm ci`,
-#              then lint / typecheck / knip / fan-in each as its own step. A failing
-#              tool fails the job — and the `ci` run — so this is a hard gate, not an
-#              advisory pass (the run fails fast at the first red tool). Each tool's
-#              deterministic OUTCOME is still forwarded to `review` via
-#              `steps.<id>.outcome` for a per-tool summary. GitHub Actions
-#              (.github/workflows/ci.yml) runs these tools directly too. Called by `ci`
-#              via `uses: workflow/checks`; also runnable: `work run checks`.
+#              then lint / typecheck / knip / fan-in / sloc each as its own step. A
+#              failing tool fails the job — and the `ci` run — so this is a hard gate,
+#              not an advisory pass (the run fails fast at the first red tool). fan-in
+#              and sloc are report-only (always exit 0): they print structural numbers
+#              for the log, they don't gate. Each tool's deterministic OUTCOME is still
+#              forwarded to `review` via `steps.<id>.outcome` for a per-tool summary.
+#              GitHub Actions (.github/workflows/ci.yml) runs these tools directly too.
+#              Called by `ci` via `uses: workflow/checks`; also runnable: `work run checks`.
 ---
 name: checks
 
@@ -17,6 +18,7 @@ on:
       typecheck: ${{ jobs.static.outputs.typecheck }}
       knip: ${{ jobs.static.outputs.knip }}
       fanin: ${{ jobs.static.outputs.fanin }}
+      sloc: ${{ jobs.static.outputs.sloc }}
 
 jobs:
   static:
@@ -31,6 +33,7 @@ jobs:
       typecheck: ${{ steps.typecheck.outcome }}
       knip: ${{ steps.knip.outcome }}
       fanin: ${{ steps.fanin.outcome }}
+      sloc: ${{ steps.sloc.outcome }}
     steps:
       - name: install
         run: npm ci
@@ -50,3 +53,7 @@ jobs:
       - id: fanin
         name: fan-in
         run: npm run fan-in
+
+      - id: sloc
+        name: sloc
+        run: npm run sloc
