@@ -133,6 +133,80 @@ export function crashTargetFor(
   };
 }
 
+/** A raw SSE frame: the `event` name plus the undecoded `data:` payload. */
+export interface SseEvent {
+  event: string;
+  data: string;
+}
+
+/**
+ * Open an SSE stream at `url`, accumulate frames, and resolve once a `run-end`
+ * frame arrives (or the timeout aborts the read). Skips `:` heartbeat comments and
+ * is robust to `event:` / `event: ` spacing (it trims), so it parses every stream
+ * the web server emits. Callers `JSON.parse` the `data` of whichever frame they
+ * assert on. The single SSE reader behind the web tests.
+ */
+export async function collectSse(url: string, timeoutMs = 20_000): Promise<SseEvent[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const res = await fetch(url, { signal: controller.signal });
+  if (res.status !== 200) throw new Error(`SSE ${url} → HTTP ${res.status}`);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const events: SseEvent[] = [];
+  let buf = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (block.startsWith(":")) continue; // heartbeat comment
+        let event = "message";
+        let data = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        events.push({ event, data });
+        if (event === "run-end") {
+          clearTimeout(timer);
+          controller.abort();
+          return events;
+        }
+      }
+    }
+  } catch (err) {
+    // An abort after we saw run-end is expected; otherwise rethrow.
+    if (!events.some((e) => e.event === "run-end")) throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+  return events;
+}
+
+/** A parsed SSE frame: `data` JSON-decoded into an object. */
+export interface SseFrame {
+  event: string;
+  data: Record<string, unknown>;
+}
+
+/** Like {@link collectSse} but JSON-decodes each frame's `data` (dataless frames are dropped). */
+export async function collectSseFrames(url: string, timeoutMs = 20_000): Promise<SseFrame[]> {
+  const events = await collectSse(url, timeoutMs);
+  return events
+    .filter((e) => e.data)
+    .map((e) => ({ event: e.event, data: JSON.parse(e.data) as Record<string, unknown> }));
+}
+
+/** Drain an SSE stream until `run-end` (or timeout), discarding the frames. */
+export async function awaitRunEnd(url: string, timeoutMs = 20_000): Promise<void> {
+  await collectSse(url, timeoutMs);
+}
+
 export interface SharedRuntime {
   run(plan: ExecutionPlan, ctx: RunContext, agentRunner?: AgentRunner): Promise<WorkflowResult>;
 }

@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, mkdir, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hostTargetFactory } from "./_support.ts";
+import { awaitRunEnd, hostTargetFactory } from "./_support.ts";
 import { startWebServer, type WebServerHandle } from "../src/web/index.ts";
 
 const ECHO = `name: echo
@@ -77,7 +77,7 @@ async function runToEnd(name: string, inputs: Record<string, unknown>): Promise<
   });
   assert.equal(r.status, 202);
   const { runId } = (await r.json()) as { runId: string };
-  await awaitRunEnd(runId);
+  await awaitRunEnd(`${base}/api/runs/${runId}/events`);
   return runId;
 }
 
@@ -100,7 +100,7 @@ describe("web — POST /api/runs/:id/retry (re-run failed jobs)", () => {
     assert.equal(body.runId, runId, "retry re-runs under the SAME run id");
     assert.deepEqual(body.jobsReset, ["bad"], "only the failed job is cleared");
 
-    await awaitRunEnd(runId);
+    await awaitRunEnd(`${base}/api/runs/${runId}/events`);
     assert.equal(await statusOf(runId), "success", "the retried run succeeds");
     assert.equal(await byteLen(join(sideDir, "ok")), 1, "the passing job is NOT re-run on retry");
     assert.equal(await byteLen(join(sideDir, "bad")), 2, "the failed job re-runs on retry");
@@ -133,36 +133,3 @@ async function statusOf(runId: string): Promise<string> {
   return hist.find((h) => h.id === runId)?.status ?? "missing";
 }
 
-/** Drain the SSE stream until `run-end` (or timeout). */
-async function awaitRunEnd(runId: string, timeoutMs = 20_000): Promise<void> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const res = await fetch(`${base}/api/runs/${runId}/events`, { signal: controller.signal });
-  assert.equal(res.status, 200);
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let sawEnd = false;
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const block = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        if (block.split("\n").some((l) => l.startsWith("event:") && l.slice(6).trim() === "run-end")) {
-          sawEnd = true;
-          clearTimeout(timer);
-          controller.abort();
-          return;
-        }
-      }
-    }
-  } catch (err) {
-    if (!sawEnd) throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}

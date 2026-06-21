@@ -11,7 +11,7 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAbsurdEngine, type AbsurdEngine } from "../src/runtime/index.ts";
-import { hostTargetFactory } from "./_support.ts";
+import { collectSse, hostTargetFactory } from "./_support.ts";
 import { listWorkflows } from "../src/project.ts";
 import { startWebServer, type WebServerHandle } from "../src/web/index.ts";
 
@@ -214,54 +214,3 @@ describe("web server", () => {
   });
 });
 
-/** Parsed SSE frame. */
-interface SseEvent {
-  event: string;
-  data: string;
-}
-
-/**
- * Open an SSE stream, accumulate frames, and resolve once a `run-end` arrives
- * (or the timeout fires). Returns the frames seen so far.
- */
-async function collectSse(url: string, timeoutMs: number): Promise<SseEvent[]> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const res = await fetch(url, { signal: controller.signal });
-  assert.equal(res.status, 200);
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  const events: SseEvent[] = [];
-  let buf = "";
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const block = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        if (block.startsWith(":")) continue; // heartbeat comment
-        let event = "message";
-        let data = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trim();
-        }
-        events.push({ event, data });
-        if (event === "run-end") {
-          clearTimeout(timer);
-          controller.abort();
-          return events;
-        }
-      }
-    }
-  } catch (err) {
-    // An abort after we got run-end is expected; otherwise rethrow.
-    if (!events.some((e) => e.event === "run-end")) throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-  return events;
-}
