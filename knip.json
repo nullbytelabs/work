@@ -4,5 +4,6 @@
     "src/**/index.ts",
     "test/**/*.test.ts"
   ],
-  "project": ["src/**/*.ts"]
+  "project": ["src/**/*.ts"],
+  "ignoreBinaries": ["awk"]
 }

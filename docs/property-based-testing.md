@@ -14,9 +14,10 @@ This doc is three things at once:
 
 Status: **established.** fast-check `4.8.0` is a devDependency. All five inventory
 targets are landed (23 properties), plus a [security track](#security-track) (S-1/S-2/S-3,
-10 more properties) — 33 in all, every one mutation-checked. Two real bugs found: a
-path-safety bug on day one (F-1, target #1) and an egress credential-scope wildcard
-(F-8, S-3). See the [progress tracker](#progress-tracker) and [findings log](#findings-log).
+10 more properties) and two follow-on targets — reusable-workflow inlining (#6) and
+durable crash-resume (#7) — for 37 in all, every one mutation-checked. Two real bugs
+found: a path-safety bug on day one (F-1, target #1) and an egress credential-scope
+wildcard (F-8, S-3). See the [progress tracker](#progress-tracker) and [findings log](#findings-log).
 
 ---
 
@@ -312,6 +313,8 @@ the property describes intended behavior rather than mirroring the code.
 | 3 | Typed input coercion | `src/compiler/inputs.ts` | ☑ done | 5 / 5 | 0 (F-4) |
 | 4 | Condition evaluation | `src/compiler/condition.ts` | ☑ done | 9 / 9 | 0 (F-6) |
 | 5 | Topological sort | `src/compiler/compile.ts` | ☑ done | 4 / 4 | 0 (F-5) |
+| 6 | Reusable inlining | `src/compiler/reusable.ts` | ☑ done | 3 / 3 | 0 |
+| 7 | Durable crash-resume | `src/runtime/absurd/runtime.ts` | ☑ done | 1 / 1 | 0 |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · deferred.
 
@@ -320,6 +323,23 @@ monotonicity, P3 include no-overwrite, P4 cellId path-safety, P5 cellId
 order-independence). All five were **mutation-checked**: each goes red on a
 non-equivalent mutant (slice the product, grow on exclude, prepend appended cells,
 drop the extras `.sort()`), so none is a trivially-passing test.
+
+Target #6 (`test/reusable-namespacing.property.test.ts`) treats inlining as a pure
+structural relabel `<job>` → `<call>__<job>`: P1 quantifies node-set + edge-set
+preservation over every small multi-job callee DAG (oracle = the one-line relabel,
+not a re-implementation of `inlineCall`); P2 pins the regression that `needs.*` is
+rewritten only *inside* `${{ }}` spans, never in bare prose; P3 covers single-job
+collapse onto the call id. Mutation-checked: P2 reddens on a blanket `renameNeeds`
+over the whole string, P1 on dropping the intra-callee `needs` rename.
+
+Target #7 (`test/resume-model.property.test.ts`) is the first **model-based** property
+(`fc.commands` + `fc.asyncModelRun`): it generates an arbitrary crash schedule over a
+linear job chain and re-runs the workflow on a fresh engine over the same on-disk
+journal + runId after each tear-out, asserting at-most-once step execution (counter
+files never exceed one byte), convergence (a clean resume always finishes), and a
+terminal outcome identical to a clean once-through run. Mutation-checked: it reddens
+when the job-level resume re-drive (`retryTask`) is disabled — the resumed run never
+completes. This generalizes the single hand-picked crash in `durable-resume.test.ts`.
 
 ---
 

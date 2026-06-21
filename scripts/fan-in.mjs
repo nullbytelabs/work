@@ -126,15 +126,18 @@ for (const r of rows.slice(0, 30)) {
   );
 }
 
-const buckets = new Map();
-for (const r of rows) {
-  const b = r.srcFanIn === 0 ? "0" : r.srcFanIn <= 2 ? "1-2" : r.srcFanIn <= 5 ? "3-5" : r.srcFanIn <= 10 ? "6-10" : "11+";
-  buckets.set(b, (buckets.get(b) ?? 0) + 1);
-}
-console.log("\nsrc-module fan-in distribution (symbols at each coupling level):");
-for (const b of ["0", "1-2", "3-5", "6-10", "11+"]) {
-  const n = buckets.get(b) ?? 0;
-  console.log(`  ${pad(b, 5)} ${pad("#".repeat(n), 40)} ${n}`);
+// Per-symbol fan-in distribution — the same percentile view `sloc` uses, since
+// fan-in is the same shape of skewed distribution: a low-coupling body (most
+// symbols), a load-bearing tail (the few many modules lean on). p50→p99 shows how
+// fast it climbs; mean ≫ p50 confirms the skew; max is the most-coupled symbol.
+const fanIns = rows.map((r) => r.srcFanIn).sort((a, b) => a - b);
+const fmt = (n) => n.toLocaleString("en-US");
+const total = fanIns.reduce((a, b) => a + b, 0);
+const q = (p) => fanIns[Math.max(0, Math.ceil((p / 100) * fanIns.length) - 1)] ?? 0;
+const stats = [["p50", q(50)], ["p75", q(75)], ["p90", q(90)], ["p95", q(95)], ["p99", q(99)], ["max", fanIns.at(-1) ?? 0], ["mean", rows.length ? Math.round(total / rows.length) : 0]];
+console.log("\nper-symbol src-module fan-in distribution");
+for (const [k, v] of stats) {
+  console.log(`  ${pad(k, 5)} ${lpad(fmt(v), 7)}`);
 }
 console.log("\n(report only — not a gate; review the tail by hand)\n");
 

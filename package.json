@@ -34,8 +34,9 @@
     "knip": "knip",
     "fan-in": "node scripts/fan-in.mjs",
     "sloc": "node scripts/sloc.mjs",
+    "jscpd": "jscpd | awk '/time: [0-9]/{print; exit} {print}'",
     "mutation": "node scripts/mutation-check.mjs",
-    "check": "npm run lint && npm run typecheck && npm run knip && npm run fan-in && npm run sloc",
+    "check": "npm run lint && npm run typecheck && npm run knip && npm run fan-in && npm run sloc && npm run jscpd",
     "build": "node scripts/build.mjs",
     "prepack": "npm run build"
   },
@@ -68,6 +69,7 @@
     "eslint": "10.5.0",
     "fast-check": "4.8.0",
     "globals": "17.6.0",
+    "jscpd": "^5.0.11",
     "knip": "6.17.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.61.1"

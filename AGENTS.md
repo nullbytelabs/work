@@ -22,9 +22,10 @@ npm run test:unit        # fast inner loop: everything EXCEPT the VM tier (WORK_
 npm run typecheck        # tsc --noEmit
 npm run lint             # eslint
 npm run knip             # unused files / exports / deps
-npm run check            # lint + typecheck + knip + the two reports below (full static pass)
+npm run check            # lint + typecheck + knip + the three reports below (full static pass)
 npm run fan-in           # report-only: afferent coupling of exported symbols (see below)
 npm run sloc             # report-only: SLOC distribution — largest files + percentiles (see below)
+npm run jscpd            # report-only: copy/paste duplication across src/ TypeScript (see below)
 npm run build            # esbuild → dist/ (publish-only; see below)
 
 # run the CLI in dev — invoke the bin shim directly (it runs src/cli.ts when
@@ -47,9 +48,9 @@ node --experimental-strip-types --disable-warning=ExperimentalWarning --test --t
 Per the project memory, verify agent/runtime changes against a real run — the graph + run
 paths against `test/e2e/agent-project`, not just the test suite.
 
-### Structural reports — `fan-in` and `sloc` (refinement aids, not gates)
+### Structural reports — `fan-in`, `sloc`, `jscpd` (refinement aids, not gates)
 
-`npm run check` runs the static gate (lint, typecheck, knip) and then two **report-only**
+`npm run check` runs the static gate (lint, typecheck, knip) and then three **report-only**
 analyses that always exit 0 — they print numbers to read, they never fail CI:
 
 - **`fan-in`** — afferent coupling per exported symbol: which types other modules lean on.
@@ -57,12 +58,19 @@ analyses that always exit 0 — they print numbers to read, they never fail CI:
   breaking up. Read it before changing a high-fan-in symbol — that's the blast radius.
 - **`sloc`** — source-line distribution: the largest files, per-file percentiles, and a
   by-subsystem rollup. It flags the files that have grown into split candidates.
+- **`jscpd`** — copy/paste duplication across `src/` TypeScript (config in `.jscpd.json`,
+  token-based Rabin-Karp, `minTokens: 50`). Surfaces the clone % + each clone's locations.
+  No threshold is set, so it's report-only like the other two; the clone % is the trend to
+  watch. (The `| awk …` in the script just trims jscpd's promo footer — `awk` is whitelisted
+  in `knip.json`'s `ignoreBinaries`. Run `npx jscpd --silent` for a one-line summary.)
 
 Reach for them **during** refactoring and when adding surface, not only at commit time:
 `fan-in` tells you what a change ripples into, `sloc` tells you what's getting too big to
-hold in one head. Both are dependency-free (they reuse the project's own `typescript`) and
-run in CI's lint job, so the trend lives in the run logs — the point is to watch the shape
-over time, judged by hand, never as a pass/fail threshold.
+hold in one head, `jscpd` tells you what's been copy-pasted instead of factored. `fan-in`
+and `sloc` are dependency-free (they reuse the project's own `typescript`); `jscpd` is an
+MIT, fully-local dev dependency (no SaaS, no phone-home). All three run in CI's lint job, so
+the trend lives in the run logs — watch the shape over time, judged by hand, never as a
+pass/fail threshold.
 
 ### dist/ and publishing
 
