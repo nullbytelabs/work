@@ -14,12 +14,6 @@ const sample = {
 };
 
 describe("config", () => {
-  it("parses a valid config", () => {
-    const c = parseConfig(sample);
-    assert.equal(c.defaultModel, "kimi");
-    assert.equal(c.providers["fireworks"]!.baseUrl, "https://api.fireworks.ai/inference/v1");
-  });
-
   it("resolves a model and expands $ENV in the apiKey", () => {
     process.env["FW_KEY"] = "secret-123";
     const c = parseConfig(sample);
@@ -55,23 +49,8 @@ describe("config", () => {
     );
   });
 
-  it("parses optional datasources/webhooks sections alongside providers/models", () => {
-    const c = parseConfig({
-      ...sample,
-      datasources: { grafana: { baseUrl: "https://grafana.internal", token: "$GRAFANA_TOKEN" } },
-      webhooks: { "deploy-incident": { workflow: "incident", auth: "hmac-sha256", datasources: ["grafana"] } },
-    });
-    assert.equal(c.datasources!["grafana"]!.baseUrl, "https://grafana.internal");
-    assert.equal(c.webhooks!["deploy-incident"]!.workflow, "incident");
-    // The model catalog is untouched by the new sections.
-    assert.equal(c.defaultModel, "kimi");
-  });
-
-  it("leaves datasources/webhooks undefined when absent", () => {
-    const c = parseConfig(sample);
-    assert.equal(c.datasources, undefined);
-    assert.equal(c.webhooks, undefined);
-  });
+  // The datasources/webhooks parse shape (present, absent, malformed, merge) is
+  // owned by test/datasource-egress.test.ts — not re-asserted here.
 });
 
 describe("config — observability", () => {

@@ -80,6 +80,15 @@ describe("durable run-log replay + re-run", () => {
       const end = frames.find((f) => f.event === "run-end");
       assert.ok(end, "replay includes run-end");
       assert.equal(end!.data["status"], "success");
+
+      // The durable HISTORY survives the restart too: the fresh server lists the
+      // prior run in /api/runs (the Phase-1 contract — formerly its own
+      // web-persistence.test.ts, folded here as the strict superset).
+      const hist = (await (await fetch(`${base}/api/runs`)).json()) as { id: string; name: string; status: string }[];
+      const rec = hist.find((h) => h.id === runId);
+      assert.ok(rec, "a fresh server on the same dataDir still lists the prior run");
+      assert.equal(rec!.name, "echo");
+      assert.equal(rec!.status, "success");
     } finally {
       await s2.close();
     }
