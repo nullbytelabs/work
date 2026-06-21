@@ -33,8 +33,9 @@
     "lint": "eslint .",
     "knip": "knip",
     "fan-in": "node scripts/fan-in.mjs",
+    "sloc": "node scripts/sloc.mjs",
     "mutation": "node scripts/mutation-check.mjs",
-    "check": "npm run lint && npm run typecheck && npm run knip && npm run fan-in",
+    "check": "npm run lint && npm run typecheck && npm run knip && npm run fan-in && npm run sloc",
     "build": "node scripts/build.mjs",
     "prepack": "npm run build"
   },
