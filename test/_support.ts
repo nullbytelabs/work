@@ -4,6 +4,7 @@
 import { before, after } from "node:test";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
+import { basename } from "node:path";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunContext, type WorkflowResult } from "../src/runtime/index.ts";
 import { parseRunsOn, type ExecutionPlan } from "../src/compiler/index.ts";
 import { resolveImageConfig, ensureImageTag } from "../src/images/index.ts";
@@ -91,6 +92,46 @@ export class HostTarget implements ExecutionTarget {
 
 /** A `makeTarget` factory that always returns the host double (ignores runs-on). */
 export const hostTargetFactory: TargetFactory = (_runsOn, ctx) => new HostTarget(ctx.workdir);
+
+/**
+ * A `makeTarget` factory whose target for job `jobId` simulates a platform stop:
+ * its `run` rejects, so the runtime-wrapped exec throws StepInterrupted and the job
+ * is torn out (resumable) while every other job runs on the host double. This is the
+ * shared crash-resume primitive behind the durability tests — job identity is read
+ * from the workdir basename, which the runtime sets to the job id.
+ *
+ * - `onRun` (default 1): reject the Nth `run()` call on the target; earlier calls
+ *   delegate to the host, so a multi-step job can complete step 1 and be torn out on
+ *   step 2.
+ * - `disposeThrows`: the torn-out job's `dispose()` ALSO rejects (a dead VM's close
+ *   failing). The runtime must swallow it and keep the run resumable, not relabel it a
+ *   terminal failure.
+ */
+export function crashTargetFor(
+  jobId: string,
+  opts: { onRun?: number; disposeThrows?: boolean } = {},
+): TargetFactory {
+  const crashAt = opts.onRun ?? 1;
+  return (_runsOn, ctx) => {
+    const host = new HostTarget(ctx.workdir);
+    if (basename(ctx.workdir) !== jobId) return host;
+    let runs = 0;
+    const crashing: ExecutionTarget = {
+      kind: "host",
+      workspacePath: host.workspacePath,
+      provision: () => host.provision(),
+      run: (cmd, runOpts) => {
+        runs += 1;
+        if (runs === crashAt) return Promise.reject(new Error("PLATFORM STOPPED mid-job (simulated)"));
+        return host.run(cmd, runOpts);
+      },
+      dispose: opts.disposeThrows
+        ? () => Promise.reject(new Error("vm.close() failed on an already-dead VM"))
+        : () => host.dispose(),
+    };
+    return crashing;
+  };
+}
 
 export interface SharedRuntime {
   run(plan: ExecutionPlan, ctx: RunContext, agentRunner?: AgentRunner): Promise<WorkflowResult>;

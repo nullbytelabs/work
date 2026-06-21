@@ -160,11 +160,15 @@ describe("create webhook (retrofit)", () => {
     assert.equal(existsSync(join(proj, "work.json")), false);
   });
 
-  it("requires --workflow", async () => {
-    // failUsage exits the process, so assert it doesn't silently succeed by
-    // checking no config was written when --workflow is absent is covered by the
-    // parser; here we just confirm the happy path needs the existing target.
+  it("retrofit with no --source uses the generic preset and still writes a $VAR-secret entry", async () => {
+    // (A missing --workflow is rejected by `failUsage`, which calls process.exit — so
+    // that arg-required path can't be asserted in-process; the grafana test above
+    // covers an explicit preset, so here we pin the DEFAULT/generic-source path.)
     await runCreate(["workflow", "triage"], proj);
     assert.equal(await runCreate(["webhook", "alerts", "--workflow", "triage"], proj), 0);
+
+    const cfg = await readJson(join(proj, "work.json"));
+    assert.equal(cfg.webhooks.alerts.workflow, "triage");
+    assert.equal(cfg.webhooks.alerts.secret, "$ALERTS_SECRET"); // never a literal secret
   });
 });

@@ -26,12 +26,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { AbsurdRuntime, createAbsurdEngine, StepInterrupted, type AbsurdEngine, type UsesHandler } from "../src/runtime/index.ts";
-import type { ExecutionTarget, TargetFactory } from "../src/targets/index.ts";
-import { HostTarget, hostTargetFactory } from "./_support.ts";
+import { crashTargetFor, hostTargetFactory } from "./_support.ts";
 
 // A well-behaved `uses:` handler: it calls `ctx.exec` (so a torn-out target makes
 // the runtime-wrapped exec throw StepInterrupted) and re-throws StepInterrupted per
@@ -69,42 +68,6 @@ jobs:
       - run: 'printf x >> "\${{ inputs.dir }}/second"'
 `;
 
-/**
- * A target factory that tears `second` out mid-step — its `run` rejects, as if
- * the platform died under the job. Every other job runs normally on the host
- * double. (Job identity is read from the workdir basename, which the runtime sets
- * to the job id.)
- */
-const crashSecond: TargetFactory = (_runsOn, ctx) => {
-  const host = new HostTarget(ctx.workdir);
-  if (basename(ctx.workdir) !== "second") return host;
-  const crashing: ExecutionTarget = {
-    kind: "host",
-    workspacePath: host.workspacePath,
-    provision: () => host.provision(),
-    run: () => Promise.reject(new Error("PLATFORM STOPPED mid-job (simulated)")),
-    dispose: () => host.dispose(),
-  };
-  return crashing;
-};
-
-// Like crashSecond, but the torn-out job's `dispose()` ALSO throws (a dead VM's
-// close failing). A bare `finally { await dispose() }` would let that throw
-// overwrite the in-flight JobInterrupted, mislabeling the run as a non-resumable
-// `failure`. The runtime must swallow the dispose error and preserve resumability.
-const crashSecondThrowingDispose: TargetFactory = (_runsOn, ctx) => {
-  const host = new HostTarget(ctx.workdir);
-  if (basename(ctx.workdir) !== "second") return host;
-  const crashing: ExecutionTarget = {
-    kind: "host",
-    workspacePath: host.workspacePath,
-    provision: () => host.provision(),
-    run: () => Promise.reject(new Error("PLATFORM STOPPED mid-job (simulated)")),
-    dispose: () => Promise.reject(new Error("vm.close() failed on an already-dead VM")),
-  };
-  return crashing;
-};
-
 async function byteLen(path: string): Promise<number> {
   return (await readFile(path, "utf8").catch(() => "")).length;
 }
@@ -122,7 +85,7 @@ describe("durable execution — whole-workflow crash-resume", () => {
     try {
       // Phase 1 — the platform "runs" then dies under `second`.
       e1 = await createAbsurdEngine({ dataDir, log: SILENT });
-      const r1 = new AbsurdRuntime({ engine: e1, makeTarget: crashSecond });
+      const r1 = new AbsurdRuntime({ engine: e1, makeTarget: crashTargetFor("second") });
       const res1 = await r1.run(plan, { runId, workRoot });
       await e1.close();
       e1 = undefined;
@@ -168,7 +131,7 @@ describe("durable execution — whole-workflow crash-resume", () => {
     try {
       // Phase 1 — `second` is torn out AND its dispose throws.
       e1 = await createAbsurdEngine({ dataDir, log: SILENT });
-      const res1 = await new AbsurdRuntime({ engine: e1, makeTarget: crashSecondThrowingDispose }).run(plan, { runId, workRoot });
+      const res1 = await new AbsurdRuntime({ engine: e1, makeTarget: crashTargetFor("second", { disposeThrows: true }) }).run(plan, { runId, workRoot });
       await e1.close();
       e1 = undefined;
       // The dispose throw must not mask the interruption.
@@ -216,17 +179,7 @@ jobs:
       { inputs: { dir: sideDir } },
     );
     // Tear out the `probe` job's target (its exec rejects), like a platform stop.
-    const crashProbe: TargetFactory = (_runsOn, ctx) => {
-      const host = new HostTarget(ctx.workdir);
-      if (basename(ctx.workdir) !== "probe") return host;
-      return {
-        kind: "host",
-        workspacePath: host.workspacePath,
-        provision: () => host.provision(),
-        run: () => Promise.reject(new Error("PLATFORM STOPPED mid-uses (simulated)")),
-        dispose: () => host.dispose(),
-      };
-    };
+    const crashProbe = crashTargetFor("probe");
 
     let e1: AbsurdEngine | undefined;
     let e2: AbsurdEngine | undefined;
