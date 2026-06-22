@@ -1,0 +1,174 @@
+# trace-analysis
+# description: Given a work run id, fetch its OpenTelemetry trace from Grafana Cloud
+#              (Tempo) and have an agent analyze it. The run id is the correlation
+#              key: traces carry it as the span attribute `work.run.id`, so we first
+#              search Tempo (`{ span.work.run.id = "<id>" }`) to resolve the random
+#              OTLP trace id, then fetch the full span tree and distill it.
+#
+#              Grafana access is brokered by the `grafana` datasource (work.json):
+#              the service-account token is injected host-side into the Authorization
+#              header for dydx.grafana.net only and never enters the guest — so the
+#              analyzing agent (with open egress) can read the trace but cannot see or
+#              leak the token. Because datasources are deny-by-default, you MUST scope
+#              this run to it:
+#
+#                export SERVICE_ACCOUNT_TOKEN=...   # the glsa_ service-account token
+#                work run trace-analysis \
+#                  --inputs '{"run_id":"fe63caaf-e5c0-47c2-957a-76602b895cab"}' \
+#                  --datasources grafana
+#
+#              Agent-only + one HTTP fetch → machine: small.
+---
+name: trace-analysis
+
+inputs:
+  run_id:
+    type: string
+    required: true
+    description: the work.run.id to analyze (a UUID, as shown in `work` run output)
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+  lookback_hours:
+    type: number
+    default: 720
+    description: how far back to search Tempo for the run's trace (default 30 days)
+
+jobs:
+  analyze:
+    runs-on: work:base
+    machine: small
+    outputs:
+      analysis: ${{ steps.analyze.outputs.output }}
+    steps:
+      - id: fetch
+        name: resolve run id → trace and distill the span tree
+        env:
+          GRAFANA_URL: https://dydx.grafana.net
+          RUN_ID: ${{ inputs.run_id }}
+          LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+        # SERVICE_ACCOUNT_TOKEN is injected automatically into the VM env by the
+        # `grafana` datasource (deny-by-default; requires --datasources grafana).
+        # In-guest it is an opaque placeholder; gondolin swaps the real token into
+        # the Authorization header for the grafana host only.
+        run: |
+          cat > /tmp/fetch-trace.mjs <<'NODE'
+          import { writeFileSync } from "node:fs";
+
+          const base = (process.env.GRAFANA_URL || "").replace(/\/$/, "");
+          const token = process.env.SERVICE_ACCOUNT_TOKEN;
+          const runId = process.env.RUN_ID;
+          const lookbackH = Number(process.env.LOOKBACK_HOURS || "720");
+          if (!base) throw new Error("GRAFANA_URL is not set");
+          if (!token) throw new Error("SERVICE_ACCOUNT_TOKEN is not set (scope the run with --datasources grafana)");
+
+          const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+          async function gapi(path) {
+            const res = await fetch(base + path, { headers });
+            const body = await res.text();
+            if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}\n${body.slice(0, 400)}`);
+            try { return JSON.parse(body); } catch { throw new Error(`non-JSON for ${path}: ${body.slice(0, 200)}`); }
+          }
+
+          // 1. Discover the Tempo datasource uid (override with TEMPO_UID).
+          let uid = process.env.TEMPO_UID;
+          if (!uid) {
+            const ds = await gapi("/api/datasources");
+            const tempo = (Array.isArray(ds) ? ds : []).find((d) => d.type === "tempo");
+            if (!tempo) throw new Error("no Tempo datasource on this Grafana stack");
+            uid = tempo.uid;
+          }
+          const proxy = `/api/datasources/proxy/uid/${uid}`;
+
+          // 2. Resolve the random OTLP trace id from the work run id.
+          const end = Math.floor(Date.now() / 1000);
+          const start = end - lookbackH * 3600;
+          const q = `{ span.work.run.id = "${runId}" }`;
+          const search = await gapi(`${proxy}/api/search?q=${encodeURIComponent(q)}&start=${start}&end=${end}&limit=5`);
+          const traces = search.traces || [];
+          if (traces.length === 0) {
+            throw new Error(`no trace found for work.run.id=${runId} within the last ${lookbackH}h ` +
+              `(widen lookback_hours, or check the run id / that telemetry landed)`);
+          }
+          const traceId = traces[0].traceID;
+
+          // 3. Fetch the full trace (OTLP JSON) and distill it.
+          const trace = await gapi(`${proxy}/api/traces/${traceId}`);
+          writeFileSync("/workspace/trace.json", JSON.stringify(trace));
+
+          const attrVal = (v) => v?.stringValue ?? v?.intValue ?? v?.boolValue ?? v?.doubleValue ?? (v?.arrayValue ? JSON.stringify(v.arrayValue) : "");
+          const attrMap = (arr) => Object.fromEntries((arr || []).map((a) => [a.key, attrVal(a.value)]));
+          const ns = (s) => (s ? Number(BigInt(s) / 1000000n) : 0);
+
+          const spans = [];
+          let resource = {};
+          for (const b of trace.batches || trace.resourceSpans || []) {
+            resource = { ...resource, ...attrMap(b.resource?.attributes) };
+            for (const ss of b.scopeSpans || b.instrumentationLibrarySpans || [])
+              for (const s of ss.spans || [])
+                spans.push({ name: s.name, id: s.spanId, parent: s.parentSpanId || null, attrs: attrMap(s.attributes), status: s.status?.code ?? 0, start: ns(s.startTimeUnixNano), end: ns(s.endTimeUnixNano) });
+          }
+          if (spans.length === 0) throw new Error(`trace ${traceId} returned no spans (ingestion lag?)`);
+          const t0 = Math.min(...spans.map((s) => s.start));
+          const total = Math.max(...spans.map((s) => s.end)) - t0;
+
+          const keep = (k) => /^(gen_ai|work|cicd|error|host\.image)\./.test(k);
+          const kids = (p) => spans.filter((s) => s.parent === p).sort((a, b) => a.start - b.start);
+          const lines = [];
+          lines.push(`run.id        ${runId}`);
+          lines.push(`trace.id      ${traceId}`);
+          lines.push(`service       ${resource["service.name"] ?? "?"} v${resource["service.version"] ?? "?"} (${resource["host.arch"] ?? "?"})`);
+          lines.push(`spans/total   ${spans.length} spans · ${total}ms`);
+          lines.push("");
+          const render = (s, d) => {
+            lines.push(`${"  ".repeat(d)}▸ ${s.name}  [${s.end - s.start}ms]${s.status === 2 ? "  ⚠ ERROR" : ""}`);
+            for (const [k, v] of Object.entries(s.attrs).filter(([k]) => keep(k)).sort())
+              lines.push(`${"  ".repeat(d)}    ${k} = ${v}`);
+            for (const c of kids(s.id)) render(c, d + 1);
+          };
+          for (const r of spans.filter((s) => !s.parent || !spans.find((x) => x.id === s.parent)).sort((a, b) => a.start - b.start)) render(r, 0);
+
+          const out = lines.join("\n");
+          console.log(out);
+          // $WORK_OUTPUT uses $GITHUB_OUTPUT semantics — emit the multi-line tree as a
+          // heredoc value under the `tree` key (→ steps.fetch.outputs.tree).
+          if (process.env.WORK_OUTPUT) writeFileSync(process.env.WORK_OUTPUT, `tree<<__TRACE_EOF__\n${out}\n__TRACE_EOF__\n`);
+          NODE
+          node /tmp/fetch-trace.mjs
+
+      - id: analyze
+        name: analyze the trace
+        uses: work/agent
+        with:
+          prompt: |
+            You are a performance + reliability analyst. Below is a distilled
+            OpenTelemetry span tree for a single `work` engine run (the full raw
+            trace is also at /workspace/trace.json if you need exact attributes).
+
+            The span shape is: run {workflow} → job {name} → step {name} → chat
+            {model}. Per-span durations are in `[Nms]`. `⚠ ERROR` marks a failed
+            span. Token usage lives on `chat` spans as `gen_ai.usage.input_tokens` /
+            `gen_ai.usage.output_tokens` (+ cache_read / cache_creation when present).
+
+            Produce a concise markdown report with these sections:
+            - **Summary** — workflow, run id, total wall-clock, overall success/failure.
+            - **Critical path** — the spans that dominate wall-clock; name the long pole
+              and what it was (which job/step, and a `chat` model call vs a `run:` step).
+            - **Per-job / per-step timing** — a short table of the notable spans.
+            - **Token usage** — totals and per-model breakdown across all `chat` spans
+              (input/output, and cache hits if any); note "no token data" if absent.
+            - **Failures** — any `⚠ ERROR` spans, the `error.type`, and whether the run
+              still rolled up to success (continue-on-error).
+            - **Takeaways** — 2–4 specific, actionable observations (e.g. a slow step
+              worth caching, an unexpectedly large model call, a missing instrumentation).
+
+            Do not invent data not present in the trace. If something is absent, say so.
+
+            === DISTILLED SPAN TREE ===
+            ${{ steps.fetch.outputs.tree }}
+
+      - name: show analysis
+        env:
+          ANALYSIS: ${{ steps.analyze.outputs.output }}
+        run: |
+          printf '%s\n' "===== TRACE ANALYSIS BEGIN ====="
+          printf '%s\n' "$ANALYSIS"
+          printf '%s\n' "===== TRACE ANALYSIS END ====="
