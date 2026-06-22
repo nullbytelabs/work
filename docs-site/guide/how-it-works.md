@@ -44,8 +44,12 @@ cell, and a downstream `needs` on it waits for every leg.
 
 Every job runs in its own [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin)
 micro-VM. There is no host-execution mode — your steps never run directly on your
-machine. Network access is **mediated**: a job only reaches what the engine
-allowlists for it. Each VM is sized per job via
+machine. Egress is **open** — a job reaches the network freely, with no allowlist
+to maintain; the sandbox's job is isolating your **host** (filesystem, processes),
+not walling jobs off from the internet. (Reaching private/internal IP ranges is the
+one explicit grant — a [datasource](../reference/configuration#datasources) `resolve`
+pin — so open public egress never exposes host-loopback services.) Each VM is sized
+per job via
 [`machine:`](../reference/workflow-syntax#machine-types), a named type or custom
 cpu/memory, defaulting to `medium`.
 
@@ -58,8 +62,8 @@ When a step is the built-in [`work/agent`](./agent-steps) primitive — or a
 composite [`action/<name>`](./actions) that wraps it — the engine invokes a
 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) coding agent
 **inside that same micro-VM**, with its toolset rooted at the checkout. The host
-allowlists the model endpoint through the sandbox's egress and injects the API key,
-so the agent can reach the model while the key never enters the guest. A
+injects the API key into the model request **host-side**, scoped to the model
+endpoint, so the agent can reach the model while the key never enters the guest. A
 `uses: action/<name>` step runs your own [JavaScript action](./actions) the same
 way: staged into the guest and run there, never on the host. See
 [Agent steps](./agent-steps) and [Actions](./actions) for the authoring side.
@@ -70,7 +74,7 @@ way: staged into the guest and run there, never on the host. See
 |---|---|
 | [Absurd](https://www.npmjs.com/package/absurd-sdk) | Durable task execution — jobs are tasks, steps are checkpoints. |
 | [PGLite](https://www.npmjs.com/package/@electric-sql/pglite) | In-process Postgres the journal is written to. No external DB. |
-| [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin) | The micro-VM every job runs in, with mediated egress. |
+| [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin) | The micro-VM every job runs in, isolating your host. |
 | [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | The coding agent behind `uses: work/agent` steps. |
 
 ::: tip Deeper dives

@@ -42,7 +42,7 @@ work takes a different stance:
   is a single CLI; durable state lives in an in-process Postgres.
 - **Isolated by default.** Every job runs in its own [Gondolin](https://www.npmjs.com/package/@earendil-works/gondolin)
   micro-VM. There is no host-execution mode — steps never run directly on your
-  machine, and network access is mediated.
+  machine. Egress is open; the sandbox isolates your host, not the job's network.
 - **Durable.** A workflow compiles to a graph of durable tasks; each step is a
   journaled checkpoint, so the engine knows exactly what already ran.
 - **Agent-native.** An AI agent can be a first-class step, working inside the same
