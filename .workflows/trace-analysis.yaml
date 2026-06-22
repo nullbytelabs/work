@@ -9,7 +9,7 @@
 #              the service-account token is injected host-side into the Authorization
 #              header for dydx.grafana.net only and never enters the guest — so the
 #              analyzing agent (with open egress) can read the trace but cannot see or
-#              leak the token. Because datasources are deny-by-default, you MUST scope
+#              leak the token. The grafana token is injected only when you scope
 #              this run to it:
 #
 #                export SERVICE_ACCOUNT_TOKEN=...   # the glsa_ service-account token
@@ -41,7 +41,7 @@ jobs:
     steps:
       # Grafana/Tempo access lives in the tempo-trace action: it resolves the run id
       # → trace and distills the span tree. The `grafana` datasource injects the
-      # token host-side (deny-by-default; requires --datasources grafana).
+      # token host-side. Token injection is deny-by-default, so it requires --datasources grafana; egress itself is open.
       - id: fetch
         name: resolve run id → trace and distill the span tree
         uses: action/tempo-trace

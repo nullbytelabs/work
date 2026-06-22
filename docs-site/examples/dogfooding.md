@@ -3,7 +3,7 @@
 work is built with work. The repository ships a `.workflows/ci.yaml` that runs the
 project's own static checks, full test suite, and docs build — every job in its own
 gondolin micro-VM, on the same engine you run. (The AI agent code review is a
-separate, on-demand workflow — `work run review` — covered at the [end](#review-a-separate-on-demand-workflow).)
+separate, on-demand workflow — see [Review](./review).)
 
 It's a useful example precisely because it's real. The pipeline leans on the
 features you'd reach for in your own workflows: reusable workflows composed with
@@ -160,117 +160,6 @@ jobs:
         run: cd docs-site && npm run docs:build   # a markdown break fails here
 ```
 
-## review: a separate, on-demand workflow
-
-The agent code review is **not part of `ci`** — it's kept out of the deterministic
-gate so its cost and model-dependence stay clear of every push. Run it when you want
-it:
-
-```bash
-work run review           # the four focused reviews + the merge
-work run compiler-review  # just one subsystem (2 agent VMs)
-```
-
-`review` is **pure composition** of four focused, self-contained reusable workflows,
-one per subsystem:
-
-| Focused review | Reads |
-|---|---|
-| `compiler-review` | `src/compiler/`, `src/spec/` |
-| `runtime-review` | `src/runtime/`, `src/targets/` |
-| `security-review` | the agent / egress / config surface |
-| `web-review` | `src/web/`, `src/persistence/` |
-
-Each one is a **scan → collect** pair. `scan` is a single
-[Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) agent
-(`uses: work/agent`) that reads its subsystem straight from the checkout. `collect`
-is an editor agent that **verifies every candidate against the source**: it opens
-each cited file, confirms the issue is real with a concrete failure scenario, drops
-anything in `.review/accepted.md`, and caps the list to four, then emits
-machine-readable JSON between scope-labeled sentinels:
-
-```yaml
-# .workflows/compiler-review.yaml  (the other three mirror it)
-name: compiler-review
-on:
-  workflow_call:
-    outputs:
-      review: ${{ jobs.collect.outputs.review }}
-jobs:
-  scan:
-    machine: small
-    outputs:
-      findings: ${{ steps.r.outputs.output }}
-    steps:
-      - id: r
-        name: review compiler + spec
-        uses: work/agent
-        with:
-          promptFile: .workflows/prompts/review-compiler.md
-  collect:
-    machine: small
-    needs: [scan]
-    steps:
-      - id: editor
-        uses: work/agent
-        with:
-          prompt: |
-            …open each cited file, confirm the issue is real, drop what doesn't
-            hold up, suppress anything in .review/accepted.md, cap at 4, emit JSON…
-            === compiler + spec (raw reviewer output) ===
-            ${{ needs.scan.outputs.findings }}
-      - name: show review
-        run: |
-          printf '%s\n' "===== REVIEW JSON [compiler] BEGIN ====="
-          # …$REVIEW… [compiler] END
-```
-
-Because each focused review verifies and caps on its own, it stays a small,
-narrow-context job, and it runs standalone too (`work run compiler-review`) for a
-fast, focused loop. The top-level `review.yaml` just wires the four together and adds
-a **merge editor** that folds the four pre-verified reviews into one — it does *not*
-re-verify, only de-duplicates across subsystems, ranks by severity, and keeps at most
-six:
-
-```yaml
-# .workflows/review.yaml  (excerpt)
-on:
-  workflow_call:
-    outputs:
-      review: ${{ jobs.collect.outputs.review }}
-jobs:
-  security:  { uses: workflow/security-review }
-  compiler:  { uses: workflow/compiler-review }
-  runtime:   { uses: workflow/runtime-review }
-  web:       { uses: workflow/web-review }
-  collect:
-    needs: [security, compiler, runtime, web]
-    steps:
-      - id: editor
-        uses: work/agent
-        with:
-          prompt: |
-            Merge the four pre-verified subsystem reviews — do NOT re-verify, only
-            fold together: de-duplicate, rank by severity, keep at most 6. Emit one
-            JSON object.
-            === compiler === ${{ needs.compiler.outputs.review }}
-            # …runtime / web / security
-      - name: show review
-        run: |
-          printf '%s\n' "===== REVIEW JSON BEGIN ====="   # …END
-```
-
-The split is deliberate: **verification happens once, per subsystem, in the focused
-collects**; the top-level editor only folds the four already-distilled reviews into
-one, so it works over a handful of small JSON blocks, not raw scanner dumps. The final
-JSON (unlabeled `REVIEW JSON` sentinels) makes the pipeline usable as an automated
-review loop: an agent can run `work run review`, parse the findings, fix, and re-run.
-
-::: tip The model key never enters the guest
-Each agent's API key is injected host-side, scoped to the model endpoint, so the key
-never lands inside the micro-VM. See [Agent steps](../guide/agent-steps).
-:::
-
 ## What it exercises
 
 Every part of the pipeline maps to a feature you can use directly:
@@ -281,26 +170,20 @@ Every part of the pipeline maps to a feature you can use directly:
 | `test` runs the full suite in nested gondolin VMs | [Custom images](../guide/custom-images) (`work:nested` bundles QEMU) + nested execution — TCG fallback, no `/dev/kvm` needed |
 | `checks` / `test` / `docs` expose each step's `steps.<id>.outcome` as a job output | Deterministic per-step verdict threaded as job/workflow outputs across the `needs` DAG |
 | `docs` renders VitePress in a VM | A markdown break fails the gate, not the Pages deploy |
-| `review` (on demand) → four `*-review` reusables, nine `uses: work/agent` steps | [Agent steps](../guide/agent-steps) — a real Pi model in the job's sandbox — and [reusable workflows](../guide/reusable-workflows) composed two levels deep |
 
 ## Run it yourself
 
-The workflows live in
+The `ci` workflows live in
 [`.workflows/`](https://github.com/nullbytelabs/work/tree/main/.workflows) —
-`ci.yaml`, `checks.yaml`, `test.yaml`, `docs.yaml`, and (on demand) `review.yaml` with
-the four focused reviews (`compiler-review.yaml`, `runtime-review.yaml`,
-`security-review.yaml`, `web-review.yaml`) and their reviewer prompts under
-`.workflows/prompts/`. The review jobs need a model configured in `work.json`;
-everything else runs without one.
+`ci.yaml` and the three reusables it composes (`checks.yaml`, `test.yaml`,
+`docs.yaml`). The deterministic gate needs no model.
 
 ```bash
-work graph ci             # render the compiled DAG without running it
-work run ci               # checks + test + docs (the deterministic gate)
-work run review           # the four focused reviews + the merge, on demand
-work run compiler-review  # just one subsystem (2 agent VMs)
+work graph ci   # render the compiled DAG without running it
+work run ci     # checks + test + docs (the deterministic gate)
 ```
 
 From here, the [Reusable workflows](../guide/reusable-workflows) guide covers `uses:`
-and output threading, and [Agent steps](../guide/agent-steps) covers `work/agent` and
-the sandboxed egress. And once these runs are emitting traces, [Trace
+and output threading; [Review](./review) is the agentic counterpart to this gate (a
+multi-agent code review, on demand); and once these runs emit traces, [Trace
 analysis](./trace-analysis) feeds a run id back in to fetch and analyze its Tempo trace.

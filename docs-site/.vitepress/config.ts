@@ -91,6 +91,7 @@ export default withMermaid(defineConfig({
           text: "Real-world examples",
           items: [
             { text: "Dogfooding: the engine checks itself", link: "/examples/dogfooding" },
+            { text: "Review: the engine reviews itself", link: "/examples/review" },
             { text: "Trace analysis: read a run back from Tempo", link: "/examples/trace-analysis" },
           ],
         },
