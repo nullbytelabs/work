@@ -102,6 +102,9 @@ short run still reports. On a long-lived [`work serve`](./web-ui), the SDK start
 streams for the host's lifetime.
 :::
 
+You can also pull a trace back into a workflow: [Trace analysis](../examples/trace-analysis)
+takes a run id, fetches that run's trace from Grafana Tempo, and has an agent analyze it.
+
 ## Notes
 
 - **Off by default.** No endpoint configured (and no `OTEL_*` env) ⇒ no telemetry, no
