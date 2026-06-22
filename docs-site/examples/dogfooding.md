@@ -267,8 +267,7 @@ JSON (unlabeled `REVIEW JSON` sentinels) makes the pipeline usable as an automat
 review loop: an agent can run `work run review`, parse the findings, fix, and re-run.
 
 ::: tip The model key never enters the guest
-Each agent reaches the model only through the sandbox's mediated egress: the egress
-resolver allowlists the model host and injects the API key host-side, so the key
+Each agent's API key is injected host-side, scoped to the model endpoint, so the key
 never lands inside the micro-VM. See [Agent steps](../guide/agent-steps).
 :::
 

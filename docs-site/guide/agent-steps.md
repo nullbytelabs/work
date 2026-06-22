@@ -2,9 +2,9 @@
 
 An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 coding agent **inside the job's micro-VM**, with its full toolset rooted at the
-checkout, so it can read and edit the project's files directly. The model is
-reached only through the sandbox's mediated egress, and your API key is injected
-host-side and **never enters the guest**.
+checkout, so it can read and edit the project's files directly. Your API key is
+injected into the model request **host-side**, scoped to the model endpoint, so it
+**never enters the guest**.
 
 The agent is a built-in **step primitive**, `uses: work/agent`, prompted entirely
 through `with:`, with no package format and no special files. To give an agent a name, a
@@ -88,9 +88,9 @@ a file-backed prompt and a declared output, called as `uses: action/<name>`.
 ## How it runs
 
 The agent runs **in-guest**: Pi is invoked inside the same micro-VM as the rest of
-the job, working directly against the job's checkout. The host resolves the model
-endpoint, allowlists it through the sandbox's egress, and injects the API key, so
-the key reaches the model without ever being visible inside the guest.
+the job, working directly against the job's checkout. The host injects the API key
+into the model request **host-side**, scoped to the model endpoint, so the key
+reaches the model without ever being visible inside the guest.
 
 ::: tip Complete example
 [`test/e2e/agent-project/`](https://github.com/nullbytelabs/work/tree/main/test/e2e/agent-project)

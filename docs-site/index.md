@@ -36,7 +36,7 @@ features:
   - icon:
       svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><rect x="8" y="8" width="8" height="8" rx="1.5"/></svg>'
     title: Isolated micro-VMs
-    details: Every job runs in its own Gondolin micro-VM with mediated egress, sized per job with machine types (small to xlarge, or custom cpus/memory). There is no host-execution mode — your steps never touch the host directly.
+    details: Every job runs in its own Gondolin micro-VM, sized per job with machine types (small to xlarge, or custom cpus/memory). There is no host-execution mode — your steps never touch the host directly, and egress is open.
     linkText: How it works
     link: /guide/how-it-works
   - icon:

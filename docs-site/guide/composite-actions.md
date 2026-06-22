@@ -64,7 +64,7 @@ The whole action runs as the caller's **single** durable step. A composite step'
 `with:` is resolved at **run time**, so an inner step can take a previous step's output
 as an input, the same step-to-step data flow GitHub composite actions support. Inner
 `run:` steps capture `$WORK_OUTPUT`; inner `uses:` steps dispatch to their handler
-(`work/agent`, a nested action). It executes in the job's micro-VM with mediated egress,
+(`work/agent`, a nested action). It executes in the job's micro-VM,
 [like any action](./actions#how-a-js-action-runs).
 
 ::: tip Runnable example

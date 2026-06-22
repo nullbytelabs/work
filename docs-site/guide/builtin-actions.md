@@ -16,7 +16,7 @@ host — work without any egress setup.
 
 Clone a **public** git repository into the job's workspace. Git isn't in the guest
 image, so the action installs it (`apk add git`) on demand, then clones over the
-sandbox's mediated egress.
+job's open egress.
 
 ```yaml
 steps:

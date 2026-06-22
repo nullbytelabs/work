@@ -274,10 +274,10 @@ file. A key committed to git is a leaked key; rotate it if that happens.
 
 ## How the key reaches the model
 
-For an agent step, the host resolves the model endpoint, allowlists it through the
-sandbox's mediated egress, and injects the API key **host-side**. The key is never
-written into the guest, so it isn't visible to anything running inside the micro-VM,
-including the agent's own tools. See [How it works](../guide/how-it-works#agent-steps).
+For an agent step, the host injects the API key into the model request **host-side**,
+scoped to the model endpoint. The key is never written into the guest, so it isn't
+visible to anything running inside the micro-VM, including the agent's own tools.
+See [How it works](../guide/how-it-works#agent-steps).
 
 ## Example
 
