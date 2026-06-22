@@ -302,4 +302,5 @@ work run compiler-review  # just one subsystem (2 agent VMs)
 
 From here, the [Reusable workflows](../guide/reusable-workflows) guide covers `uses:`
 and output threading, and [Agent steps](../guide/agent-steps) covers `work/agent` and
-the sandboxed egress.
+the sandboxed egress. And once these runs are emitting traces, [Trace
+analysis](./trace-analysis) feeds a run id back in to fetch and analyze its Tempo trace.
