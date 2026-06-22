@@ -133,7 +133,7 @@ The secret is always emitted as a `$VAR` env-ref (`$TRIAGE_SECRET`), never a
 literal. Run `export TRIAGE_SECRET=...` to set it. `--source` picks the sender preset
 that supplies the auth scheme (and signature header where the sender signs
 deliveries); see [`work create webhook`](#work-create-webhook) for the preset
-table. `--datasources` scopes the egress the triggered run may use.
+table. `--datasources` selects which datasource credentials the triggered run may use (it does not gate egress, which is open).
 
 | Option | Effect |
 |---|---|
@@ -254,7 +254,7 @@ on:
 The hook is served by `work serve` at `POST /hooks/<name>`; a smoke-test
 endpoint lives at `POST /api/webhooks/<name>/test`. The `secret` is always emitted
 as a `$VAR` env-ref (`$ALERTS_SECRET`), never a literal. Run `export ALERTS_SECRET=...`
-to set it. `--datasources` scopes the egress the triggered run may use.
+to set it. `--datasources` selects which datasource credentials the triggered run may use (it does not gate egress, which is open).
 
 `--source` selects the sender preset, which fixes the auth scheme (and the
 signature header for senders that sign their deliveries):
@@ -465,7 +465,7 @@ v=$(work version)
 | `--port <n>` | `serve` | Port the host binds (default `4280`; `1`–`65535`). |
 | `--inputs '<json>'` | `run`, file, `resume`, `rerun`, `retry` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`/`retry`, overrides the inputs stored in history. |
 | `--config <file>` | `run`, file | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
-| `--datasources <a,b>` | `run`, file | [Datasources](./configuration#datasources) this run's jobs may reach (comma-separated; the CLI counterpart of a webhook's `datasources` scope). Deny-by-default when omitted. |
+| `--datasources <a,b>` | `run`, file | [Datasources](./configuration#datasources) whose credentials this run's jobs may use (comma-separated; the CLI counterpart of a webhook's `datasources` scope). Deny-by-default: none injected when omitted. Selects credentials, not reachability — egress is open. |
 | `--no-global` | `run`, file | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
 | `--workdir <dir>` | `run`, file | Where job workspaces are staged (default: a temp dir). |
 | `--resume <id>` | `run` | Continue an interrupted run instead of starting a new one (same run id; finished jobs are reused). Project workflows only. |

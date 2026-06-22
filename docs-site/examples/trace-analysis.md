@@ -106,10 +106,13 @@ work run trace-analysis \
   --datasources grafana
 ```
 
-`--datasources grafana` scopes the run to that datasource — egress is deny-by-default
-for datasources, so a run reaches only what you name. Grab a run id from any `work`
-run's output. The agent's report comes back as the job's `analysis` output and is
-printed at the end of the run.
+`--datasources grafana` is what injects the Grafana token for this run — host-side,
+into the `Authorization` header for the Grafana host only. It's deny-by-default, so
+name nothing and no token is injected (the call would be unauthorized). It selects
+which datasource *credentials* the run may use, **not** what the run can reach:
+[public egress is open](../reference/configuration#datasources) either way. Grab a run
+id from any `work` run's output. The agent's report comes back as the job's `analysis`
+output and is printed at the end of the run.
 
 ## The observer, observed
 
@@ -129,7 +132,7 @@ lands in Tempo, not just a claim.
 
 | In the workflow | Engine feature it leans on |
 |---|---|
-| `grafana` datasource brokers the Tempo API token host-side | [Datasources](../reference/configuration#datasources) — scoped, deny-by-default egress with a header-injected credential the guest never sees |
+| `grafana` datasource brokers the Tempo API token host-side | [Datasources](../reference/configuration#datasources) — a deny-by-default, header-injected credential scoped to the Grafana host that the guest never sees |
 | `uses: action/tempo-trace` keeps the fetch/distill logic reusable | [Actions](../guide/actions) — a node action with the `INPUT_*` / `$WORK_OUTPUT` ABI |
 | `uses: work/agent` reads the distilled tree and writes the report | [Agent steps](../guide/agent-steps) — a real model in the job's sandbox |
 | consumes `work.run.id` / `gen_ai.usage.*` spans | [Observability](../guide/observability) — the traces this reads back |

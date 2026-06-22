@@ -2,7 +2,7 @@
 
 `work.json` declares the **providers** and **models** that
 [agent steps](../guide/agent-steps) use, and optionally the **datasources** a
-`run:` step may reach and the **webhooks** that can trigger a workflow. You only
+`run:` step authenticates to and the **webhooks** that can trigger a workflow. You only
 need it if your workflows run `uses: work/agent` steps, call out to a declared
 datasource, or accept webhook triggers; plain `run:` workflows need no config at
 all.
@@ -128,8 +128,10 @@ instead.
 | `resolve` | string | Pin the address the engine dials, like `curl --resolve` — an IP literal the `baseUrl` hostname maps to host-side. For an upstream public DNS can't name: a local Postgres on loopback, a docker-published port, an SSH tunnel, a local kind cluster. Pinning is an explicit grant, so it also lifts the sandbox's private-address block for the pinned IP. |
 
 Scoping is per run: a webhook-triggered run gets the hook's `datasources` list; a
-CLI run opts in with `--datasources <a,b>`. Without either, jobs get no datasource
-access.
+CLI run opts in with `--datasources <a,b>`. This is deny-by-default for the
+**credential** — name nothing and no datasource token is injected (and a datasource's
+pinned private host stays unreachable). It does not gate general egress (open — see
+below); it selects which datasource tokens a run may use.
 
 ## `secrets`
 
@@ -219,7 +221,7 @@ config alone can't make a workflow webhook-triggerable.
 | `auth` | `"hmac-sha256"` \| `"bearer"` | Delivery auth scheme. |
 | `secret` | string | Per-hook secret; literal, or `$VAR` / `${VAR}`. Verified constant-time. |
 | `signatureHeader` | string | Header the signature/token arrives in, e.g. `X-Hub-Signature-256`. |
-| `datasources` | string[] | Datasource keys the triggered run may use — scopes egress for that run. |
+| `datasources` | string[] | Datasource keys whose credentials the triggered run may use — injects those tokens (and lifts access to any private host they pin) for that run. Not an egress scope; egress is open. |
 
 The receiver is **fail-closed**: a delivery is rejected unless the workflow opted
 in, a matching hook exists, and the request authenticates. Deliveries are de-duped
