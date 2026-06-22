@@ -1,0 +1,35 @@
+name: tempo-trace
+description: >
+  Resolve a work run's OpenTelemetry trace in Grafana Tempo by its run id and emit
+  a distilled span tree. The run id is the correlation key — traces carry it as the
+  span attribute `work.run.id`, so this searches Tempo (`{ span.work.run.id = … }`)
+  to resolve the random OTLP trace id, fetches the full trace, and distills it.
+
+  Reaches Grafana through the `grafana` datasource: the service-account token is
+  injected host-side into the Authorization header (never in-guest), so the job
+  must be scoped with `--datasources grafana`. Pure node:builtin + global fetch —
+  no dependencies.
+inputs:
+  run_id:
+    type: string
+    required: true
+    description: the work.run.id to resolve (a UUID)
+  grafana_url:
+    type: string
+    required: true
+    description: Grafana stack base URL, e.g. https://<stack>.grafana.net
+  lookback_hours:
+    type: string
+    default: "720"
+    description: >
+      how far back to search Tempo for the run's trace, in hours (default 30 days).
+      A string because `${{ }}` interpolation into `with:` yields strings; index.mjs
+      coerces with Number().
+outputs:
+  tree:
+    description: distilled span tree (text) — the run → job → step → chat hierarchy with key attributes and per-span durations
+  trace_id:
+    description: the resolved OTLP trace id
+runs:
+  using: node
+  main: index.mjs

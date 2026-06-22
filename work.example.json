@@ -27,5 +27,12 @@
     "headers": {
       "Authorization": "Basic $GRAFANA_CLOUD_OTLP_TOKEN"
     }
+  },
+  "datasources": {
+    "grafana": {
+      "baseUrl": "https://<stack>.grafana.net",
+      "token": "$SERVICE_ACCOUNT_TOKEN",
+      "tokenEnv": "SERVICE_ACCOUNT_TOKEN"
+    }
   }
 }

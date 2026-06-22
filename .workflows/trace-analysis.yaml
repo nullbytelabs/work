@@ -1,0 +1,89 @@
+# trace-analysis
+# description: Given a work run id, fetch its OpenTelemetry trace from Grafana Cloud
+#              (Tempo) and have an agent analyze it. The run id is the correlation
+#              key: traces carry it as the span attribute `work.run.id`, so we first
+#              search Tempo (`{ span.work.run.id = "<id>" }`) to resolve the random
+#              OTLP trace id, then fetch the full span tree and distill it.
+#
+#              Grafana access is brokered by the `grafana` datasource (work.json):
+#              the service-account token is injected host-side into the Authorization
+#              header for dydx.grafana.net only and never enters the guest — so the
+#              analyzing agent (with open egress) can read the trace but cannot see or
+#              leak the token. Because datasources are deny-by-default, you MUST scope
+#              this run to it:
+#
+#                export SERVICE_ACCOUNT_TOKEN=...   # the glsa_ service-account token
+#                work run trace-analysis \
+#                  --inputs '{"run_id":"fe63caaf-e5c0-47c2-957a-76602b895cab"}' \
+#                  --datasources grafana
+#
+#              Agent-only + one HTTP fetch → machine: small.
+---
+name: trace-analysis
+
+inputs:
+  run_id:
+    type: string
+    required: true
+    description: the work.run.id to analyze (a UUID, as shown in `work` run output)
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+  lookback_hours:
+    type: number
+    default: 720
+    description: how far back to search Tempo for the run's trace (default 30 days)
+
+jobs:
+  analyze:
+    runs-on: work:base
+    machine: small
+    outputs:
+      analysis: ${{ steps.analyze.outputs.output }}
+    steps:
+      # Grafana/Tempo access lives in the tempo-trace action: it resolves the run id
+      # → trace and distills the span tree. The `grafana` datasource injects the
+      # token host-side (deny-by-default; requires --datasources grafana).
+      - id: fetch
+        name: resolve run id → trace and distill the span tree
+        uses: action/tempo-trace
+        with:
+          run_id: ${{ inputs.run_id }}
+          grafana_url: https://dydx.grafana.net
+          lookback_hours: ${{ inputs.lookback_hours }}
+
+      - id: analyze
+        name: analyze the trace
+        uses: work/agent
+        with:
+          prompt: |
+            You are a performance + reliability analyst. Below is a distilled
+            OpenTelemetry span tree for a single `work` engine run.
+
+            The span shape is: run {workflow} → job {name} → step {name} → chat
+            {model}. Per-span durations are in `[Nms]`. `⚠ ERROR` marks a failed
+            span. Token usage lives on `chat` spans as `gen_ai.usage.input_tokens` /
+            `gen_ai.usage.output_tokens` (+ cache_read / cache_creation when present).
+
+            Produce a concise markdown report with these sections:
+            - **Summary** — workflow, run id, total wall-clock, overall success/failure.
+            - **Critical path** — the spans that dominate wall-clock; name the long pole
+              and what it was (which job/step, and a `chat` model call vs a `run:` step).
+            - **Per-job / per-step timing** — a short table of the notable spans.
+            - **Token usage** — totals and per-model breakdown across all `chat` spans
+              (input/output, and cache hits if any); note "no token data" if absent.
+            - **Failures** — any `⚠ ERROR` spans, the `error.type`, and whether the run
+              still rolled up to success (continue-on-error).
+            - **Takeaways** — 2–4 specific, actionable observations (e.g. a slow step
+              worth caching, an unexpectedly large model call, a missing instrumentation).
+
+            Do not invent data not present in the trace. If something is absent, say so.
+
+            === DISTILLED SPAN TREE ===
+            ${{ steps.fetch.outputs.tree }}
+
+      - name: show analysis
+        env:
+          ANALYSIS: ${{ steps.analyze.outputs.output }}
+        run: |
+          printf '%s\n' "===== TRACE ANALYSIS BEGIN ====="
+          printf '%s\n' "$ANALYSIS"
+          printf '%s\n' "===== TRACE ANALYSIS END ====="
