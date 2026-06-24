@@ -2,96 +2,142 @@
  * tempo-trace action — resolve a work run's OpenTelemetry trace in Grafana Tempo
  * by its run id and emit a distilled span tree.
  *
- * ABI (work node action): inputs arrive as INPUT_<NAME>; the grafana service-account
- * token arrives as INPUT_GRAFANA_TOKEN (passed from the workflow as the
- * `grafana_token` input, ${{ secrets.GRAFANA_TOKEN }}, resolved host-side from the
- * work.json secrets: whitelist). Declared outputs are written to $WORK_OUTPUT.
+ * ABI (work node action): inputs arrive as INPUT_<NAME>; the Grafana service-account
+ * token arrives as INPUT_GRAFANA_TOKEN — the workflow passes it as the `grafana_token`
+ * input (${{ secrets.GRAFANA_TOKEN }}, resolved host-side from work.json's secrets:
+ * whitelist). The distilled tree is printed and written to $WORK_OUTPUT as `tree`.
  */
 import { writeFileSync } from "node:fs";
 
-function fail(msg) {
+const die = (msg) => {
   console.error(`tempo-trace: ${msg}`);
   process.exit(1);
-}
+};
 
-const base = (process.env.INPUT_GRAFANA_URL || "").replace(/\/$/, "");
+// ── inputs ───────────────────────────────────────────────────────────────────
+
+const baseUrl = (process.env.INPUT_GRAFANA_URL || "").replace(/\/$/, "");
 const token = process.env.INPUT_GRAFANA_TOKEN;
 const runId = process.env.INPUT_RUN_ID;
-const lookbackH = Number(process.env.INPUT_LOOKBACK_HOURS || "720");
-if (!base) fail("grafana_url input is empty");
-if (!runId) fail("run_id input is empty");
-if (!token) fail("grafana_token input is empty — pass ${{ secrets.GRAFANA_TOKEN }} (declared in the secrets: block of work.json)");
+const lookbackHours = Number(process.env.INPUT_LOOKBACK_HOURS || "720");
 
-const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
-async function gapi(path) {
-  const res = await fetch(base + path, { headers });
+if (!baseUrl) die("grafana_url input is empty");
+if (!runId) die("run_id input is empty");
+if (!token) die("grafana_token input is empty — pass ${{ secrets.GRAFANA_TOKEN }} (declared in the secrets: block of work.json)");
+
+// ── Grafana HTTP ─────────────────────────────────────────────────────────────
+
+const auth = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+
+async function grafana(path) {
+  const res = await fetch(baseUrl + path, { headers: auth });
   const body = await res.text();
-  if (!res.ok) fail(`HTTP ${res.status} for ${path}\n${body.slice(0, 400)}`);
+  if (!res.ok) die(`HTTP ${res.status} for ${path}\n${body.slice(0, 400)}`);
   try {
     return JSON.parse(body);
   } catch {
-    return fail(`non-JSON for ${path}: ${body.slice(0, 200)}`);
+    return die(`non-JSON for ${path}: ${body.slice(0, 200)}`);
   }
 }
 
-// 1. Discover the Tempo datasource uid.
-const ds = await gapi("/api/datasources");
-const tempo = (Array.isArray(ds) ? ds : []).find((d) => d.type === "tempo");
-if (!tempo) fail("no Tempo datasource on this Grafana stack");
-const proxy = `/api/datasources/proxy/uid/${tempo.uid}`;
-
-// 2. Resolve the random OTLP trace id from the work run id.
-const end = Math.floor(Date.now() / 1000);
-const start = end - lookbackH * 3600;
-const q = `{ span.work.run.id = "${runId}" }`;
-const search = await gapi(`${proxy}/api/search?q=${encodeURIComponent(q)}&start=${start}&end=${end}&limit=5`);
-const traces = search.traces || [];
-if (traces.length === 0) {
-  fail(`no trace found for work.run.id=${runId} within the last ${lookbackH}h ` +
-    `(widen lookback_hours, or check the run id / that telemetry landed)`);
+// Tempo is reached through Grafana's datasource proxy — find its uid once.
+async function tempoProxy() {
+  const sources = await grafana("/api/datasources");
+  const tempo = (Array.isArray(sources) ? sources : []).find((d) => d.type === "tempo");
+  if (!tempo) die("no Tempo datasource on this Grafana stack");
+  return `/api/datasources/proxy/uid/${tempo.uid}`;
 }
-const traceId = traces[0].traceID;
 
-// 3. Fetch the full trace (OTLP JSON) and distill it.
-const trace = await gapi(`${proxy}/api/traces/${traceId}`);
-
-const attrVal = (v) => v?.stringValue ?? v?.intValue ?? v?.boolValue ?? v?.doubleValue ?? (v?.arrayValue ? JSON.stringify(v.arrayValue) : "");
-const attrMap = (arr) => Object.fromEntries((arr || []).map((a) => [a.key, attrVal(a.value)]));
-const ns = (s) => (s ? Number(BigInt(s) / 1000000n) : 0);
-
-const spans = [];
-let resource = {};
-for (const b of trace.batches || trace.resourceSpans || []) {
-  resource = { ...resource, ...attrMap(b.resource?.attributes) };
-  for (const ss of b.scopeSpans || b.instrumentationLibrarySpans || [])
-    for (const s of ss.spans || [])
-      spans.push({ name: s.name, id: s.spanId, parent: s.parentSpanId || null, attrs: attrMap(s.attributes), status: s.status?.code ?? 0, start: ns(s.startTimeUnixNano), end: ns(s.endTimeUnixNano) });
+// The run id rides on spans as `work.run.id`; search resolves it to the random
+// OTLP trace id.
+async function resolveTraceId(proxy) {
+  const end = Math.floor(Date.now() / 1000);
+  const start = end - lookbackHours * 3600;
+  const query = encodeURIComponent(`{ span.work.run.id = "${runId}" }`);
+  const { traces = [] } = await grafana(`${proxy}/api/search?q=${query}&start=${start}&end=${end}&limit=5`);
+  if (traces.length === 0) {
+    die(`no trace found for work.run.id=${runId} within the last ${lookbackHours}h ` +
+      `(widen lookback_hours, or check the run id / that telemetry landed)`);
+  }
+  return traces[0].traceID;
 }
-if (spans.length === 0) fail(`trace ${traceId} returned no spans (ingestion lag?)`);
-const t0 = Math.min(...spans.map((s) => s.start));
-const total = Math.max(...spans.map((s) => s.end)) - t0;
 
-const keep = (k) => /^(gen_ai|work|cicd|error|host\.image)\./.test(k);
-const kids = (p) => spans.filter((s) => s.parent === p).sort((a, b) => a.start - b.start);
-const lines = [];
-lines.push(`run.id        ${runId}`);
-lines.push(`trace.id      ${traceId}`);
-lines.push(`service       ${resource["service.name"] ?? "?"} v${resource["service.version"] ?? "?"} (${resource["host.arch"] ?? "?"})`);
-lines.push(`spans/total   ${spans.length} spans · ${total}ms`);
-lines.push("");
-const render = (s, d) => {
-  lines.push(`${"  ".repeat(d)}▸ ${s.name}  [${s.end - s.start}ms]${s.status === 2 ? "  ⚠ ERROR" : ""}`);
-  for (const [k, v] of Object.entries(s.attrs).filter(([k]) => keep(k)).sort())
-    lines.push(`${"  ".repeat(d)}    ${k} = ${v}`);
-  for (const c of kids(s.id)) render(c, d + 1);
-};
-for (const r of spans.filter((s) => !s.parent || !spans.find((x) => x.id === s.parent)).sort((a, b) => a.start - b.start)) render(r, 0);
+// ── distill the OTLP trace into a span tree ──────────────────────────────────
 
-const out = lines.join("\n");
-console.log(out);
+const KEEP_ATTR = /^(gen_ai|work|cicd|error|host\.image)\./;
 
-// Emit declared outputs. $WORK_OUTPUT uses $GITHUB_OUTPUT semantics — the multi-line
-// tree is a heredoc value (→ steps.<id>.outputs.tree).
+const attrValue = (v) =>
+  v?.stringValue ?? v?.intValue ?? v?.boolValue ?? v?.doubleValue ?? (v?.arrayValue ? JSON.stringify(v.arrayValue) : "");
+const attrsOf = (list) => Object.fromEntries((list || []).map((a) => [a.key, attrValue(a.value)]));
+const toMs = (nanos) => (nanos ? Number(BigInt(nanos) / 1000000n) : 0);
+
+// Flatten OTLP's resource → scope → span nesting (both the modern `*Spans` keys
+// and the legacy `instrumentationLibrarySpans` shape) into a flat span list plus
+// the merged resource attributes.
+function flattenTrace(trace) {
+  const spans = [];
+  let resource = {};
+  for (const batch of trace.batches || trace.resourceSpans || []) {
+    resource = { ...resource, ...attrsOf(batch.resource?.attributes) };
+    for (const scope of batch.scopeSpans || batch.instrumentationLibrarySpans || []) {
+      for (const s of scope.spans || []) {
+        spans.push({
+          name: s.name,
+          id: s.spanId,
+          parent: s.parentSpanId || null,
+          attrs: attrsOf(s.attributes),
+          status: s.status?.code ?? 0,
+          start: toMs(s.startTimeUnixNano),
+          end: toMs(s.endTimeUnixNano),
+        });
+      }
+    }
+  }
+  return { spans, resource };
+}
+
+function renderTree(trace, traceId) {
+  const { spans, resource } = flattenTrace(trace);
+  if (spans.length === 0) die(`trace ${traceId} returned no spans (ingestion lag?)`);
+
+  const t0 = Math.min(...spans.map((s) => s.start));
+  const totalMs = Math.max(...spans.map((s) => s.end)) - t0;
+  const childrenOf = (id) => spans.filter((s) => s.parent === id).sort((a, b) => a.start - b.start);
+  const isRoot = (s) => !s.parent || !spans.some((x) => x.id === s.parent);
+
+  const lines = [
+    `run.id        ${runId}`,
+    `trace.id      ${traceId}`,
+    `service       ${resource["service.name"] ?? "?"} v${resource["service.version"] ?? "?"} (${resource["host.arch"] ?? "?"})`,
+    `spans/total   ${spans.length} spans · ${totalMs}ms`,
+    "",
+  ];
+
+  const walk = (span, depth) => {
+    const pad = "  ".repeat(depth);
+    const error = span.status === 2 ? "  ⚠ ERROR" : "";
+    lines.push(`${pad}▸ ${span.name}  [${span.end - span.start}ms]${error}`);
+    for (const [k, v] of Object.entries(span.attrs).filter(([k]) => KEEP_ATTR.test(k)).sort()) {
+      lines.push(`${pad}    ${k} = ${v}`);
+    }
+    for (const child of childrenOf(span.id)) walk(child, depth + 1);
+  };
+  for (const root of spans.filter(isRoot).sort((a, b) => a.start - b.start)) walk(root, 0);
+
+  return lines.join("\n");
+}
+
+// ── run ──────────────────────────────────────────────────────────────────────
+
+const proxy = await tempoProxy();
+const traceId = await resolveTraceId(proxy);
+const trace = await grafana(`${proxy}/api/traces/${traceId}`);
+const tree = renderTree(trace, traceId);
+
+console.log(tree);
+
+// $WORK_OUTPUT uses $GITHUB_OUTPUT semantics — the multi-line tree is a heredoc
+// value, exposed as steps.<id>.outputs.tree.
 if (process.env.WORK_OUTPUT) {
-  writeFileSync(process.env.WORK_OUTPUT, `tree<<__TRACE_EOF__\n${out}\n__TRACE_EOF__\ntrace_id=${traceId}\n`);
+  writeFileSync(process.env.WORK_OUTPUT, `tree<<__TRACE_EOF__\n${tree}\n__TRACE_EOF__\ntrace_id=${traceId}\n`);
 }
