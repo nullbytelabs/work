@@ -22,7 +22,6 @@ import { failUsage, prog } from "../cli-util.ts";
 import { CODE, paint, shouldColor } from "../tui/palette.ts";
 import { slug } from "./slug.ts";
 import { planWrites, executeWrites } from "./write.ts";
-import { runCreateDatasource } from "./datasource.ts";
 import { runCreateImage } from "./image.ts";
 import {
   runCreateWebhook,
@@ -46,10 +45,9 @@ import {
 interface CreateOptions {
   rawName: string;
   template: TemplateName;
-  /** Opt the generated workflow into webhook triggering (also implied by --source/--datasources). */
+  /** Opt the generated workflow into webhook triggering (also implied by --source). */
   webhook: boolean;
   source: string | undefined;
-  datasources: string[];
   force: boolean;
   dryRun: boolean;
 }
@@ -59,7 +57,6 @@ function parseCreateArgs(argv: string[]): CreateOptions {
   let template: TemplateName = "hello-world";
   let webhook = false;
   let source: string | undefined;
-  let datasources: string[] = [];
   let force = false;
   let dryRun = false;
 
@@ -77,11 +74,6 @@ function parseCreateArgs(argv: string[]): CreateOptions {
       if (!v) failUsage(`--source requires a source id (${Object.keys(SOURCE_PRESETS).join(" | ")})`);
       source = v;
       webhook = true; // naming a source opts the workflow into webhook triggering
-    } else if (arg === "--datasources") {
-      const v = argv[++i];
-      if (!v) failUsage("--datasources requires a comma-separated list");
-      datasources = v.split(",").map((s) => s.trim()).filter(Boolean);
-      webhook = true; // scoping datasources only makes sense for a webhook trigger
     } else if (arg === "--force" || arg === "-f") {
       force = true;
     } else if (arg === "--dry-run") {
@@ -91,7 +83,7 @@ function parseCreateArgs(argv: string[]): CreateOptions {
       process.stdout.write(
         `Usage:\n` +
           `  ${p} create workflow <name> [--template ${TEMPLATES.join("|")}] ` +
-          `[--webhook [--source ${Object.keys(SOURCE_PRESETS).join("|")}]] [--datasources a,b] [--force] [--dry-run]\n`,
+          `[--webhook [--source ${Object.keys(SOURCE_PRESETS).join("|")}]] [--force] [--dry-run]\n`,
       );
       process.exit(0);
     } else if (arg.startsWith("-")) {
@@ -104,7 +96,7 @@ function parseCreateArgs(argv: string[]): CreateOptions {
   }
 
   if (rawName === undefined) failUsage("create workflow requires a name, e.g. `create workflow deploy`");
-  return { rawName, template, webhook, source, datasources, force, dryRun };
+  return { rawName, template, webhook, source, force, dryRun };
 }
 
 /** Validate generated workflow YAML through the real pipeline before writing. */
@@ -126,13 +118,12 @@ export function assertValidWorkflow(name: string, yamlText: string): void {
 }
 
 /**
- * Every `create` is `create <noun> <name>` — `workflow`, `datasource`, `image`,
- * `webhook`. The grammar is uniform (no magical bare form), which also removes the
- * old noun/name ambiguity: a workflow can again be named `image` or `datasource`.
+ * Every `create` is `create <noun> <name>` — `workflow`, `image`, `webhook`. The
+ * grammar is uniform (no magical bare form), which also removes the old noun/name
+ * ambiguity: a workflow can again be named `image` or `webhook`.
  */
 const NOUN_HANDLERS: Record<string, (argv: string[], cwd: string) => Promise<number>> = {
   workflow: runCreateWorkflow,
-  datasource: runCreateDatasource,
   image: runCreateImage,
   webhook: runCreateWebhook,
 };
@@ -142,10 +133,9 @@ function familyUsage(): string {
   return (
     `Usage: ${p} create <resource> <name> [options]\n\n` +
     `Resources:\n` +
-    `  ${p} create workflow <name> [--template ${TEMPLATES.join("|")}] [--webhook [--source <id>]] [--datasources a,b]\n` +
-    `  ${p} create datasource <name> [--preset <id>] [--url <baseUrl>]\n` +
+    `  ${p} create workflow <name> [--template ${TEMPLATES.join("|")}] [--webhook [--source <id>]]\n` +
     `  ${p} create image <name>\n` +
-    `  ${p} create webhook <name> --workflow <existing> [--source <id>] [--datasources a,b]\n\n` +
+    `  ${p} create webhook <name> --workflow <existing> [--source <id>]\n\n` +
     `Common flags: --force, --dry-run.\n`
   );
 }
@@ -209,7 +199,7 @@ async function runCreateWorkflow(argv: string[], cwd: string): Promise<number> {
   // Greenfield webhook: wire the matching config half (webhooks.<name>) AFTER the
   // template files land, so the merge reads any work.json the template just wrote.
   if (source) {
-    const entry = buildWebhookEntry({ hook: name, workflow: name, source, datasources: opts.datasources });
+    const entry = buildWebhookEntry({ hook: name, workflow: name, source });
     await wireWebhookConfig(cwd, name, entry, { force: opts.force, dryRun: opts.dryRun, color });
   }
 

@@ -8,7 +8,6 @@
  */
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { UserFacingError } from "../errors.ts";
@@ -30,44 +29,9 @@ export interface ModelConfig {
 }
 
 /**
- * A named external data source a plain `run:` step may reach with an injected
- * header secret (e.g. grafana, an internal API). Like `providers`, the secret
- * `token` is operator-owned and supports `$VAR` / `${VAR}` expansion so the file
- * itself need not hold it. The `datasource` egress resolver derives the allowlist
- * host from `baseUrl` and injects `token` host-side only — the guest references
- * the placeholder env var (`tokenEnv`) but **never sees the real value** (Gondolin
- * swaps it into the outbound header for the allowlisted host only).
- */
-export interface DatasourceConfig {
-  /** Base URL; its host is the egress allowlist entry for this datasource. */
-  baseUrl: string;
-  /** Secret token; literal, or `$VAR` / `${VAR}` to read from the environment. */
-  token?: string;
-  /** Outbound header the swapped token rides in (default the target's default, e.g. Authorization). */
-  tokenHeader?: string;
-  /**
-   * Env-var name the `run:` step references (e.g. `$GRAFANA_TOKEN`). The resolver
-   * injects the real value under this name; the guest only ever sees the
-   * placeholder. Defaults (per the resolver) to `<NAME>_TOKEN` from the datasource key.
-   */
-  tokenEnv?: string;
-  /**
-   * Pin the address the engine dials for this datasource, like curl's
-   * `--resolve` — an IP literal the `baseUrl` hostname maps to host-side. For an
-   * upstream public DNS can't name: a service on the engine host's loopback
-   * (e.g. a local kind cluster at 127.0.0.1), a docker-published port, an SSH
-   * tunnel. Pinning is an explicit operator grant, so it also lifts the
-   * sandbox's private-address block for the pinned IP.
-   */
-  resolve?: string;
-}
-
-/**
  * A named webhook receiver entry (per §9). The committed workflow names this via
  * `on: webhook: { secret: <name> }` — a *reference*, never a secret. Each hook
- * carries its own `$ENV` secret (per-hook scoping) and may declare which
- * `datasources` its triggered run is allowed to use (passed to the datasource
- * egress resolver as the scoping allowlist).
+ * carries its own `$ENV` secret (per-hook scoping).
  */
 export interface WebhookConfig {
   /** Workflow name this hook triggers. */
@@ -80,8 +44,6 @@ export interface WebhookConfig {
   secret?: string;
   /** Header the delivery signature/token arrives in, e.g. `X-Hub-Signature-256`. */
   signatureHeader?: string;
-  /** Datasource keys this hook's triggered run may use (scopes the egress resolver). */
-  datasources?: string[];
 }
 
 /**
@@ -113,16 +75,14 @@ export interface PiWorkflowsConfig {
   models: Record<string, ModelConfig>;
   /** Model alias used when an agent step doesn't specify `with.model`. */
   defaultModel?: string;
-  /** Named external data sources a plain `run:` step may reach (egress + header secret). */
-  datasources?: Record<string, DatasourceConfig>;
   /**
    * Whitelist of host secrets a workflow may address as `${{ secrets.<name>}}`.
    * Each value is a literal or a `$VAR`/`${VAR}` env reference (the
-   * `$FIREWORKS_TOKEN`/`$GRAFANA_TOKEN` pattern). Whitelisted secrets flow into the
-   * guest env (path b — for CLIs that must hold the credential to sign, like
-   * aws/gcloud/kubectl); anything not listed is unaddressable. See
-   * docs/egress-walk-back.md. (For a token you want *never* in the guest, prefer a
-   * datasource — host-side header-swap.)
+   * `$FIREWORKS_TOKEN`/`$GRAFANA_TOKEN` pattern). Whitelisted secrets are resolved
+   * host-side and flow into the guest env, where a step or action reads them (e.g.
+   * a CLI that must hold the credential to sign, like aws/gcloud/kubectl, or an
+   * action that forwards the token in a request header). Anything not listed is
+   * unaddressable.
    */
   secrets?: Record<string, string>;
   /** Named webhook receivers (operator-owned; referenced by `on: webhook`). */
@@ -153,7 +113,7 @@ export function expandEnv(value: string): string {
 
 /**
  * Like `expandEnv`, but **throws** if a referenced variable is unset. Use for a
- * secret that gets injected and used (a model `apiKey`, a datasource `token`),
+ * secret that gets injected and used (a model `apiKey`, a `secrets:` value),
  * where silently expanding `$MISSING` to `""` would inject a blank credential.
  * `label` names the config field in the error.
  */
@@ -189,12 +149,9 @@ export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
   };
   const defaultModel = parseDefaultModel(raw);
   if (defaultModel !== undefined) config.defaultModel = defaultModel;
-  // `datasources`/`webhooks` are OPTIONAL — absent is fine. Shape-only validation
-  // here (no cross-refs): a webhook may name a datasource defined in a *different*
-  // layer, so we only reject malformed-in-isolation entries now; cross-refs live
-  // in `validateConfig` post-merge, matching the providers/models philosophy.
-  const datasources = parseDatasources(raw);
-  if (datasources) config.datasources = datasources;
+  // `webhooks` is OPTIONAL — absent is fine. Shape-only validation here (no
+  // cross-refs): cross-refs live in `validateConfig` post-merge, matching the
+  // providers/models philosophy.
   const secrets = parseSecrets(raw);
   if (secrets) config.secrets = secrets;
   const webhooks = parseWebhooks(raw);
@@ -246,38 +203,11 @@ function parseDefaultModel(raw: Record<string, unknown>): string | undefined {
   return raw.defaultModel;
 }
 
-function parseDatasources(raw: Record<string, unknown>): Record<string, DatasourceConfig> | undefined {
-  if (raw.datasources === undefined) return undefined;
-  if (!isObject(raw.datasources)) throw new UserFacingError("config.datasources must be an object");
-  const datasources: Record<string, DatasourceConfig> = {};
-  for (const [name, d] of Object.entries(raw.datasources)) {
-    if (!isObject(d) || typeof d.baseUrl !== "string") {
-      throw new UserFacingError(`config.datasources.${name} needs a string baseUrl`);
-    }
-    const label = `config.datasources.${name}`;
-    const dc: DatasourceConfig = { baseUrl: d.baseUrl };
-    const token = optStr(d.token, `${label}.token`);
-    if (token !== undefined) dc.token = token;
-    const tokenHeader = optStr(d.tokenHeader, `${label}.tokenHeader`);
-    if (tokenHeader !== undefined) dc.tokenHeader = tokenHeader;
-    const tokenEnv = optStr(d.tokenEnv, `${label}.tokenEnv`);
-    if (tokenEnv !== undefined) dc.tokenEnv = tokenEnv;
-    if (d.resolve !== undefined) {
-      if (typeof d.resolve !== "string" || isIP(d.resolve) === 0) {
-        throw new UserFacingError(`${label}.resolve must be an IP address literal (like curl --resolve)`);
-      }
-      dc.resolve = d.resolve;
-    }
-    datasources[name] = dc;
-  }
-  return datasources;
-}
-
 /**
  * `secrets:` — a flat name → value whitelist. Each value is a string (literal or
  * `$VAR`/`${VAR}` env reference, expanded host-side at run time). Names are the
  * keys a workflow addresses as `${{ secrets.<name> }}`. Shape-only here; `$ENV`
- * expansion happens at injection time (`run.ts`), like a datasource token.
+ * expansion happens at injection time (`run.ts`).
  */
 function parseSecrets(raw: Record<string, unknown>): Record<string, string> | undefined {
   if (raw.secrets === undefined) return undefined;
@@ -322,12 +252,6 @@ function parseWebhookEntry(name: string, w: unknown): WebhookConfig {
   if (secret !== undefined) wc.secret = secret;
   const signatureHeader = optStr(w.signatureHeader, `${label}.signatureHeader`);
   if (signatureHeader !== undefined) wc.signatureHeader = signatureHeader;
-  if (w.datasources !== undefined) {
-    if (!Array.isArray(w.datasources) || !w.datasources.every((s) => typeof s === "string")) {
-      throw new UserFacingError(`${label}.datasources must be an array of strings`);
-    }
-    wc.datasources = w.datasources as string[];
-  }
   return wc;
 }
 
@@ -385,12 +309,9 @@ export function mergeConfig(base: PiWorkflowsConfig, over: PiWorkflowsConfig): P
   const defaultModel = over.defaultModel ?? base.defaultModel;
   if (defaultModel !== undefined) merged.defaultModel = defaultModel;
 
-  // `datasources`/`webhooks` merge by key like providers/models — a colliding
-  // entry replaced wholesale; an omitted map inherits the lower layer (so we only
-  // set the merged key when at least one layer supplied it).
-  if (base.datasources || over.datasources) {
-    merged.datasources = { ...base.datasources, ...over.datasources };
-  }
+  // `webhooks` merges by key like providers/models — a colliding entry replaced
+  // wholesale; an omitted map inherits the lower layer (so we only set the merged
+  // key when at least one layer supplied it).
   if (base.secrets || over.secrets) {
     merged.secrets = { ...base.secrets, ...over.secrets };
   }
@@ -415,21 +336,10 @@ export function validateConfig(config: PiWorkflowsConfig): PiWorkflowsConfig {
     throw new UserFacingError(`config.defaultModel must name a model in config.models`);
   }
 
-  // Cross-refs for the new sections, run once post-merge. Kept LENIENT: a webhook
-  // may legitimately reference a datasource defined in another layer, so we only
-  // validate a webhook's datasource refs when the merged config actually has a
-  // `datasources` map (i.e. some layer declared one) — otherwise we can't tell a
-  // typo from a still-to-be-merged layer and stay quiet.
+  // Cross-refs for the webhook section, run once post-merge.
   for (const [name, w] of Object.entries(config.webhooks ?? {})) {
     if (w.workflow.trim() === "") {
       throw new UserFacingError(`config.webhooks.${name}.workflow must be a non-empty string`);
-    }
-    if (w.datasources && config.datasources) {
-      for (const ds of w.datasources) {
-        if (!(ds in config.datasources)) {
-          throw new UserFacingError(`config.webhooks.${name} references unknown datasource "${ds}"`);
-        }
-      }
     }
   }
   return config;

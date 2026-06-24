@@ -422,7 +422,6 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
         workflow: entry.workflow,
         enabled: entry.enabled !== false,
         auth: entry.auth ?? "bearer",
-        datasources: entry.datasources ?? [],
         configured: (entry.secret ? expandEnv(entry.secret) : "").length > 0,
       })),
     );
@@ -654,9 +653,6 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       layout: layoutFields(layout),
       plan,
       trigger: "webhook",
-      // Scope this run's datasource egress to exactly what the hook declares, so
-      // a fact-finding `run:` can reach those APIs with header-injected tokens.
-      ...(entry.datasources ? { datasources: entry.datasources } : {}),
     });
     // L3 backpressure: under a storm we shed load with 429 + Retry-After (which
     // re-hits the fail-closed/auth path safely) rather than spawning more VMs.
@@ -881,7 +877,6 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       layout: layoutFields(layout),
       plan,
       trigger: "webhook",
-      ...(entry.datasources ? { datasources: entry.datasources } : {}),
     });
     if (!result.accepted) {
       recordDelivery({ hook: name, workflow: entry.workflow, result: "at_capacity", httpStatus: 429, sourceIp });
@@ -929,9 +924,6 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
  *
  * Dispatching only re-enqueues the runs (each returns immediately and proceeds in
  * the background under the run-concurrency cap); it does not await completion.
- * (A webhook run resumes without its original `datasources` egress scope — that
- * isn't persisted in history — so a datasource `run:` step would fail closed;
- * tracked as a follow-up.)
  */
 async function reconcileInterruptedRuns(deps: {
   runStore: RunRepository;

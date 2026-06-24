@@ -27,8 +27,8 @@ in [`work.json`](../reference/configuration):
   "datasources": {
     "grafana": {
       "baseUrl": "https://<stack>.grafana.net",
-      "token": "$SERVICE_ACCOUNT_TOKEN",
-      "tokenEnv": "SERVICE_ACCOUNT_TOKEN"
+      "token": "$GRAFANA_SERVICE_ACCOUNT_TOKEN",
+      "tokenEnv": "GRAFANA_SERVICE_ACCOUNT_TOKEN"
     }
   }
 }
@@ -99,7 +99,7 @@ the datasource, never as an input.
 ## Run it
 
 ```bash
-export SERVICE_ACCOUNT_TOKEN=glsa_...   # a Grafana service-account token
+export GRAFANA_SERVICE_ACCOUNT_TOKEN=glsa_...   # a Grafana service-account token
 
 work run trace-analysis \
   --inputs '{"run_id":"<run-id>"}' \

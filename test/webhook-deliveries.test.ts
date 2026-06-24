@@ -115,7 +115,7 @@ const config: PiWorkflowsConfig = {
   providers: {},
   models: {},
   webhooks: {
-    "deploy-incident": { workflow: "incident", auth: "bearer", secret: "$WEBHOOK_DELIV_SECRET", datasources: ["grafana"] },
+    "deploy-incident": { workflow: "incident", auth: "bearer", secret: "$WEBHOOK_DELIV_SECRET" },
     "plain-hook": { workflow: "plain", auth: "bearer", secret: "$WEBHOOK_DELIV_SECRET" },
     "secretless-hook": { workflow: "incident", auth: "bearer" },
   },
@@ -165,7 +165,6 @@ describe("webhook delivery endpoints", () => {
     assert.equal(deploy["workflow"], "incident");
     assert.equal(deploy["enabled"], true);
     assert.equal(deploy["auth"], "bearer");
-    assert.deepEqual(deploy["datasources"], ["grafana"]);
     assert.equal(deploy["configured"], true); // secret resolves
 
     // A configured-but-secretless hook reports configured:false.
@@ -174,7 +173,7 @@ describe("webhook delivery endpoints", () => {
 
     // The listed fields are exactly the contract — no `secret` anywhere.
     for (const h of hooks) {
-      assert.deepEqual(Object.keys(h).sort(), ["auth", "configured", "datasources", "enabled", "name", "workflow"]);
+      assert.deepEqual(Object.keys(h).sort(), ["auth", "configured", "enabled", "name", "workflow"]);
     }
     const serialized = JSON.stringify(hooks);
     assert.doesNotMatch(serialized, new RegExp(SECRET));

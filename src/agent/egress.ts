@@ -8,8 +8,8 @@
  * allowlist. Walling off the one shape operators reach for first (a pure `run:`
  * job) only pushed real work back onto the unsandboxed host. So this resolver
  * grants `["*"]` to every job and the runtime stops dead-ending plain `run:` jobs.
- * (Reaching *internal/private* ranges is still an explicit grant — a datasource
- * `resolve` pin — so opening public egress doesn't expose host-loopback services.)
+ * (Reaching *internal/private* ranges stays blocked by gondolin's default — opening
+ * public egress doesn't expose host-loopback services.)
  *
  * The load-bearing control stays: when a model is configured, each model host the
  * job touches gets its own header-only secret, injected under a per-host env-var

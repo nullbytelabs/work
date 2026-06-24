@@ -21,7 +21,6 @@ import { createWorkHandler, makeAgentEgressResolver } from "./agent/index.ts";
 import { createActionUsesHandler, type SubUsesDispatch } from "./actions/index.ts";
 import { VERSION } from "./version.ts";
 import type { UsesHandler } from "./runtime/index.ts";
-import { composeResolvers, makeDatasourceEgressResolver } from "./egress/index.ts";
 import { RunRepository } from "./persistence/runs.ts";
 import { RunEventRepository } from "./persistence/run-events.ts";
 import { WebPresenter } from "./web/web-presenter.ts";
@@ -45,14 +44,6 @@ export interface StartRunOptions {
   runId?: string;
   /** Provider/model config for agent steps. */
   config?: PiWorkflowsConfig | undefined;
-  /**
-   * Datasource keys this run's jobs may reach (e.g. a webhook's `datasources`
-   * scope). Composed with the agent egress resolver and forwarded to the runtime,
-   * so a plain `run:` step in this run can reach an allowlisted datasource host
-   * with a header-injected token. Deny-by-default — omit and no datasource egress
-   * is granted.
-   */
-  datasources?: string[];
   /** Base working directory; a fresh temp dir is allocated when omitted. */
   workdir?: string;
   /**
@@ -175,11 +166,10 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
   // action's inner `uses:` sub-steps route through a late-bound dispatcher that
   // resolves by scheme over this same handler set — so `work/agent` and nested
   // `action/<name>` work inside a composite, and built-in `work/*` actions run via
-  // the action path. Per-job egress is the union of the agent/action resolver
-  // (allow-all for jobs with a uses-step + a host-scoped model key) and the
-  // datasource resolver (a scoped datasource host + injected token for a `run:`
-  // step). Secrets are injected host-side only — never entering the guest. An
-  // injected engine is shared (not closed per run).
+  // the action path. Per-job egress comes from the agent resolver: allow-all
+  // egress with a host-scoped model key injected host-side for any model-running
+  // step — never entering the guest. An injected engine is shared (not closed per
+  // run).
   const handlers: UsesHandler[] = [];
   const dispatch: SubUsesDispatch = (subCtx) => {
     const scheme = subCtx.uses.split("/", 1)[0]!;
@@ -220,10 +210,7 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
   const runtime = new AbsurdRuntime({
     engine,
     usesHandlers: handlers,
-    resolveJobNetwork: composeResolvers(
-      makeAgentEgressResolver(opts.config),
-      makeDatasourceEgressResolver(opts.config, opts.datasources ? { datasources: opts.datasources } : {}),
-    ),
+    resolveJobNetwork: makeAgentEgressResolver(opts.config),
     // The `work.json` `secrets:` whitelist, `$ENV`-expanded host-side, for
     // `${{ secrets.* }}` passthrough into a step's guest env (path b). Computed
     // up-front (above) so the value never reaches the durable plan and an

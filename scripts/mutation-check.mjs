@@ -88,10 +88,6 @@ const MUTATIONS = [
   { id: "M-model-key", file: "src/agent/egress.ts",
     find: "if (hosts.size > 0 && value !== undefined) {", replace: "if (false) {",
     why: "the model API key is never injected into the job network" },
-  { id: "M-datasource-deny", file: "src/egress/datasource.ts",
-    find: "if (scoped.length === 0) return undefined; // deny-by-default",
-    replace: "if (scoped.length === 0) return { allowedHosts: [] }; // deny-by-default",
-    why: "an unscoped job's datasource egress resolver fails open instead of returning deny" },
 ];
 
 // --- Safety: in-memory restore, even on crash -------------------------------

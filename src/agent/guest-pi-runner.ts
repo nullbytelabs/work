@@ -46,7 +46,7 @@ export function modelHostOf(baseUrl: string): string | undefined {
     // used as a gondolin `matchHostname` pattern, which treats `*` as a wildcard, so a
     // `*` in the host would scope the key to a pattern instead of one host — leaking it
     // to any matching host the agent's allow-all egress can reach. Refuse it (fail
-    // closed). Mirrors `hostOf` in egress/datasource.ts — keep the two in lockstep.
+    // closed).
     return host?.includes("*") ? undefined : host;
   } catch {
     return undefined;

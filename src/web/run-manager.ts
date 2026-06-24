@@ -68,8 +68,6 @@ export interface DispatchOptions {
   runId?: string;
   /** What started this run (default "dispatch"). */
   trigger?: RunTrigger;
-  /** Datasource keys this run's jobs may reach (a webhook's `datasources` scope). */
-  datasources?: string[];
 }
 
 export interface RunManagerOptions {
@@ -215,7 +213,6 @@ export class RunManager {
       ...(opts.layout.workflowDir !== undefined ? { workflowDir: opts.layout.workflowDir } : {}),
       runId: record.id,
       config: this.config,
-      ...(opts.datasources ? { datasources: opts.datasources } : {}),
       engine: this.engine,
       ...(this.makeTarget ? { makeTarget: this.makeTarget } : {}),
       ...(this.telemetry ? { telemetry: this.telemetry } : {}),

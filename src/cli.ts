@@ -43,11 +43,6 @@ interface CliArgs {
   config?: string;
   /** Skip the global config layer for a hermetic run. */
   noGlobal?: boolean;
-  /**
-   * Datasource keys this run's jobs may reach (`--datasources a,b`) — the CLI
-   * counterpart of a webhook's `datasources` scope. Deny-by-default when omitted.
-   */
-  datasources?: string[];
   /** `graph` subcommand: emit the DAG instead of running. */
   graph?: boolean;
   /** Graph output format (defaults to mermaid). */
@@ -64,6 +59,8 @@ interface CliArgs {
   runs?: boolean;
   /** `runs --status <s>`: filter the history by status. */
   runStatus?: string;
+  /** `runs --full`: print the full run id (UUID) instead of the short prefix. */
+  runsFull?: boolean;
   /** `resume <id>` / `rerun <id>` / `retry <id>`: recover a prior run by id
    *  (workflow + inputs from history). */
   recover?: { id: string; mode: "resume" | "rerun" | "retry" };
@@ -80,12 +77,12 @@ interface FlagState {
   inputs: Record<string, unknown>;
   config?: string;
   noGlobal: boolean;
-  datasources?: string[];
   format?: GraphFormat;
   steps: boolean;
   port?: number;
   resume?: string;
   status?: string;
+  full: boolean;
 }
 
 /** A flag handler: consumes from `argv` starting at `i` and returns the new index. */
@@ -131,19 +128,16 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
     if (!s.status) fail("--status requires a value (e.g. interrupted, failure)");
     return i;
   },
+  "--full": (_argv, i, s) => {
+    s.full = true;
+    return i;
+  },
   "--config": (argv, i, s) => {
     s.config = argv[++i];
     if (!s.config) fail("--config requires a path");
     return i;
   },
   "--inputs": (argv, i, s) => parseInputsFlag(argv, i, s),
-  "--datasources": (argv, i, s) => {
-    const raw = argv[++i];
-    if (!raw) fail("--datasources requires a comma-separated list of datasource names");
-    s.datasources = raw.split(",").map((x) => x.trim()).filter((x) => x.length > 0);
-    if (s.datasources.length === 0) fail("--datasources requires at least one datasource name");
-    return i;
-  },
   "--quiet": (_argv, i, s) => {
     s.quiet = true;
     return i;
@@ -173,7 +167,7 @@ function parseInputsFlag(argv: string[], i: number, s: FlagState): number {
 
 /** Tokenize argv into a FlagState (flags + positionals); `-h`/`--help` exits. */
 function parseFlags(argv: string[]): FlagState {
-  const s: FlagState = { positionals: [], quiet: false, inputs: {}, noGlobal: false, steps: false };
+  const s: FlagState = { positionals: [], quiet: false, inputs: {}, noGlobal: false, steps: false, full: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     const handler = FLAG_HANDLERS[arg];
@@ -193,7 +187,7 @@ function parseFlags(argv: string[]): FlagState {
 
 /** The flags shared by every command form. */
 function buildCommon(s: FlagState) {
-  return { workdir: s.workdir, quiet: s.quiet, inputs: s.inputs, noGlobal: s.noGlobal, ...(s.workspace ? { workspace: s.workspace } : {}), ...(s.config ? { config: s.config } : {}), ...(s.datasources ? { datasources: s.datasources } : {}) };
+  return { workdir: s.workdir, quiet: s.quiet, inputs: s.inputs, noGlobal: s.noGlobal, ...(s.workspace ? { workspace: s.workspace } : {}), ...(s.config ? { config: s.config } : {}) };
 }
 type CommonArgs = ReturnType<typeof buildCommon>;
 
@@ -202,6 +196,7 @@ function parseArgs(argv: string[]): CliArgs {
   const common = buildCommon(s);
   if (s.positionals[0] === "runs") return resolveRuns(s, common);
   if (s.status) fail("--status only applies to `runs`");
+  if (s.full) fail("--full only applies to `runs`");
   if (s.positionals[0] === "resume") return resolveRecover(s, common, "resume");
   if (s.positionals[0] === "rerun") return resolveRecover(s, common, "rerun");
   if (s.positionals[0] === "retry") return resolveRecover(s, common, "retry");
@@ -246,7 +241,7 @@ function resolveRuns(s: FlagState, common: CommonArgs): CliArgs {
   if (s.positionals.length > 1) fail(`runs takes no positional arguments (got ${s.positionals[1]})`);
   if (s.format || s.steps) fail("--format / --steps only apply to `graph`");
   if (s.resume) fail("--resume applies to a workflow run, not `runs`");
-  return { runs: true, ...(s.status ? { runStatus: s.status } : {}), ...common };
+  return { runs: true, ...(s.status ? { runStatus: s.status } : {}), ...(s.full ? { runsFull: true } : {}), ...common };
 }
 
 // `serve` — boot the long-lived host (HTTP API + console + webhook receiver +
@@ -305,14 +300,14 @@ function printUsage(): void {
   const prog = process.env["PI_WF_PROG"] ?? "work";
   process.stderr.write(
     "Usage:\n" +
-      `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
-      `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
+      `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
+      `  ${prog} [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
       `  ${prog} graph <workflow.yaml> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] graph <name> [--format mermaid|dot|json|ascii] [--steps]\n` +
       `  ${prog} [--workspace <dir>] resume <id>   # continue an interrupted run (reuse finished jobs)\n` +
       `  ${prog} [--workspace <dir>] rerun <id>    # re-run a past run fresh, same inputs\n` +
       `  ${prog} [--workspace <dir>] retry <id>    # re-run only a past run's failed jobs (reuse the passing ones)\n` +
-      `  ${prog} [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]\n` +
+      `  ${prog} [--workspace <dir>] runs [--status queued|running|success|failure|interrupted] [--full]\n` +
       `  ${prog} [--workspace <dir>] logs <id>     # replay a past run's stored log (web-run logs)\n` +
       `  ${prog} [--workspace <dir>] serve [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
@@ -334,8 +329,8 @@ function fail(msg: string): never {
  */
 async function runWebServer(args: CliArgs): Promise<void> {
   const workspace = args.workspace ?? process.cwd();
-  // Load config so agent steps AND the webhook receiver (`webhooks:` /
-  // `datasources:`) work. With no explicit `--config`, prefer the *workspace's*
+  // Load config so agent steps AND the webhook receiver (`webhooks:`) work.
+  // With no explicit `--config`, prefer the *workspace's*
   // project config (the UI/webhooks are scoped to that workspace, which may
   // differ from cwd), falling back to the cwd default otherwise.
   const wsConfig = join(workspace, PROJECT_CONFIG_FILENAME);
@@ -376,13 +371,15 @@ function relTime(epochMs: number): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-/** Print the run history as an aligned table, newest-first, with a resume hint. */
-function printRuns(rows: RunRow[], filter: string | undefined): void {
+/** Print the run history as an aligned table, newest-first, with a resume hint.
+ *  `full` widens the ID column to the complete run id (UUID) instead of the
+ *  8-char prefix — handy for copy-pasting into workflows that want the full id. */
+function printRuns(rows: RunRow[], filter: string | undefined, full = false): void {
   if (rows.length === 0) {
     process.stdout.write(filter ? `no ${filter} runs\n` : "no runs yet\n");
     return;
   }
-  const idW = 8;
+  const idW = full ? Math.max("ID".length, ...rows.map((r) => r.id.length)) : 8;
   const nameW = Math.max("WORKFLOW".length, ...rows.map((r) => r.name.length));
   const statusW = Math.max("STATUS".length, ...rows.map((r) => r.status.length));
   process.stdout.write(`${"ID".padEnd(idW)}  ${"WORKFLOW".padEnd(nameW)}  ${"STATUS".padEnd(statusW)}  WHEN\n`);
@@ -414,7 +411,7 @@ async function listRuns(args: CliArgs): Promise<void> {
     const repo = new RunRepository(engine);
     await repo.ensureSchema();
     const rows = await repo.list();
-    printRuns(args.runStatus ? rows.filter((r) => r.status === args.runStatus) : rows, args.runStatus);
+    printRuns(args.runStatus ? rows.filter((r) => r.status === args.runStatus) : rows, args.runStatus, args.runsFull);
   } finally {
     await engine.close();
   }
@@ -756,7 +753,6 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
     ...(presenter.hooks ? { hooks: presenter.hooks } : {}),
     config,
     runId,
-    ...(args.datasources ? { datasources: args.datasources } : {}),
     ...(dataDir ? { dataDir } : {}),
     ...(args.workdir ? { workdir: args.workdir } : {}),
   });

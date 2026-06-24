@@ -56,9 +56,9 @@ export interface GondolinTargetConfig {
   allowedHosts?: string[];
   /**
    * Hosts allowed to resolve to internal/private IP ranges (gondolin blocks
-   * those by default, even when allowlisted). Needed for on-box upstreams —
-   * today the egress e2e test's fake model host; a local datasource would use
-   * the same knob. Entries are implicitly part of the allowlist.
+   * those by default, even when allowlisted). Needed for on-box upstreams — today
+   * the egress e2e test's fake model host. Entries are implicitly part of the
+   * allowlist.
    */
   allowedInternalHosts?: string[];
   /**
@@ -163,8 +163,8 @@ export class GondolinTarget implements ExecutionTarget {
     if (imagePath) createOpts["sandbox"] = { imagePath };
 
     // Install HTTP mediation ONLY when this job has something to mediate — a model
-    // host or datasource (an allowlist + host-side secret injection that keeps the
-    // real key out of the guest). A job with none of that gets NO hooks, and gets
+    // host (an allowlist + host-side secret injection that keeps the real key out
+    // of the guest). A job with none of that gets NO hooks, and gets
     // OPEN outbound network as a result: that's how a plain `run: npm install`
     // reaches the registry. Mediation here scopes *injected secrets* to their host;
     // it is NOT a sandbox over general egress for (trusted) workflow steps.
