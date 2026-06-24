@@ -131,7 +131,17 @@ async function runWorkAgent(ctx: UsesContext, opts: WorkHandlerOptions): Promise
     stdout: res.text,
     stderr: warning,
     outputs: { output: res.text },
-    ...(model ? { agent: { model: model.model, ...(provider ? { provider } : {}), ...(res.usage ? { usage: res.usage } : {}) } } : {}),
+    ...(model
+      ? {
+          agent: {
+            model: model.model,
+            ...(provider ? { provider } : {}),
+            ...(res.usage ? { usage: res.usage } : {}),
+            ...(res.setupMs !== undefined ? { setupMs: res.setupMs } : {}),
+            ...(res.runMs !== undefined ? { runMs: res.runMs } : {}),
+          },
+        }
+      : {}),
   };
 }
 

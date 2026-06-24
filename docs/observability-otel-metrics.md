@@ -104,7 +104,7 @@ run {workflow}                         span, SpanKind.SERVER     work.run.id, ci
    ├─ stage          (job sub-phase)   span, SpanKind.INTERNAL   work.job.phase
    ├─ provision      (job sub-phase)   span, SpanKind.INTERNAL   work.job.phase  (VM boot)
    ├─ step {step}                      span, SpanKind.INTERNAL   work.step.*, cicd.pipeline.task.*
-   │  └─ chat {model} (agent steps)    span, SpanKind.INTERNAL   gen_ai.*
+   │  └─ chat {model} (agent steps)    span, SpanKind.INTERNAL   gen_ai.*, work.agent.setup_ms/run_ms
    └─ teardown       (job sub-phase)   span, SpanKind.INTERNAL   work.job.phase
 ```
 

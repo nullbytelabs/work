@@ -92,7 +92,7 @@ function playReviewJob(h: any, jobId = "review__compiler__scan") {
     name: "review compiler + spec",
     status: "success",
     exitCode: 0,
-    agent: { model: "claude-opus-4", usage: { inputTokens: 18200, outputTokens: 1450, requests: 3 } },
+    agent: { model: "claude-opus-4", usage: { inputTokens: 18200, outputTokens: 1450, requests: 3 }, setupMs: 30, runMs: 70 },
   });
   h.onJobEnd(jobId, { id: jobId, status: "success" });
 }
@@ -212,6 +212,23 @@ describe("observability emitter — Layer 1 (unit)", () => {
     assert.equal(chat.attributes["gen_ai.request.model"], "claude-opus-4");
     assert.equal(chat.attributes["gen_ai.usage.input_tokens"], 18200);
     assert.equal(chat.attributes["gen_ai.usage.output_tokens"], 1450);
+  });
+
+  it("splits the agent step into setup vs model time (attributes, no extra span)", () => {
+    h.hooks.onWorkflowStart({ runId: "4f9a2c", workflow: "ci" });
+    playReviewJob(h.hooks);
+    h.hooks.onWorkflowEnd({ name: "ci", status: "success" });
+
+    const spans = h.spans();
+    const step = one(spans, "step review compiler + spec");
+    const chat = one(spans, "chat claude-opus-4");
+    // The split lives as attributes on the existing chat span — no new spans.
+    assert.equal(chat.attributes["work.agent.setup_ms"], 30);
+    assert.equal(chat.attributes["work.agent.run_ms"], 70);
+    assert.equal(byName(spans, "chat claude-opus-4").length, 1, "no extra agent child spans");
+    // The chat span starts at/after the step start (narrowed past the setup window).
+    const ms = (s: any) => s.startTime[0] * 1000 + s.startTime[1] / 1e6;
+    assert.ok(ms(chat) >= ms(step) - 1, "chat span starts no earlier than its step");
   });
 
   it("marks a failed step ERROR with error.type, but the continue-on-error job stays success", () => {

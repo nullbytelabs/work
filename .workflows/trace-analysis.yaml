@@ -76,6 +76,10 @@ jobs:
             `teardown` (VM dispose); they carry `work.job.phase`. Token usage lives
             on `chat` spans as `gen_ai.usage.input_tokens` /
             `gen_ai.usage.output_tokens` (+ cache_read / cache_creation when present).
+            For an agent step, the `chat` span also carries `work.agent.setup_ms`
+            (staging + in-guest Pi install) and `work.agent.run_ms` (the model loop);
+            the chat span is the model-loop window, so the gap between its parent
+            step and it is the setup cost — call out which dominates.
 
             Produce a concise markdown report with these sections:
             - **Summary** — workflow, run id, total wall-clock, overall success/failure.

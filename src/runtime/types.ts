@@ -27,6 +27,11 @@ export interface StepAgentInfo {
   model: string;
   provider?: string;
   usage?: StepAgentUsage;
+  /** Setup wall-clock (staging + in-guest Pi install), ms — telemetry splits this
+   *  from the agent loop so a slow step is attributable to setup vs the model. */
+  setupMs?: number;
+  /** Agent-loop wall-clock (model calls + tools), ms. */
+  runMs?: number;
 }
 
 export interface StepResult {

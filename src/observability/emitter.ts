@@ -83,6 +83,8 @@ export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
       [ATTR.GEN_AI_OPERATION_NAME]: "chat",
       [ATTR.GEN_AI_PROVIDER_NAME]: agent.provider ?? GEN_AI_PROVIDER_ANTHROPIC,
       [ATTR.GEN_AI_REQUEST_MODEL]: agent.model,
+      ...(agent.setupMs !== undefined ? { [ATTR.WORK_AGENT_SETUP_MS]: agent.setupMs } : {}),
+      ...(agent.runMs !== undefined ? { [ATTR.WORK_AGENT_RUN_MS]: agent.runMs } : {}),
       ...(usage
         ? {
             [ATTR.GEN_AI_USAGE_INPUT_TOKENS]: usage.inputTokens,
@@ -93,9 +95,15 @@ export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
         : {}),
     };
     // The hook seam gives one start/end per step, not per model turn, so the leaf
-    // span carries the loop's cumulative usage over the step's own time bounds.
-    const chat = tracer.startSpan(`chat ${agent.model}`, { kind: SpanKind.INTERNAL, startTime: start, attributes }, stepCtx);
-    chat.end();
+    // span carries the loop's cumulative usage. Start it AFTER setup (the in-guest
+    // Pi install), so the chat span is the actual model-loop window — not the whole
+    // step — and the setup time shows as the gap before it. `work.agent.setup_ms`
+    // carries the exact number for querying. (No setupMs ⇒ falls back to step start;
+    // clamp to the end so a setupMs over the step's own duration can't invert the span.)
+    const chatEnd = Date.now();
+    const chatStart = Math.min(start + (agent.setupMs ?? 0), chatEnd);
+    const chat = tracer.startSpan(`chat ${agent.model}`, { kind: SpanKind.INTERNAL, startTime: chatStart, attributes }, stepCtx);
+    chat.end(chatEnd);
 
     mAgentRequests.add(usage?.requests ?? 1, { model: agent.model, result: stepRes });
     mAgentDuration.record((Date.now() - start) / 1000, { model: agent.model, result: stepRes });
