@@ -61,8 +61,8 @@ the rationale is the point.
   `sleepUntil` (a self-rescheduling ticker, not `pg_cron`), the web-server
   lifecycle as host, and `croner` for cron math.
 - [`tailnet-incident-response-research.md`](tailnet-incident-response-research.md) —
-  a cluster fleet and its LGTM telemetry stack as datasources over a Tailscale
-  tailnet, and the autonomous loop: PrometheusRule → Alertmanager → `work`
+  a cluster fleet and its LGTM telemetry stack reached over a Tailscale tailnet
+  (tokens via the `secrets:` whitelist), and the autonomous loop: PrometheusRule → Alertmanager → `work`
   webhooks → conditional diagnostic DAGs → ops notify → remediation hand-off.
 - [`gondolin-custom-images.md`](gondolin-custom-images.md) — the `work:*`
   image namespace: lazy builds through Gondolin's own builder, tagged store.
@@ -82,7 +82,7 @@ the rationale is the point.
 - [`generator-expansion-research.md`](generator-expansion-research.md) — a
   state-of-the-generators assessment: how useful `init`/`create` are today, the
   docs-site coverage gaps, and the ranked unaccounted-for surfaces to scaffold
-  next (action packages, datasource/webhook config, template variety).
+  next (action packages, webhook config, template variety).
 
 ## Testing & quality
 

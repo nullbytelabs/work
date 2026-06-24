@@ -64,7 +64,7 @@ host-execution mode), but it concentrates risk (below) and accrues redundancy.
 
 - **Strong, multi-tier:** `compiler/` (15 files, 6 property-based — the best-tested
   layer by far), `spec/`, `runtime/` (deep durability coverage), `egress/`
-  (`datasource-egress.test.ts` is the model adversarial file), `web/` server/SSE
+  (`agent-egress.test.ts` is the model adversarial file), `web/` server/SSE
   (9 files), `actions/`, `scaffold/`.
 - **Thin / tested at the wrong altitude:** `targets/gondolin` — the single most
   security-critical, complex module — has only arg-building unit tests plus one
@@ -212,10 +212,9 @@ of the reusable-namespacing code rather than calling the real function, and
   `compiler.test.ts:85` (implicit-runs-on warning prose — **verify it still fires
   under this branch's `work:base`-default change**). Prefer the JSON-format
   assertions (`graph.test.ts:67`) as the model.
-- **Tests that don't test their names**: `scaffold-datasource.test.ts:19`
-  ("matches the resolver derivation" — never imports the resolver),
-  `scaffold-webhook.test.ts:163` ("requires --workflow" — body tests the happy
-  path). Also one dead commented-out parallelism test at `integration.test.ts:135`
+- **Tests that don't test their names**: `scaffold-webhook.test.ts:163`
+  ("requires --workflow" — body tests the happy path). Also one dead
+  commented-out parallelism test at `integration.test.ts:135`
   duplicating `run-concurrency.test.ts`.
 
 ---

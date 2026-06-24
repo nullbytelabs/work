@@ -69,7 +69,7 @@ Notes for using them:
 
 - `review` (and `ci`) need a model in `work.json` (gitignored — copy
   `work.example.json`; `apiKey` takes `$VAR` expansion). The key is injected
-  host-side via mediated egress; it never enters the guest.
+  host-side, scoped to the model host; it never enters the guest.
 - The tool/test steps are `continue-on-error`, so `checks`/`test` **don't fail the
   run** on a red tool — each tool's deterministic `outcome` (success/failure/skipped)
   is forwarded to `review`, which leads with any failure and prints a deterministic

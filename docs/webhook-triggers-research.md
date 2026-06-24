@@ -34,13 +34,13 @@
 >   cap, ack-fast `202` + async dispatch reusing the `RunManager` (tagged
 >   `trigger:"webhook"`), exempt from the UI's loopback Host/CSRF guards. Tests:
 >   `test/webhook-receiver.test.ts`.
-> - **Generalized egress + config (§5/§8/§9):** `datasources`/`webhooks` config
->   sections; `makeDatasourceEgressResolver` + `composeResolvers` (`src/egress`),
->   now **wired into the run path** — `startRun` composes the agent + datasource
->   resolvers, and a webhook's `datasources:` list scopes its triggered run's
->   egress (deny-by-default). Validated through the runtime to the target boundary
->   (`test/egress-wiring.test.ts`); the real host-side header-swap still wants a
->   one-time **real-gondolin** confirmation (the test double doesn't implement it).
+> - **Open egress + secrets config (§5/§8/§9):** a `secrets:` whitelist in `work.json`
+>   that a triggered run's `run:`/`with:` steps reference as `${{ secrets.NAME }}`,
+>   resolved host-side at run time and injected into the guest env. Egress is open for
+>   every job, so a fact-finding step reaches a metrics/logs host directly. Validated
+>   through the runtime to the target boundary (`test/egress-wiring.test.ts`); the
+>   host-side model-key header-swap still wants a one-time **real-gondolin**
+>   confirmation (the test double doesn't implement it).
 > - **Delivery dedupe (§4 Mandatory / §7 step 2):** an identical re-delivery
 >   (retry / repeat send) within a 300s window — keyed `sha256(hook + raw body)`,
 >   since no sender supplies a delivery-id — returns the original runId (`200
@@ -80,10 +80,10 @@ order:
    expose the POST body as `${{ event.* }}`. The one real *parser* change.
 2. **The authenticated async receiver** (§6–7) — HMAC/bearer auth, ack-fast,
    run-async, dedupe, backpressure — an extension of the `--web` server.
-3. **Generalized egress/secrets for `run` steps** (§5, §8) — so fact-finding can
-   reach a logs/metrics API and the response can post to Slack. The plumbing
-   already exists; only the *resolver* is agent-gated.
-4. **Config + ops surface** (§5) — where hook secrets and datasource creds live,
+3. **Egress + secrets for `run` steps** (§5, §8) — so fact-finding can
+   reach a logs/metrics API and the response can post to Slack. Egress is open for
+   every job and a `${{ secrets.* }}` whitelist supplies the credential.
+4. **Config + ops surface** (§5) — where hook secrets and step creds live,
    how the receiver is started, what's audited.
 5. **Pipeline ergonomics** (§8) — optional: multi-output agents, dynamic matrix.
 
@@ -446,20 +446,20 @@ jobs:
         run: curl -s -XPOST "$SLACK_WEBHOOK" --data "{\"text\":\"$ASSESSMENT\"}"  ### NEEDS-BUILDING: run-step egress+secret
 ```
 
-**The egress gap (the most important pipeline finding).** A fact-finding `run: curl
-…` and the Slack `respond` step both need an **allowlisted host + a header secret**.
-The mechanism is **fully generic and already job-level**: `GondolinTarget` merges a
-job's `JobNetwork.secrets` placeholders into the **VM-wide env every step sees** and
-swaps the real value into outbound headers host-side for allowlisted hosts only
-(`gondolin.ts:106-116`; the runtime forwards `resolveJobNetwork?.(job)` verbatim,
-`runtime.ts:315`). **What's missing is only the resolver:** the sole one wired in is
-`makeAgentEgressResolver`, which returns `undefined` for any job with no
-`agent/*` step (`egress.ts:57`). So **egress is effectively agent-only today — a
-property of the resolver, not the sandbox.** Closing it = a config-driven resolver +
-a per-job spec surface to declare `allowedHosts`/`secrets`; **no sandbox change.**
-This is the highest-value enabler for real pipelines and should be validated against
-a **real gondolin run** (the header-swap lives in real Gondolin httpHooks, not the
-test double — per the project's verify-against-a-real-run rule).
+**Egress + secrets for plain `run` steps (the pipeline enabler).** A fact-finding
+`run: curl …` and the Slack `respond` step both need to **reach a host and carry a
+credential**. Both are first-class: egress is **open for every job**
+(`makeAgentEgressResolver` grants `{ allowedHosts: ["*"] }`, `egress.ts:56`), so a
+`run:` step reaches a metrics/logs/Slack host directly with no allowlist to maintain.
+The credential rides the `secrets:` whitelist in `work.json`: a step references
+`${{ secrets.GRAFANA_TOKEN }}` in its `env:` (or an action's `with:`), and the value
+— resolved host-side at run time — is injected into that step's guest env. The only
+secret kept *out* of the guest is the model API key, header-swapped host-side and
+scoped to the model host (`gondolin.ts:106-116`; the runtime forwards
+`resolveJobNetwork?.(job)` verbatim, `runtime.ts:315`). The end-to-end secret path
+should be validated against a **real gondolin run** (the header-swap lives in real
+Gondolin httpHooks, not the test double — per the project's verify-against-a-real-run
+rule).
 
 **Capability map:**
 
@@ -469,7 +469,7 @@ test double — per the project's verify-against-a-real-run rule).
 | N→1 fan-in outputs threading | **Supported** (`runtime.ts:164,404,494`) |
 | Agent job reads facts via `with: needs.*.outputs.*` | **Supported** (`uses-handler.ts:77`, `agent/index.ts:130`) |
 | Read raw alert payload (`event.*`) | **Needs-building** (§3) |
-| Egress + secret for plain `run` steps | **Needs-building, small** (resolver only; §5/§8) |
+| Egress + secret for plain `run` steps | **Supported** (open egress + `secrets:` whitelist; §5/§8) |
 | Multi-output agent (severity/root_cause/confidence as separate outputs) | **Needs-building** — agent maps its whole final message to its *first* output only (`agent/index.ts:136`) |
 | Dynamic matrix over alert instances | **Needs-building** — matrix axes are static compile-time literals (`spec/types.ts:67`); can't derive from the alert |
 | The trigger itself | **Needs-building** (§2) |
@@ -481,22 +481,21 @@ test double — per the project's verify-against-a-real-run rule).
 **Config (PROPOSED): extend the existing file.** `parseConfig` validates only
 `providers`/`models`/`defaultModel` and **ignores unknown top-level keys**
 (`config/index.ts:54`), and secrets already use `$VAR` expansion + a gitignored
-file. So add `datasources` and `webhooks` sections that inherit all of that — one
+file. So add `secrets` and `webhooks` sections that inherit all of that — one
 operator-owned, commit-safe secrets surface:
 
 ```jsonc
 {
   "providers": { /* … */ }, "models": { /* … */ }, "defaultModel": "kimi",
-  "datasources": {
-    "grafana": { "baseUrl": "https://grafana.internal", "token": "$GRAFANA_TOKEN" }
+  "secrets": {
+    "GRAFANA_TOKEN": "$GRAFANA_SERVICE_ACCOUNT_TOKEN"   // $ENV ref or literal
   },
   "webhooks": {
     "deploy-incident": {
       "workflow": "incident", "enabled": true,
       "auth": "hmac-sha256",                 // hmac-sha256 | bearer
       "secret": "$HOOK_DEPLOY_SECRET",       // per-hook, $ENV — never a literal
-      "signatureHeader": "X-Hub-Signature-256",
-      "datasources": ["grafana"]             // which creds this hook's run may use
+      "signatureHeader": "X-Hub-Signature-256"
     }
   }
 }
@@ -514,14 +513,15 @@ on:
 This gives **per-hook scoping** (each hook its own `$ENV` secret) rather than one
 global webhook secret.
 
-**Secret injection generalizes (VALIDATED plumbing, PROPOSED resolver).** A
-fact-finding job's datasource token rides the *same* host-side header-swap as the
-model key — a `makeDatasourceEgressResolver(config, hook)` emits `{ allowedHosts:
-[host], secrets: { GRAFANA_TOKEN: { hosts:[host], value: expandEnv(...) } } }`,
-composed with the agent resolver (union `allowedHosts`, merge `secrets` by env-var
-name). The `run` step references `$GRAFANA_TOKEN`; the real value never enters the
-guest. **Datasource creds must route through the resolver, never through workflow
-`env:`** (which *is* visible in-guest).
+**Secret injection (VALIDATED plumbing).** A fact-finding job names a whitelisted
+secret in its step `env:` — `env: { GRAFANA_TOKEN: "${{ secrets.GRAFANA_TOKEN }}" }`
+— and the engine resolves the `work.json` entry host-side (`$ENV` expansion via
+`expandEnv`) and injects it into that step's guest env. Egress is open, so the
+`run` step calls `https://grafana.internal` directly with the token. The model key
+an agent step uses is the one credential header-swapped host-side so it never enters
+the guest. **To keep a fetched secret away from an agent step,** split it: a `fetch`
+job holds the secret and exposes a job output, and an `analyze` job (`needs:
+[fetch]`) consumes `${{ needs.fetch.outputs.<name> }}` without the secret in scope.
 
 **Operating the receiver (PROPOSED).** Fold hooks into the same long-lived server:
 `work --web [--hooks]` (or `work serve`), `127.0.0.1` + `--port 4280`, fronted by
@@ -547,10 +547,10 @@ on turning on persistence (the `dataDir` work from `web-ui` §8).
    both evaluators).
 2. **Authenticated async receiver** (§4,§6,§7) — HMAC/bearer, fail-closed, ack-fast,
    dedupe, backpressure. Extends the `--web` server; `node:http`+`node:crypto`.
-3. **Generalized egress/secrets for `run` steps** (§5,§8,§9) — a composed
-   config-driven resolver. **Small, no sandbox change**, high leverage. Validate on
-   a real gondolin run.
-4. **Config surface** (§9) — `datasources` + `webhooks` sections + per-workflow
+3. **Egress + secrets for `run` steps** (§5,§8,§9) — open egress plus the `secrets:`
+   whitelist injected into the step's guest env. **No sandbox change**, high leverage.
+   Validate on a real gondolin run.
+4. **Config surface** (§9) — `secrets` + `webhooks` sections + per-workflow
    opt-in/secret-reference; reuses `$ENV`/gitignore.
 5. **Pipeline ergonomics** (§8, optional) — multi-output agents; dynamic
    (alert-derived) matrix.
@@ -569,8 +569,8 @@ on turning on persistence (the `dataDir` work from `web-ui` §8).
 - **Phase 1 — Hardening.** HMAC mode (incl. Grafana's `X-Grafana-Alerting-Signature`
   and GitHub/Stripe/Slack schemes), replay window + dedupe (deterministic runId),
   size cap/timeouts/rate limit, bounded-concurrency queue (200/202/429).
-- **Phase 2 — Fact-finding egress.** The generalized datasource resolver +
-  per-job/`webhooks` allowlist+secret surface; validated against a real gondolin run.
+- **Phase 2 — Fact-finding egress.** Open egress for `run:` steps + the `secrets:`
+  whitelist injected into the step's guest env; validated against a real gondolin run.
   This is what makes the incident pipeline *do* anything.
 - **Phase 3 — Ops.** Audit log + failure-mode responses; durable history (with
   `web-ui` persistence); optional signed on-complete callback.
@@ -613,7 +613,7 @@ parallel schedule); `runtime/absurd/runtime.ts:131` (internal runId), `:149,216`
 `schema.sql:744` (idempotency key + conflict-skip), `:315` (resolveJobNetwork
 forward), `:510` (sandboxed); `targets/gondolin.ts:106-116` (VM-wide secret env +
 header-swap) + `factory.ts:19` (generic TargetContext); `agent/egress.ts:47-69`
-(agent-only resolver, generic shape); `agent/uses-handler.ts:77` + `agent/index.ts:
+(open-egress resolver + model-key injection); `agent/uses-handler.ts:77` + `agent/index.ts:
 130,136` (with→agent inputs, first-output-only); `config/index.ts:28,44,119`
 (schema, `$ENV` expansion); `cli.ts:146,230` (config resolution, resolver wiring);
 `docs/web-ui-research.md` §3/§4/§6/§8/§9 (server, dispatch, RunManager, persistence,

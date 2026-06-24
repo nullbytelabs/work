@@ -16,7 +16,6 @@ The dev launcher is `./bin/work.mjs`; production users invoke `work`.
 | `--quiet` | all run forms | silent presenter |
 | `--no-global` | all | hermetic: ignore the global creds home, project config only |
 | `--config <file>` | all | explicit config file (else layered global + project `work.json`) |
-| `--datasources <a,b>` | run forms | enable named datasources (scoped egress with header-injected token) |
 | `--inputs '<json>'` | run forms | bind typed inputs at compile time; must be a JSON **object** |
 | `-h` / `--help` | any | print usage, exit 0 |
 
@@ -33,7 +32,7 @@ The dev launcher is `./bin/work.mjs`; production users invoke `work`.
 | `logs <id>` | `--workspace` | needs an id (short prefix ok); `--resume`/`--format`/`--steps` rejected |
 | `serve` | `--port <1-65535>`, `--workspace` | no positionals; `--format`/`--steps`/`--resume` rejected |
 | `init` | `--global`, `--include-skill`, `--from-template hello-world\|agent-action`, `--force`, `--dry-run` | scaffolds a workspace |
-| `create <name>` | `--template hello-world\|agent-action`, `--force`, `--dry-run` | scaffolds one workflow; `create datasource\|image\|webhook` for other nouns |
+| `create <name>` | `--template hello-world\|agent-action`, `--force`, `--dry-run` | scaffolds one workflow; `create image\|webhook` for other nouns |
 | `doctor` | `--json` | preflight checks |
 
 ## `runs` output

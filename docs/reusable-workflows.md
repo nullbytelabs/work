@@ -362,9 +362,11 @@ to avoid. Declare an input; pass it at the call site.
 ## 9. Secrets / egress
 
 GitHub passes `secrets:` (or `secrets: inherit`). work doesn't carry
-secrets in YAML at all — egress is **mediated**, keys injected host-side, never
-in-guest (`makeAgentEgressResolver` + the datasource resolver, composed in
-`startRun`). Those resolvers are **run-level**, derived from config.
+secrets in YAML at all — they live in the `secrets:` whitelist in `work.json`,
+resolved host-side at run time and referenced as `${{ secrets.NAME }}`. Egress is
+open for every job; the only secret injected host-side and kept out of the guest
+is the model API key (scoped to the model host, via `makeAgentEgressResolver`,
+composed in `startRun`). That resolver is **run-level**, derived from config.
 
 **v1 consequence:** an inlined callee's jobs run inside the caller's single run,
 so they **inherit the caller run's egress posture** automatically — there is no

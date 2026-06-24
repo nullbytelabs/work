@@ -14,8 +14,8 @@ This doc is three things at once:
 
 Status: **established.** fast-check `4.8.0` is a devDependency. All five inventory
 targets are landed (23 properties), plus a [security track](#security-track) (S-1/S-2/S-3,
-10 more properties) and two follow-on targets — reusable-workflow inlining (#6) and
-durable crash-resume (#7) — for 37 in all, every one mutation-checked. Two real bugs
+8 more properties) and two follow-on targets — reusable-workflow inlining (#6) and
+durable crash-resume (#7) — for 35 in all, every one mutation-checked. Two real bugs
 found: a path-safety bug on day one (F-1, target #1) and an egress credential-scope
 wildcard (F-8, S-3). See the [progress tracker](#progress-tracker) and [findings log](#findings-log).
 
@@ -491,11 +491,9 @@ there was gold in the hill.
 
 ### F-8 — S-3 egress secret-scope: a real gap — a `*` in a `baseUrl` host is a wildcard
 
-- **Target S-3** (`test/egress-scope.property.test.ts`): 4 properties — a derived host
-  is an exact `matchHostname` pattern (P1), the datasource and agent host derivations
-  agree at the resolver boundary (P2), a datasource token is scoped only to
-  allowlisted, non-wildcard hosts (P3), and agent egress is allow-all yet the model key
-  stays confined to its host (P4). The properties import the **real** vendor
+- **Target S-3** (`test/egress-scope.property.test.ts`): 2 properties — a derived host
+  is an exact `matchHostname` pattern (P1), and agent egress is allow-all yet the model
+  key stays confined to its host (P4). The properties import the **real** vendor
   `matchHostname` by relative path (its package `exports` map hides the subpath) and
   feed it our derived hosts, so a gondolin bump that loosened matching turns P1/P4 red.
 - **The bug (real, operator-config severity).** `new URL("https://a*b.example").hostname`
@@ -503,22 +501,18 @@ there was gold in the hill.
   URL parsing. `matchHostname` builds its regex by splitting the pattern on `*` *before*
   escaping every other metachar, so a `*` in the host becomes `.*` — a wildcard. That
   host literal scopes **both** the egress allowlist and the injected token/key, so a
-  `baseUrl` host containing `*` silently widened the credential's scope from one host to
+  `baseUrl` host containing `*` silently widened the model key's scope from one host to
   a whole pattern: a request to any matching host would have received the secret. Among
   all URL-legal host characters, `*` is the *only* escape — every other matcher-special
   char is regex-escaped. Probed empirically first (a one-line `node -e`), per the
   iterate-don't-relitigate rule, before any code changed.
-- **The fix.** `hostOf` (`egress/datasource.ts`) and `modelHostOf`
-  (`agent/guest-pi-runner.ts`) — the two seams that derive the host — now refuse a
-  `*`-bearing host (return `undefined`), which is **fail-closed at every call site**:
-  the datasource is skipped (no egress, no token) and the agent key isn't injected (the
-  guest runner already throws a clean `UserFacingError` on an unresolvable host). One
-  guard each, kept in lockstep; P2 locks that they don't drift apart.
-- **Mutation check.** Reverting both guards turns **P1, P3, P4 red** and leaves **P2
-  green** — exactly right: the two seams diverge *consistently* to the same wrong
-  wildcard host, so they still agree (P2 is the anti-divergence invariant, orthogonal to
-  the wildcard escape). Three properties catch the bug; the fourth proves it tests
-  something else.
+- **The fix.** `modelHostOf` (`agent/guest-pi-runner.ts`) — the seam that derives the
+  host — now refuses a `*`-bearing host (returns `undefined`), which is **fail-closed at
+  every call site**: the agent key isn't injected, and the guest runner throws a clean
+  `UserFacingError` on the unresolvable host.
+- **Mutation check.** Reverting the guard turns **P1 and P4 red** — exactly right: with
+  the guard gone, a `*`-bearing `baseUrl` host derives a wildcard pattern, so the
+  exact-match property (P1) and the confined-key property (P4) both fail.
 
 ---
 
@@ -599,24 +593,24 @@ a path-traversal sink — but stresses untested compositions (an id that collaps
 
 ### S-3 — egress allowlist ↔ secret-scope consistency, and locking the matcher contract ☑ done (found F-8)
 
-**Invariant:** the host a credential is scoped to is exactly the host that's allowlisted
+**Invariant:** the host the model key is scoped to is exactly the host that's allowlisted
 and exactly what a guest request canonicalizes to. Our derivation —
-`hostOf(baseUrl)` / `modelHostOf` feeding both the allowlist set and the secret's
-`hosts` (`egress/datasource.ts`, `agent/egress.ts:75`) — must not diverge, or a token
-is injected for an unintended host (leak) or a host is reachable without its token.
-The matcher itself (`matchHostname` in `node_modules/@earendil-works/gondolin`) is
-vendor code and already `^…$`-anchored, so we don't re-test their regex — we
-**characterize and lock the contract we depend on** ("`hostOf(baseUrl)` matches that
-exact host and nothing else; no suffix/trailing-dot/IDN/port escape"), so a gondolin
-auto-bump that loosened matching turns the property red instead of silently widening
-egress. Generators vary case/ports/trailing-dots/IPv6/IDN.
+`modelHostOf(baseUrl)` feeding both the allowlist set and the secret's
+`hosts` (`agent/egress.ts:75`) — must be exact, or the key is injected for an unintended
+host (leak) or the model host is reachable without its key. The matcher itself
+(`matchHostname` in `node_modules/@earendil-works/gondolin`) is vendor code and already
+`^…$`-anchored, so we don't re-test their regex — we **characterize and lock the contract
+we depend on** ("`modelHostOf(baseUrl)` matches that exact host and nothing else; no
+suffix/trailing-dot/IDN/port escape"), so a gondolin auto-bump that loosened matching
+turns the property red instead of silently widening the key's scope. Generators vary
+case/ports/trailing-dots/IPv6/IDN.
 
 **Outcome: a real gap (F-8).** This wasn't only a regression net — characterizing the
 matcher contract surfaced that a `*` in a `baseUrl` host survives URL parsing and is a
-`matchHostname` wildcard, so it would scope a token/key to a whole pattern. Both
-derivations now refuse a `*`-bearing host (fail-closed). 4 properties in
-`test/egress-scope.property.test.ts`, mutation-checked (revert → P1/P3/P4 red, P2
-green). See **F-8** in the [findings log](#findings-log).
+`matchHostname` wildcard, so it would scope the key to a whole pattern. `modelHostOf`
+now refuses a `*`-bearing host (fail-closed). 2 properties in
+`test/egress-scope.property.test.ts`, mutation-checked (revert → P1/P4 red). See **F-8**
+in the [findings log](#findings-log).
 
 ### Pre-`0.0.0.0` readiness
 

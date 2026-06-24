@@ -19,26 +19,28 @@ distills it into a readable span tree.
 
 ## Brokering Grafana access
 
-The job reaches Grafana through a `grafana` [datasource](../reference/configuration#datasources)
-in [`work.json`](../reference/configuration):
+Grafana access flows through the [`secrets:`](../reference/configuration#secrets)
+whitelist in [`work.json`](../reference/configuration). Add a Grafana stack URL and a
+service-account token, each reading its value from your shell environment:
 
 ```json
 {
-  "datasources": {
-    "grafana": {
-      "baseUrl": "https://<stack>.grafana.net",
-      "token": "$GRAFANA_SERVICE_ACCOUNT_TOKEN",
-      "tokenEnv": "GRAFANA_SERVICE_ACCOUNT_TOKEN"
-    }
+  "secrets": {
+    "GRAFANA_URL": "$GRAFANA_URL",
+    "GRAFANA_TOKEN": "$GRAFANA_SERVICE_ACCOUNT_TOKEN"
   }
 }
 ```
 
-The service-account token is injected **host-side** into the `Authorization` header,
-scoped to the Grafana host — it never enters the guest. That's the right call here
-because the next step is an AI agent running in that same job with open egress: it can
-read the trace but can never see or exfiltrate the token. A guest-side secret would
-hand the agent the credential; the datasource doesn't.
+The workflow then references them as <code v-pre>${{ secrets.GRAFANA_URL }}</code> and
+<code v-pre>${{ secrets.GRAFANA_TOKEN }}</code>, passing the token into the
+`tempo-trace` action's `with:` inputs. Each value is resolved host-side at run time
+and lands in the guest of the step that reads it — the action that makes the Grafana
+call.
+
+The token is a credential, so we keep it away from the AI agent with a **job split**:
+the `fetch` job holds the secret and exposes only its *result*; the `analyze` job runs
+the agent and consumes that result via a job output, never seeing the token.
 
 ## The workflow
 
@@ -52,21 +54,31 @@ inputs:
     required: true
     pattern: "^[0-9a-fA-F]{8}-...-[0-9a-fA-F]{12}$"   # a UUID
   lookback_hours:
-    type: string
-    default: "720"   # how far back to search Tempo (default 30 days)
+    type: number
+    default: 720   # how far back to search Tempo (default 30 days)
 
 jobs:
-  analyze:
+  # The only job that touches the secret.
+  fetch:
     runs-on: work:base
     machine: small
+    outputs:
+      tree: ${{ steps.fetch.outputs.tree }}
     steps:
       - id: fetch
         uses: action/tempo-trace
         with:
           run_id: ${{ inputs.run_id }}
-          grafana_url: https://<stack>.grafana.net
+          grafana_url: ${{ secrets.GRAFANA_URL }}
+          grafana_token: ${{ secrets.GRAFANA_TOKEN }}
           lookback_hours: ${{ inputs.lookback_hours }}
 
+  # Feeds on fetch's distilled tree — no secret in scope.
+  analyze:
+    runs-on: work:base
+    machine: small
+    needs: [fetch]
+    steps:
       - id: analyze
         uses: work/agent
         with:
@@ -75,11 +87,18 @@ jobs:
             critical path / long pole, per-step timing, per-model token
             usage (gen_ai.usage.* on chat spans), failures, and takeaways.
 
-            ${{ steps.fetch.outputs.tree }}
+            ${{ needs.fetch.outputs.tree }}
+
+      - name: show analysis
+        env:
+          ANALYSIS: ${{ steps.analyze.outputs.output }}
+        run: printf '%s\n' "$ANALYSIS"
 ```
 
-Three steps: the action resolves the trace and distills it, the agent analyzes the
-distilled tree, and a final step prints the report.
+Two jobs: `fetch` resolves the trace and distills it (passing the Grafana token in
+from `secrets`), then `analyze` — which `needs: [fetch]` — runs the agent over the
+distilled tree (via <code v-pre>${{ needs.fetch.outputs.tree }}</code>) and prints the
+report. The token lives only in `fetch`; the agent job never sees it.
 
 ## The `tempo-trace` action
 
@@ -88,31 +107,28 @@ All the Grafana/Tempo logic lives in a reusable node [action](../guide/actions) 
 workflow can `uses: action/tempo-trace` at the step level. The action:
 
 1. resolves the trace id from the run id (`{ span.work.run.id = "<id>" }`),
-2. fetches the full trace over the brokered datasource egress,
+2. fetches the full trace from Tempo, authenticating with the service-account token,
 3. distills it into the `run → job → step → chat` span tree (with the meaningful
    `work.*` / `cicd.*` / `gen_ai.*` attributes and per-span durations), and emits it as
    the `tree` output (plus `trace_id`).
 
-Its inputs are `run_id`, `grafana_url`, and `lookback_hours`; the token arrives from
-the datasource, never as an input.
+Its inputs are `run_id`, `grafana_url`, `grafana_token`, and `lookback_hours`. The
+workflow passes the token in as <code v-pre>${{ secrets.GRAFANA_TOKEN }}</code>; the
+action reads it as `INPUT_GRAFANA_TOKEN` and forwards it in the request's
+`Authorization` header.
 
 ## Run it
 
 ```bash
-export GRAFANA_SERVICE_ACCOUNT_TOKEN=glsa_...   # a Grafana service-account token
+export GRAFANA_URL=https://<stack>.grafana.net      # your Grafana stack base URL
+export GRAFANA_SERVICE_ACCOUNT_TOKEN=glsa_...        # a Grafana service-account token
 
-work run trace-analysis \
-  --inputs '{"run_id":"<run-id>"}' \
-  --datasources grafana
+work run trace-analysis --inputs '{"run_id":"<run-id>"}'
 ```
 
-`--datasources grafana` is what injects the Grafana token for this run — host-side,
-into the `Authorization` header for the Grafana host only. It's deny-by-default, so
-name nothing and no token is injected (the call would be unauthorized). It selects
-which datasource *credentials* the run may use, **not** what the run can reach:
-[public egress is open](../reference/configuration#datasources) either way. Grab a run
-id from any `work` run's output. The agent's report comes back as the job's `analysis`
-output and is printed at the end of the run.
+The two `secrets` entries read those env vars host-side, so once they're set the run
+just works — no extra flags. Grab a run id from any `work` run's output. The agent's
+report is printed at the end of the run.
 
 ## The observer, observed
 
@@ -120,7 +136,7 @@ Because observability is on, the `trace-analysis` run emits its own trace. Wait 
 seconds for ingestion, then feed *that* run's id back in:
 
 ```bash
-work run trace-analysis --inputs '{"run_id":"<the-analysis-run-id>"}' --datasources grafana
+work run trace-analysis --inputs '{"run_id":"<the-analysis-run-id>"}'
 ```
 
 Now the workflow analyzes itself — the agent's own `chat {model}` span shows up in the
@@ -132,7 +148,7 @@ lands in Tempo, not just a claim.
 
 | In the workflow | Engine feature it leans on |
 |---|---|
-| `grafana` datasource brokers the Tempo API token host-side | [Datasources](../reference/configuration#datasources) — a deny-by-default, header-injected credential scoped to the Grafana host that the guest never sees |
+| `GRAFANA_TOKEN` passes into the `fetch` job, kept out of the agent job | [Secrets](../reference/configuration#secrets) — a host secret resolved at run time, isolated to one job by a `needs` split |
 | `uses: action/tempo-trace` keeps the fetch/distill logic reusable | [Actions](../guide/actions) — a node action with the `INPUT_*` / `$WORK_OUTPUT` ABI |
 | `uses: work/agent` reads the distilled tree and writes the report | [Agent steps](../guide/agent-steps) — a real model in the job's sandbox |
 | consumes `work.run.id` / `gen_ai.usage.*` spans | [Observability](../guide/observability) — the traces this reads back |

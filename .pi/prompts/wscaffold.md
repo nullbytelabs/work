@@ -1,5 +1,5 @@
 ---
-description: Scaffold a new work workflow (or datasource/image/webhook) and verify it compiles
+description: Scaffold a new work workflow (or image/webhook) and verify it compiles
 argument-hint: "<name> [hello-world|agent-action]"
 ---
 Scaffold a new `work` workflow named `${1:?name required}`.
@@ -8,7 +8,7 @@ Scaffold a new `work` workflow named `${1:?name required}`.
    (`.pi/skills/work-operator/references/authoring.md`) and skim `test/e2e/` for the
    closest existing example to copy from.
 2. `./bin/work.mjs create $1 --template ${2:-hello-world}` (use `--dry-run` first to
-   preview). For other nouns I may ask for `create datasource|image|webhook`.
+   preview). For other nouns I may ask for `create image|webhook`.
 3. If this is a genuinely new workflow *feature* (matrix, fan-in, a new step type),
    remember the project convention: add a `test/e2e/<name>/` example folder so
    `test/examples.test.ts` picks it up.

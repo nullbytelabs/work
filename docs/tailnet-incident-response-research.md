@@ -1,4 +1,4 @@
-# Tailnet incident response: a cluster fleet as datasources, alerts as triggers
+# Tailnet incident response: a cluster fleet on the tailnet, alerts as triggers
 
 Research notes toward a fully autonomous incident-response loop built from
 pieces that already exist: a fleet of Kubernetes clusters exposed on a
@@ -10,7 +10,7 @@ from official docs (URLs inline); anything not freshly confirmed is flagged
 
 The thesis: every hop of this loop — alert egress, webhook delivery, cluster
 access, notification — can ride a private tailnet with identity-based auth,
-and `work`'s existing webhook/datasource/egress surfaces already fit the
+and `work`'s existing webhook, `secrets:`, and egress surfaces already fit the
 delivery semantics Alertmanager actually has.
 
 ```mermaid
@@ -18,13 +18,13 @@ graph LR
   PR["PrometheusRule<br/>(fires)"] --> AM["Alertmanager<br/>(groups + routes)"]
   AM -->|"egress proxy →<br/>work.&lt;tailnet&gt;.ts.net"| WH["work --web<br/>POST /hooks/&lt;name&gt;"]
   WH --> TR["triage workflow<br/>(collect → agent review)"]
-  TR -->|datasource| K8S["k8s-&lt;env&gt;.&lt;tailnet&gt;.ts.net<br/>(API-server proxy)"]
-  TR -->|datasource| LGTM["Loki / Tempo / Prometheus<br/>(telemetry APIs)"]
+  TR -->|tailnet| K8S["k8s-&lt;env&gt;.&lt;tailnet&gt;.ts.net<br/>(API-server proxy)"]
+  TR -->|tailnet + secret token| LGTM["Loki / Tempo / Prometheus<br/>(telemetry APIs)"]
   TR --> SL["Slack<br/>(ops notify)"]
   TR -.->|"structured report"| RA["downstream remediation<br/>(rollback / roll-forward)"]
 ```
 
-## 1. The substrate: a fleet of clusters as datasources
+## 1. The substrate: a fleet of clusters on the tailnet
 
 The [Tailscale Kubernetes operator's API-server proxy](https://tailscale.com/kb/1437/kubernetes-operator-api-server-proxy)
 makes each cluster a tailnet machine — `k8s-prod.<tailnet>.ts.net`,
@@ -36,17 +36,10 @@ server, with impersonation groups assigned through Tailscale ACL grants
 bearer token — identity is the WireGuard connection (**UNVERIFIED** that the
 generated kubeconfig is literally credential-free; inspect one).
 
-For `work`, each cluster is then a one-line, token-less datasource:
+For `work`, each cluster is then just a hostname a job dials —
+`https://k8s-prod.<tailnet>.ts.net` — with no per-cluster config:
 
-```json
-"datasources": {
-  "k8s-prod":    { "baseUrl": "https://k8s-prod.<tailnet>.ts.net" },
-  "k8s-staging": { "baseUrl": "https://k8s-staging.<tailnet>.ts.net" }
-}
-```
-
-- **No token** — the datasource resolver allowlists a token-less entry without
-  a secret; auth is the engine host's tailnet identity, evaluated by the
+- **No token** — auth is the engine host's tailnet identity, evaluated by the
   in-cluster proxy per the grants. Nothing to mint, rotate, or leak.
 - **TLS is publicly trusted** — the proxy serves a Let's Encrypt cert for its
   `ts.net` name, so the host-side `NODE_EXTRA_CA_CERTS` apparatus from the
@@ -59,14 +52,13 @@ For `work`, each cluster is then a one-line, token-less datasource:
 
 **The one engine gap:** tailnet addresses are CGNAT (`100.64.0.0/10`), which
 the sandbox's internal-range block includes (see
-[`egress-data-path.md`](egress-data-path.md), invariant 3). Today that means a
-`resolve: "100.x.y.z"` pin per datasource — viable (the proxy's tailnet IP is
-stable) but the wrong shape for a fleet: DNS already resolves these names
-correctly, and per-IP pins are upkeep. The right fix is a **name-based
-internal grant** (`internal: true` per datasource entry), which lifts the
-block for that datasource's hostname without pinning. The `allowedInternalHosts`
-plumbing exists end-to-end; only the config field is missing. This is the
-prerequisite for everything below.
+[`egress-data-path.md`](egress-data-path.md), invariant 3). Open egress covers
+*public* upstreams but never lifts that block, so reaching a tailnet host from a
+job is still an open engineering question — the `allowedInternalHosts` plumbing
+exists end-to-end in the target layer, but nothing wires it to a user-facing
+grant. A name-based internal grant (lift the block for one named tailnet host,
+no per-IP pinning) is the natural shape; the config field and the line that
+forwards it are what's missing. This is the prerequisite for everything below.
 
 ## 2. The `work` instance on the tailnet
 
@@ -90,8 +82,8 @@ fronted by [`tailscale serve`](https://tailscale.com/kb/1312/serve):
 
 Defense in depth, outermost-in: tailnet ACL → Serve TLS + identity headers →
 per-hook bearer secret (constant-time verified, fail-closed) → workflow
-`on: webhook` opt-in → per-hook `datasources` scoping → read-only cluster
-grants.
+`on: webhook` opt-in → read-only cluster grants (the engine host's tailnet
+identity is the ceiling for every run).
 
 ## 3. Alert egress: cluster → tailnet → webhook
 
@@ -147,20 +139,19 @@ So a hook per alert class, declaratively:
   "prod-incident": {
     "workflow": "triage",
     "auth": "bearer",
-    "secret": "$PROD_INCIDENT_HOOK_SECRET",
-    "datasources": ["k8s-prod"]
+    "secret": "$PROD_INCIDENT_HOOK_SECRET"
   }
 }
 ```
 
 **Declarative vs dynamic routing.** A single catch-all hook with one workflow
-branching on `event` labels is tempting (the engine supports it — see §5),
-but `datasources` scoping is **per-hook and static**: a catch-all hook must be
-granted every cluster, widening every run's reach. Per-class hooks keep the
-proven property — a staging alert physically cannot trigger a run that can
-see prod. Recommendation: declarative per-class (or per-cluster) hooks;
-dynamic branching only *within* a class. (Future research: event-derived
-datasource scoping — narrowing, never widening, from a validated label.)
+branching on `event` labels is tempting (the engine supports it — see §5), but
+per-class hooks keep the routing legible: which alert class triggers which
+workflow is a static, reviewable map rather than runtime branching. Recommendation:
+declarative per-class (or per-cluster) hooks; dynamic branching only *within* a
+class. (Cluster reach is governed one layer down by the engine host's read-only
+tailnet identity, not by the hook — see §8 for splitting read-only triage from
+write-capable remediation.)
 
 **The whole routing surface is GitOps.** In a Flux/Argo shop,
 `PrometheusRule` and `AlertmanagerConfig` are already PRs; Grafana dashboards
@@ -204,27 +195,29 @@ Sizing note: the receiver caps bodies at **256 KB**; set `max_alerts` on the
 webhook config so grouped storms truncate (`truncatedAlerts` counts the
 drops) instead of bouncing with 413.
 
-## 6. Evidence beyond kubectl: the telemetry stack as datasources
+## 6. Evidence beyond kubectl: the telemetry stack on the tailnet
 
 An LGTM-style stack (Loki, Grafana, Tempo, Prometheus/Mimir — fed by
 collection agents like Grafana Alloy, often through a central gateway) is a
-set of token-authed HTTP APIs, which is exactly what the datasource
-abstraction brokers:
+set of token-authed HTTP APIs, which a step reaches by referencing its token
+from the `secrets:` whitelist:
 
 | Signal | API | Query language |
 |---|---|---|
 | Metrics | `/api/v1/query`, `/api/v1/query_range` | PromQL |
 | Logs | `/loki/api/v1/query_range` | LogQL |
 | Traces | `/api/search`, `/api/traces/<id>` | TraceQL |
-| All of the above, brokered | Grafana `/api/ds/query` + service-account token | per-datasource |
+| All of the above, brokered | Grafana `/api/ds/query` + service-account token | one token |
 
 Expose each on the tailnet like everything else (the operator can front
-individual in-cluster Services as tailnet machines) and they're one
-token-less-or-tokened entry apiece — or broker the whole stack through
-Grafana with a single service-account token. Direct component APIs are the
-better fit for scripted collection: clean JSON for `jq`, and `logcli`/
-`promtool` bake into a `work:lgtm` image the same way kubectl bakes into
-`work:k8s`.
+individual in-cluster Services as tailnet machines). The token-less APIs need
+no secret; for the tokened ones, put the service-account token in `work.json`'s
+`secrets:` block (`"GRAFANA_TOKEN": "$GRAFANA_SERVICE_ACCOUNT_TOKEN"`) and a
+collector step reads it as `${{ secrets.GRAFANA_TOKEN }}` in its `env:` — or
+broker the whole stack through Grafana with a single service-account token.
+Direct component APIs are the better fit for scripted collection: clean JSON
+for `jq`, and `logcli`/`promtool` bake into a `work:lgtm` image the same way
+kubectl bakes into `work:k8s`.
 
 **This is the general case, not an enhancement.** A real fleet has VMs and
 bare-metal reporting through on-host agents alongside the clusters. Alerts
@@ -257,19 +250,15 @@ lets partial evidence still reach the fan-in; the DAG **is** the diagnostic
 runbook, reviewable in `work graph` and versioned like everything else.
 
 **Scripts vs in-guest MCP.** There is no MCP surface in `work/agent` today
-(the primitive is deliberately prompt-only), but a datasource grant already
-buys the interactive tier: grant the diagnose job `datasources: ["loki",
-"prom"]` and the agent can `curl` follow-up LogQL/PromQL mid-analysis using
-the placeholder token env — the engine injects the real token host-side, so
-the agent gets follow-up-question capability while never holding a
-credential. A key composition property makes this safe: agent jobs get
-wildcard egress for the model API, but **the wildcard deliberately excludes
-internal/private hosts** — reaching a tailnet service is always an explicit
-per-job grant. So the split is per-workflow and visible in the YAML:
-collectors get the broad telemetry grants; the diagnose agent gets nothing
-(pure evidence analysis) or a narrow read-only follow-up grant. MCP-in-guest
-remains a possible future `work/agent` extension if interactive tooling ever
-needs to be richer than curl.
+(the primitive is deliberately prompt-only), but the `secrets:` whitelist
+already buys the interactive tier: reference `${{ secrets.GRAFANA_TOKEN }}` in
+the diagnose job's `env:` and the agent can `curl` follow-up LogQL/PromQL
+mid-analysis. Where you'd rather the agent never hold the token, keep the split
+visible in the YAML: a `fetch` job holds the secret and runs the deterministic
+collectors, exposing their results as job outputs; the diagnose agent
+(`needs: [fetch]`) consumes `${{ needs.fetch.outputs.* }}` as pure evidence
+analysis, with no secret in its scope. MCP-in-guest remains a possible future
+`work/agent` extension if interactive tooling ever needs to be richer than curl.
 
 ## 7. Delivery semantics: at-least-once meets ack-fast
 
@@ -307,10 +296,12 @@ and source IP, which is the paper trail an autonomous loop needs anyway.
 
 ## 8. Closing the loop: ops and remediation
 
-- **Slack is just another datasource.** `chat.postMessage` with the bot token
-  as the datasource secret — injected host-side, scoped to `slack.com`, never
-  visible to the guest or the agent. The diagnose job's report step posts the
-  incident review; the resolved-path workflow posts the all-clear.
+- **Slack is just another tokened API.** `chat.postMessage` with the bot token
+  from `secrets:` (`"SLACK_BOT_TOKEN": "$SLACK_BOT_TOKEN"`), read as
+  `${{ secrets.SLACK_BOT_TOKEN }}` in a deterministic `run:` step's `env:`. The
+  notify step is a plain `run:` job, not the agent, so the token never reaches
+  the model; the diagnose job's report step posts the incident review, and the
+  resolved-path workflow posts the all-clear.
 - **Remediation is a hand-off, not a privilege escalation.** The triage run
   ends by POSTing its structured report (workload, failure, root cause,
   evidence, recommended fix) to a downstream automation — a code-change agent
@@ -369,11 +360,11 @@ and the worst case is `restart=false`.
 per-*machine*: every job from the engine host shares one tailnet identity, so
 read-only triage and write-capable remediation can't be split by identity
 alone. Keep the host's grant read-only (the ceiling for everything), and give
-the `remediate` workflow a separate token datasource — a dedicated
+the `remediate` workflow a separate write token via `secrets:` — a dedicated
 ServiceAccount whose RBAC is exactly `patch` on `deployments` (all a rollout
-restart needs), short-lived token, granted only to that workflow's hook. The
-agent job never receives it: the thing that thinks can't act, and the thing
-that acts can't think.
+restart needs), short-lived, referenced only by the `remediate` job's `run:`
+step. The agent job never references it: the thing that thinks can't act, and the
+thing that acts can't think.
 
 Nothing in the loop transits the public internet: alert egress, webhook
 delivery, cluster reads, and the remediation hand-off (if it's also a tailnet
@@ -381,9 +372,10 @@ service) all stay inside the tailnet's ACLs.
 
 ## 9. Open items
 
-1. **`internal: true` datasource grant** — the prerequisite; plumbing exists,
-   config field and resolver line needed (plus tests, docs row alongside
-   `resolve`).
+1. **Name-based internal-host grant** — the prerequisite for reaching tailnet
+   (CGNAT) hosts from a job; the `allowedInternalHosts` plumbing exists in the
+   target layer, but a user-facing config field and the line that forwards it
+   are needed (plus tests, docs).
 2. Verify the flagged claims: Alertmanager retry semantics (notify package)
    and the version that introduced `http_config.authorization` (believed
    0.22.0); `AlertmanagerConfig` `httpConfig.authorization` field shape; the

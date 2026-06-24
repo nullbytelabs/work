@@ -79,8 +79,12 @@ at compile time (`src/compiler/matrix.ts`).
   $VAR`) — fired via `work serve`'s receiver.
 - Agent steps need a model: `work.json` → `providers`, `models`, `defaultModel`
   (copy `work.example.json`; `apiKey: "$VAR"`). Gitignored — never commit keys.
-- `datasources:` in config + `--datasources a,b` grants a job scoped egress to a
-  datasource host with a header-injected token (deny-by-default).
+- `secrets:` in `work.json` is a name → value whitelist (literal or `$VAR`,
+  resolved host-side). Reference as `${{ secrets.NAME }}` in a step's `env:` or an
+  action's `with:`; the value flows into the guest env where the step reads it. To
+  keep a secret away from an agent step, split it out: a `fetch` job holds the
+  secret and exposes a job output, and an `analyze` job (`needs: [fetch]`) consumes
+  `${{ needs.fetch.outputs.<name> }}` without the secret in scope.
 
 ## Custom images
 

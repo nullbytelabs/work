@@ -30,15 +30,15 @@ And the prompt templates (`/wrun`, `/wci`, `/wreview`, `/wtriage`, `/wruns`,
    `npm start --` is the same thing. Production users get the `work` command.
 3. **Real runs boot real micro-VMs and need QEMU.** `work doctor` first if unsure.
 4. **Agent/review runs need a model in `work.json`** (gitignored; copy
-   `work.example.json`, `apiKey` takes `$VAR`). The key is injected host-side via
-   mediated egress — it never enters the guest. Never `cat work.json` (secrets);
+   `work.example.json`, `apiKey` takes `$VAR`). The key is injected host-side,
+   scoped to the model host — it never enters the guest. Never `cat work.json` (secrets);
    read `work.example.json` for shape.
 
 ## The command surface (complete)
 
 All commands accept `--workdir <dir>` (scratch dir), `--quiet`, `--no-global`
-(hermetic; ignore the global creds home), `--config <file>`, and
-`--datasources <a,b>` where they make sense.
+(hermetic; ignore the global creds home), and `--config <file>` where they make
+sense.
 
 | Command | What it does |
 |---|---|
@@ -55,7 +55,7 @@ All commands accept `--workdir <dir>` (scratch dir), `--quiet`, `--no-global`
 | `work [--workspace <dir>] graph <name> [--format …] [--steps]` | Same, by workflow name (resolves from cwd like `run`). |
 | `work [--workspace <dir>] serve [--port <n>]` | Boot the long-lived host: HTTP API + web console + webhook receiver + scheduler over `.workflows/`. Prints URL + auth token. Ctrl-C stops. |
 | `work init [--global] [--include-skill] [--from-template hello-world\|agent-action] [--force] [--dry-run]` | Scaffold a workspace. |
-| `work create <name> [--template hello-world\|agent-action] [--force] [--dry-run]` | Scaffold a single workflow. (Also `create datasource\|image\|webhook` per scaffold subsystem.) |
+| `work create <name> [--template hello-world\|agent-action] [--force] [--dry-run]` | Scaffold a single workflow. (Also `create image\|webhook` per scaffold subsystem.) |
 | `work doctor [--json]` | Preflight: Node version, gondolin SDK, QEMU, config. Run first when a real run misbehaves. |
 
 `graph`-only flags: `--format`, `--steps`. `serve`-only: `--port`. The CLI rejects
