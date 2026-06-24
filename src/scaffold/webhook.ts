@@ -78,9 +78,8 @@ export const SOURCE_PRESETS: Record<string, SourcePreset> = {
 };
 
 /**
- * The env var the hook's secret is read from. There is no resolver-side default
- * for a webhook secret (unlike datasource tokens), so we pick the convention
- * `<HOOK>_SECRET` and emit it as the `$VAR` ref — the user exports that var.
+ * The env var the hook's secret is read from — the convention `<HOOK>_SECRET`,
+ * emitted as the `$VAR` ref the user exports.
  */
 export function webhookSecretEnv(hook: string): string {
   return `${hook.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()}_SECRET`;
@@ -103,14 +102,12 @@ export function resolveSource(explicit: string | undefined): SourcePreset {
 
 /**
  * Build the `webhooks.<hook>` config entry. `secret` is always a `$VAR` ref;
- * `auth`/`signatureHeader` come from the source preset; `datasources` scopes the
- * triggered run's egress when supplied.
+ * `auth`/`signatureHeader` come from the source preset.
  */
 export function buildWebhookEntry(opts: {
   hook: string;
   workflow: string;
   source: SourcePreset;
-  datasources?: string[];
 }): Record<string, unknown> {
   const entry: Record<string, unknown> = {
     workflow: opts.workflow,
@@ -118,7 +115,6 @@ export function buildWebhookEntry(opts: {
     secret: `$${webhookSecretEnv(opts.hook)}`,
   };
   if (opts.source.signatureHeader !== undefined) entry.signatureHeader = opts.source.signatureHeader;
-  if (opts.datasources && opts.datasources.length > 0) entry.datasources = opts.datasources;
   return entry;
 }
 
@@ -134,9 +130,7 @@ export function webhookTriggerBlock(hook: string, source: SourcePreset): string 
 }
 
 /**
- * Merge the `webhooks.<hook>` config half into work.json and report. Also soft-warns
- * (never fails) when the entry scopes datasources the merged config doesn't define
- * yet — the engine is lenient about cross-layer refs, so we nudge rather than block.
+ * Merge the `webhooks.<hook>` config half into work.json and report.
  */
 export async function wireWebhookConfig(
   cwd: string,
@@ -146,25 +140,12 @@ export async function wireWebhookConfig(
 ): Promise<void> {
   const plan = await planConfigMerge(cwd, "webhooks", hook, entry, opts.force);
   await writeConfigMerge(plan, { dryRun: opts.dryRun, color: opts.color });
-
-  const scoped = (entry.datasources as string[] | undefined) ?? [];
-  if (scoped.length > 0) {
-    const merged = JSON.parse(plan.text) as { datasources?: Record<string, unknown> };
-    const known = new Set(Object.keys(merged.datasources ?? {}));
-    const missing = scoped.filter((d) => !known.has(d));
-    for (const d of missing) {
-      process.stdout.write(
-        `  ${paint(opts.color, CODE.yellow, "!")} datasource "${d}" isn't defined yet — add it with ${prog()} create datasource ${d}\n`,
-      );
-    }
-  }
 }
 
 interface WebhookOptions {
   rawHook: string;
   workflow: string | undefined;
   source: string | undefined;
-  datasources: string[];
   force: boolean;
   dryRun: boolean;
 }
@@ -173,7 +154,7 @@ function usage(): string {
   const p = prog();
   return (
     `Usage:\n` +
-    `  ${p} create webhook <name> --workflow <existing> [--source ${Object.keys(SOURCE_PRESETS).join("|")}] [--datasources a,b] [--force] [--dry-run]\n\n` +
+    `  ${p} create webhook <name> --workflow <existing> [--source ${Object.keys(SOURCE_PRESETS).join("|")}] [--force] [--dry-run]\n\n` +
     `Wires the config half (webhooks.<name>) for an EXISTING workflow and prints the\n` +
     `\`on: webhook\` block to add. To scaffold a new webhook-triggered workflow in one\n` +
     `step instead, use \`${p} create workflow <name> --webhook\`.\n`
@@ -184,7 +165,6 @@ function parseArgs(argv: string[]): WebhookOptions {
   let rawHook: string | undefined;
   let workflow: string | undefined;
   let source: string | undefined;
-  let datasources: string[] = [];
   let force = false;
   let dryRun = false;
 
@@ -198,10 +178,6 @@ function parseArgs(argv: string[]): WebhookOptions {
       const v = argv[++i];
       if (!v) failUsage(`--source requires a source id (${Object.keys(SOURCE_PRESETS).join(" | ")})`);
       source = v;
-    } else if (arg === "--datasources") {
-      const v = argv[++i];
-      if (!v) failUsage("--datasources requires a comma-separated list");
-      datasources = v.split(",").map((s) => s.trim()).filter(Boolean);
     } else if (arg === "--force" || arg === "-f") {
       force = true;
     } else if (arg === "--dry-run") {
@@ -220,7 +196,7 @@ function parseArgs(argv: string[]): WebhookOptions {
 
   if (rawHook === undefined) failUsage("create webhook requires a name, e.g. `create webhook alerts --workflow triage`");
   if (workflow === undefined) failUsage("create webhook requires --workflow <existing workflow name>");
-  return { rawHook, workflow, source, datasources, force, dryRun };
+  return { rawHook, workflow, source, force, dryRun };
 }
 
 /**
@@ -246,7 +222,7 @@ export async function runCreateWebhook(argv: string[], cwd: string = process.cwd
   }
 
   const color = shouldColor(Boolean(process.stdout.isTTY));
-  const entry = buildWebhookEntry({ hook, workflow, source, datasources: opts.datasources });
+  const entry = buildWebhookEntry({ hook, workflow, source });
   await wireWebhookConfig(cwd, hook, entry, { force: opts.force, dryRun: opts.dryRun, color });
   if (opts.dryRun) return 0;
 

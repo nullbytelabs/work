@@ -2,13 +2,13 @@
  * Egress e2e — proves the MEDIATED-egress security contract on a REAL micro-VM.
  *
  * The property under test is narrow and specific: when a job is mediated (a model
- * host / datasource with an injected secret), the real secret is kept OUT of the
- * guest and only swapped in host-side, scoped to the allowed host. This is what
- * protects the API key from the agent — it is NOT a general network sandbox
- * (bare `run:` steps have open egress by design; that's how `npm install` works).
+ * host with an injected secret), the real secret is kept OUT of the guest and only
+ * swapped in host-side, scoped to the allowed host. This is what protects the API
+ * key from the agent — it is NOT a general network sandbox (bare `run:` steps have
+ * open egress by design; that's how `npm install` works).
  *
  * It's the one place this is verified end-to-end rather than at the target
- * boundary (egress-wiring.test.ts spies on what's handed to the target; this
+ * boundary (the agent egress resolver decides what's handed to the target; this
  * proves the target *honors* it):
  *
  *   1. the guest env holds a placeholder — the real secret never enters the VM;

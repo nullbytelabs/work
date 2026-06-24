@@ -5,17 +5,15 @@
 #              search Tempo (`{ span.work.run.id = "<id>" }`) to resolve the random
 #              OTLP trace id, then fetch the full span tree and distill it.
 #
-#              Grafana access is brokered by the `grafana` datasource (work.json):
-#              the service-account token is injected host-side into the Authorization
-#              header for dydx.grafana.net only and never enters the guest — so the
-#              analyzing agent (with open egress) can read the trace but cannot see or
-#              leak the token. The grafana token is injected only when you scope
-#              this run to it:
+#              Grafana access uses a service-account token from the work.json
+#              `secrets:` whitelist: the workflow passes `${{ secrets.GRAFANA_TOKEN }}`
+#              to the tempo-trace action as its `grafana_token` input. The secret's
+#              value comes from your shell env (`"GRAFANA_TOKEN": "$GRAFANA_SERVICE_ACCOUNT_TOKEN"`
+#              in work.json reads it host-side), and `work run` / `work serve` dispatch /
+#              webhook trigger all just work:
 #
-#                export SERVICE_ACCOUNT_TOKEN=...   # the glsa_ service-account token
 #                work run trace-analysis \
-#                  --inputs '{"run_id":"fe63caaf-e5c0-47c2-957a-76602b895cab"}' \
-#                  --datasources grafana
+#                  --inputs '{"run_id":"fe63caaf-e5c0-47c2-957a-76602b895cab"}'
 #
 #              Agent-only + one HTTP fetch → machine: small.
 ---
@@ -33,23 +31,35 @@ inputs:
     description: how far back to search Tempo for the run's trace (default 30 days)
 
 jobs:
-  analyze:
+  # The only job that touches the secret. Grafana/Tempo access lives in the
+  # tempo-trace action: it resolves the run id → trace and distills the span tree.
+  # The service-account token is passed in as the `grafana_token` input
+  # (${{ secrets.GRAFANA_TOKEN }}), resolved host-side from the work.json secrets:
+  # whitelist — so the secret stays in this job and never reaches the agent job.
+  fetch:
     runs-on: work:base
     machine: small
     outputs:
-      analysis: ${{ steps.analyze.outputs.output }}
+      tree: ${{ steps.fetch.outputs.tree }}
     steps:
-      # Grafana/Tempo access lives in the tempo-trace action: it resolves the run id
-      # → trace and distills the span tree. The `grafana` datasource injects the
-      # token host-side. Token injection is deny-by-default, so it requires --datasources grafana; egress itself is open.
       - id: fetch
         name: resolve run id → trace and distill the span tree
         uses: action/tempo-trace
         with:
           run_id: ${{ inputs.run_id }}
-          grafana_url: https://dydx.grafana.net
+          grafana_url: ${{ secrets.GRAFANA_URL }}
+          grafana_token: ${{ secrets.GRAFANA_TOKEN }}
           lookback_hours: ${{ inputs.lookback_hours }}
 
+  # Feeds on `fetch`'s distilled tree (via needs.fetch.outputs.tree) — no secret
+  # in scope. Runs the agent and prints the report.
+  analyze:
+    runs-on: work:base
+    machine: small
+    needs: [fetch]
+    outputs:
+      analysis: ${{ steps.analyze.outputs.output }}
+    steps:
       - id: analyze
         name: analyze the trace
         uses: work/agent
@@ -78,7 +88,7 @@ jobs:
             Do not invent data not present in the trace. If something is absent, say so.
 
             === DISTILLED SPAN TREE ===
-            ${{ steps.fetch.outputs.tree }}
+            ${{ needs.fetch.outputs.tree }}
 
       - name: show analysis
         env:

@@ -5,10 +5,9 @@ description: >
   span attribute `work.run.id`, so this searches Tempo (`{ span.work.run.id = … }`)
   to resolve the random OTLP trace id, fetches the full trace, and distills it.
 
-  Reaches Grafana through the `grafana` datasource: the service-account token is
-  injected host-side into the Authorization header (never in-guest), so the job
-  must be scoped with `--datasources grafana`. Pure node:builtin + global fetch —
-  no dependencies.
+  Reaches Grafana with a service-account token supplied via the `grafana_token`
+  input (the workflow passes ${{ secrets.GRAFANA_TOKEN }}). Pure node:builtin +
+  global fetch — no dependencies.
 inputs:
   run_id:
     type: string
@@ -18,6 +17,13 @@ inputs:
     type: string
     required: true
     description: Grafana stack base URL, e.g. https://<stack>.grafana.net
+  grafana_token:
+    type: string
+    required: true
+    description: >
+      Grafana service-account token (glsa_…). Passed in from the workflow as
+      ${{ secrets.GRAFANA_TOKEN }} — resolved host-side from the work.json
+      secrets: whitelist and handed to the action as INPUT_GRAFANA_TOKEN.
   lookback_hours:
     type: string
     default: "720"

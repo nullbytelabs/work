@@ -414,7 +414,7 @@ h1.run-state[data-status=skipped] { color: var(--skip); }
 .hook-title .hmeta a:hover { text-decoration: underline; }
 .hook-badges { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 
-/* Compact pill for NON-status metadata only (auth scheme, datasource names). */
+/* Compact pill for NON-status metadata only (e.g. auth scheme). */
 .tag {
   display: inline-flex; align-items: center; gap: var(--space-2);
   padding: 3px var(--space-3); border-radius: 999px; font-size: var(--text-xs); font-weight: var(--weight-semi);
@@ -924,8 +924,8 @@ async function viewWebhooks() {
   for (const h of hooks) list.appendChild(hookCard(h));
 }
 
-// One hook card: header (name + auth/state badges), workflow + datasources,
-// the endpoint URL with copy + send-test, and a lazily-loaded deliveries panel.
+// One hook card: header (name + auth/state badges), workflow, the endpoint URL
+// with copy + send-test, and a lazily-loaded deliveries panel.
 function hookCard(h) {
   const card = document.createElement('div');
   card.className = 'card pad';
@@ -939,12 +939,6 @@ function hookCard(h) {
       ? statusPill('success', 'enabled')
       : statusPill('skipped', 'disabled');
   const authTag = '<span class="tag mono">' + esc(h.auth || 'bearer') + '</span>';
-
-  const dsChips = Array.isArray(h.datasources) && h.datasources.length
-    ? '<div class="chips stack-4">' +
-        h.datasources.map((d) => '<span class="tag mono">' + esc(d) + '</span>').join('') +
-      '</div>'
-    : '';
 
   const origin = window.location.origin;
   const url = origin + '/hooks/' + h.name;

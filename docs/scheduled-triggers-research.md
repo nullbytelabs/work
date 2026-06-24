@@ -594,7 +594,7 @@ findings:
   (`ownsEngine = opts.engine === undefined`, `:119`).
 - **Nuance on "same option shape"** (PARTIALLY-VALID → sharpened): the two call
   sites share the core fields (`plan`, `workspaceSource`, `workflowDir`, `config`,
-  `runId`, `datasources`, `hooks`) but diverge exactly on the **engine-ownership
+  `runId`, `hooks`) but diverge exactly on the **engine-ownership
   seam** — CLI passes `dataDir`/`workdir` (owns + persists its own engine), web
   passes `engine`/`makeTarget` (borrows the shared one). This *reinforces* the
   §7 design: `RunService` is precisely the missing owner of that seam.

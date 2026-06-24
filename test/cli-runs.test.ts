@@ -60,4 +60,36 @@ describe("work runs", () => {
       await rm(ws, { recursive: true, force: true });
     }
   });
+
+  it("--full widens the ID column to the complete run id, and is scoped to `runs`", async () => {
+    const ws = await mkdtemp(join(tmpdir(), "pi-wf-cliruns-full-"));
+    await mkdir(join(ws, ".workflows"), { recursive: true });
+    try {
+      await seed(ws);
+
+      // Default: the ID column is truncated to the 8-char prefix.
+      const short = runs(ws);
+      assert.match(short.stdout, /run-succ\s+ci/);
+      assert.doesNotMatch(short.stdout, /run-success-0001/);
+
+      // --full: the complete id is printed (copy-pasteable into workflows).
+      const full = runs(ws, "--full");
+      assert.equal(full.status, 0);
+      assert.match(full.stdout, /run-success-0001\s+ci/);
+      assert.match(full.stdout, /run-interrupt-02\s+review/);
+      assert.match(full.stdout, /resume one with:.*--resume run-interrupt-02/);
+
+      // --full composes with --status.
+      const filtered = runs(ws, "--full", "--status", "success");
+      assert.match(filtered.stdout, /run-success-0001\s+ci/);
+      assert.doesNotMatch(filtered.stdout, /review/);
+
+      // Scoped to `runs`: rejected on other commands.
+      const misplaced = spawnSync(BIN, ["--workspace", ws, "graph", "x.yaml", "--full"], { encoding: "utf8" });
+      assert.equal(misplaced.status, 2);
+      assert.match(misplaced.stderr, /--full only applies to `runs`/);
+    } finally {
+      await rm(ws, { recursive: true, force: true });
+    }
+  });
 });

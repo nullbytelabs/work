@@ -49,8 +49,8 @@ describe("config", () => {
     );
   });
 
-  // The datasources/webhooks parse shape (present, absent, malformed, merge) is
-  // owned by test/datasource-egress.test.ts — not re-asserted here.
+  // The webhooks parse shape (present, absent, malformed, merge) is owned by
+  // test/config-merge.test.ts and test/scaffold-webhook.test.ts — not re-asserted here.
 });
 
 describe("config — observability", () => {

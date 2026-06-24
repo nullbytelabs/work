@@ -3,9 +3,9 @@
  * by its run id and emit a distilled span tree.
  *
  * ABI (work node action): inputs arrive as INPUT_<NAME>; the grafana service-account
- * token arrives as SERVICE_ACCOUNT_TOKEN (injected host-side by the `grafana`
- * datasource — in-guest it is an opaque placeholder, swapped into the Authorization
- * header for the grafana host only). Declared outputs are written to $WORK_OUTPUT.
+ * token arrives as INPUT_GRAFANA_TOKEN (passed from the workflow as the
+ * `grafana_token` input, ${{ secrets.GRAFANA_TOKEN }}, resolved host-side from the
+ * work.json secrets: whitelist). Declared outputs are written to $WORK_OUTPUT.
  */
 import { writeFileSync } from "node:fs";
 
@@ -15,12 +15,12 @@ function fail(msg) {
 }
 
 const base = (process.env.INPUT_GRAFANA_URL || "").replace(/\/$/, "");
-const token = process.env.SERVICE_ACCOUNT_TOKEN;
+const token = process.env.INPUT_GRAFANA_TOKEN;
 const runId = process.env.INPUT_RUN_ID;
 const lookbackH = Number(process.env.INPUT_LOOKBACK_HOURS || "720");
 if (!base) fail("grafana_url input is empty");
 if (!runId) fail("run_id input is empty");
-if (!token) fail("SERVICE_ACCOUNT_TOKEN not set — scope the job with --datasources grafana");
+if (!token) fail("grafana_token input is empty — pass ${{ secrets.GRAFANA_TOKEN }} (declared in the secrets: block of work.json)");
 
 const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
 async function gapi(path) {

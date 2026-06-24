@@ -166,7 +166,7 @@ When a workflow lives in `.workflows/`, the **project root** (the parent) is wha
 
 ## Agent steps (AI)
 
-An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) coding agent **inside the job's micro-VM**, with its full toolset rooted at the checkout — so it can read and edit the project's files directly. The model is reached only through the sandbox's mediated egress, and your API key is injected host-side and never enters the guest.
+An agent step runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) coding agent **inside the job's micro-VM**, with its full toolset rooted at the checkout — so it can read and edit the project's files directly. Your API key is injected host-side, scoped to the model host, and never enters the guest.
 
 **1. Configure a model** in `work.json` (loaded automatically from the working directory; or pass `--config`, or set `$WORK_CONFIG`):
 
@@ -213,10 +213,10 @@ The prompt can also be file-backed (`promptFile:`); there's no separate system-p
 
 ```bash
 # run a workflow file directly
-work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--workdir <dir>] [--resume <id>] [--quiet]
+work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]
 
 # run a project workflow by name (resolves .workflows/*.yaml whose `name:` matches)
-work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--resume <id>] [--quiet]
+work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--resume <id>] [--quiet]
 
 # print the job DAG instead of running it
 work graph <workflow.yaml|name> [--format mermaid|dot|json|ascii] [--steps]
@@ -230,7 +230,6 @@ work serve [--workspace <dir>] [--port <n>]
 | `--workspace <dir>` | project root for `run <name>` / `graph <name>` (default: current dir) |
 | `--inputs '<json>'` | values for the workflow's declared `inputs:` |
 | `--config <file>` | model/provider config (default: `./work.json`, or `$WORK_CONFIG`) |
-| `--datasources <a,b>` | datasource keys this run's jobs may reach (header-injected egress; see config) |
 | `--workdir <dir>` | where job workspaces are staged (default: a temp dir) |
 | `--resume <id>` | resume a prior interrupted run (a persisted `.workflows/` project run) |
 | `--quiet` | suppress the live board / per-job output |

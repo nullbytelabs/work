@@ -46,9 +46,7 @@ Every job runs in its own [Gondolin](https://www.npmjs.com/package/@earendil-wor
 micro-VM. There is no host-execution mode — your steps never run directly on your
 machine. Egress is **open** — a job reaches the network freely, with no allowlist
 to maintain; the sandbox's job is isolating your **host** (filesystem, processes),
-not walling jobs off from the internet. (Reaching private/internal IP ranges is the
-one explicit grant — a [datasource](../reference/configuration#datasources) `resolve`
-pin — so open public egress never exposes host-loopback services.) Each VM is sized
+not walling jobs off from the internet. Each VM is sized
 per job via
 [`machine:`](../reference/workflow-syntax#machine-types), a named type or custom
 cpu/memory, defaulting to `medium`.

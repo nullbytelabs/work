@@ -1,6 +1,6 @@
 # Egress data path: how a guest byte reaches an upstream
 
-The five invariants of gondolin's mediated egress, distilled from the SDK
+The five invariants of gondolin's egress path, distilled from the SDK
 source (`node_modules/@earendil-works/gondolin/dist/src`, v0.8.x — paths below
 are into that tree). Every design that touches sandbox networking should be
 checked against these **before** it grows workarounds; each invariant is
@@ -34,17 +34,18 @@ Intercepted TCP flows are classified, and for HTTP(S) the request's hostname
 (`qemu/http.js: resolveHostname`, `http/utils.js: createLookupGuard`). The
 address the guest dialed is never used upstream.
 
-Consequence: **anything the engine host can reach is reachable from a job**,
-including the host's own loopback — provided policy allows it (3) and the
-hostname resolves host-side or is pinned (4).
+Consequence: **any public upstream the engine host can resolve is reachable
+from a job** — provided policy allows it (3) and the hostname resolves
+host-side.
 
-## 3. Policy runs on the host-resolved IP; `allowedInternalHosts` lifts the private-range block
+## 3. Policy runs on the host-resolved IP; internal ranges stay blocked
 
 `isIpAllowed` (`http/hooks.js`) checks the hostname against `allowedHosts`,
 then blocks internal ranges — loopback, RFC1918, link-local, CGNAT, and IPv6
-equivalents — **on the host-resolved IP**, unless the hostname matches
-`allowedInternalHosts`. That lift covers loopback, and its entries are
-implicitly merged into the allowlist.
+equivalents — **on the host-resolved IP**. work grants jobs allow-all *public*
+egress (`allowedHosts: ["*"]`, `src/agent/egress.ts`) but never lifts the
+internal-range block, so opening public egress does not expose host-loopback or
+private-network services to a job.
 
 ## 4. `onRequest` runs before everything that matters
 
@@ -54,32 +55,26 @@ Inside `createHttpHooks` (`http/hooks.js`), the user `onRequest` hook runs
 rewrite in `onRequest` redirects the dial, and everything downstream — secret
 scoping, `isIpAllowed`, TLS verification — sees the **rewritten** host.
 
-This is how the engine implements datasource `resolve` pins (curl
-`--resolve` analog): `makeResolveHook` (`src/targets/gondolin.ts`) rewrites
-the pinned hostname to its IP, and the datasource egress resolver
-(`src/egress/datasource.ts`) adds the pinned IP to `allowedInternalHosts`
-**and** to the token's secret scope — both are required, because post-rewrite
-the IP is the hostname.
-
-Upstream TLS is verified host-side with Node's trust store, against the
-post-rewrite host — `NODE_EXTRA_CA_CERTS` on the `work` process is honored,
-and a raw-IP target needs that IP in the certificate's SANs (kind's default
-API-server cert carries `127.0.0.1`, which is why the k8s-triage example
-needs no certificate patching).
+The engine uses exactly this ordering to inject the model API key: when a
+model is configured, `makeAgentEgressResolver` (`src/agent/egress.ts`) scopes a
+header-only secret to the model host, so the placeholder is swapped into the
+Authorization header for that one host and the real key never enters the guest.
+Upstream TLS is verified host-side with Node's trust store, against the dialed
+host — `NODE_EXTRA_CA_CERTS` on the `work` process is honored.
 
 ## 5. Mapped TCP (`tcp.hosts`) is a different animal
 
 Gondolin's `tcp.hosts` option is raw passthrough: it bypasses HTTP
 inspection, policy hooks, **and secret injection**. It is never appropriate
-for datasources or anything credential-bearing; the engine deliberately does
-not expose it.
+for anything credential-bearing; the engine deliberately does not expose it.
 
 ## Quick implications table
 
 | You want | The answer |
 |---|---|
-| Reach a service on the engine host's loopback | Datasource with `resolve: "127.0.0.1"`; any non-`.localhost` hostname label |
-| Reach a private-IP upstream with a real DNS name | Its hostname must end up in `allowedInternalHosts` (the datasource resolver derives this from `resolve`) |
-| A guest-facing hostname | Any label works — it only needs to resolve host-side **or** be pinned; never `localhost`/`*.localhost` |
+| Reach a public upstream from a job | Egress is open (`allowedHosts: ["*"]`) for every job — no allowlist to maintain |
+| A guest-facing hostname | Any label works — it only needs to resolve host-side; never `localhost`/`*.localhost` |
+| Pass a credential to a `run:` step or action | Put it in the `secrets:` whitelist in `work.json` and reference `${{ secrets.NAME }}` — it flows into the step env, never via the allowlist |
+| Keep the model key out of the guest | Automatic — it's host-injected and scoped to the model host (`makeAgentEgressResolver`); no guest env ever sees it |
 | Custom upstream CA | `NODE_EXTRA_CA_CERTS` on the `work` process (host side); in-guest, clients verify the sandbox's MITM CA instead |
 | Raw TCP to a fixed target | `tcp.hosts` exists but forfeits mediation and secrets — don't, for anything credential-bearing |

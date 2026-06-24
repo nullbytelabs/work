@@ -9,20 +9,19 @@ The package installs a single command, `work`. These docs use it throughout.
 work init [--project | --global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]
 
 # scaffold a single new workflow (optionally webhook-triggered)
-work create workflow <name> [--template hello-world|agent-action] [--webhook [--source <id>]] [--datasources a,b] [--force] [--dry-run]
+work create workflow <name> [--template hello-world|agent-action] [--webhook [--source <id>]] [--force] [--dry-run]
 
-# scaffold a datasource entry (merged into work.json) or a custom job image
-work create datasource <name> [--preset <id>] [--url <baseUrl>] [--force] [--dry-run]
+# scaffold a custom job image
 work create image <name> [--force] [--dry-run]
 
 # pair a webhook with an existing workflow (merges webhooks.<name> into work.json)
-work create webhook <name> --workflow <existing> [--source <id>] [--datasources a,b] [--force] [--dry-run]
+work create webhook <name> --workflow <existing> [--source <id>] [--force] [--dry-run]
 
 # run a workflow file directly
-work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--no-global] [--workdir <dir>] [--quiet]
+work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--quiet]
 
 # run a project pipeline by name (resolves .workflows/*.yaml whose `name:` matches)
-work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--datasources <a,b>] [--no-global] [--workdir <dir>] [--resume <id>] [--quiet]
+work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--resume <id>] [--quiet]
 
 # list run history (filter by status)
 work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
@@ -84,7 +83,7 @@ at run time. See [Configuration discovery](#configuration-discovery).
 ### `work create workflow`
 
 ```bash
-work create workflow <name> [--template hello-world|agent-action] [--webhook [--source <id>]] [--datasources a,b] [--force] [--dry-run]
+work create workflow <name> [--template hello-world|agent-action] [--webhook [--source <id>]] [--force] [--dry-run]
 ```
 
 Scaffolds a **single new workflow** named `<name>` into `.workflows/<name>.yaml`.
@@ -107,10 +106,10 @@ exact next steps (`work run <name>`, `work graph <name>`).
 Pass `--webhook` to generate a workflow that's webhook-triggered from the start.
 The generated YAML carries an `on: webhook` block, and the matching
 [`webhooks.<name>`](./configuration#webhooks) entry is merged into `work.json` in
-the same pass. `--source` and `--datasources` both imply `--webhook`.
+the same pass. `--source` implies `--webhook`.
 
 ```bash
-work create workflow triage --webhook --source alertmanager --datasources prometheus,loki
+work create workflow triage --webhook --source alertmanager
 ```
 
 writes the workflow with:
@@ -133,69 +132,15 @@ The secret is always emitted as a `$VAR` env-ref (`$TRIAGE_SECRET`), never a
 literal. Run `export TRIAGE_SECRET=...` to set it. `--source` picks the sender preset
 that supplies the auth scheme (and signature header where the sender signs
 deliveries); see [`work create webhook`](#work-create-webhook) for the preset
-table. `--datasources` selects which datasource credentials the triggered run may use (it does not gate egress, which is open).
+table.
 
 | Option | Effect |
 |---|---|
 | `--template <name>` | `hello-world` (default) or `agent-action`. |
 | `--webhook` | Also generate the `on: webhook` block and merge the `webhooks.<name>` config. |
 | `--source <id>` | Sender preset for the webhook auth (`alertmanager`, `grafana`, `github`, `generic`). Implies `--webhook`. |
-| `--datasources <a,b>` | Datasource keys the webhook-triggered run may use. Implies `--webhook`. |
 | `--force` | Overwrite an existing workflow file of the same name (never the config). |
 | `--dry-run` | Print what would be written and exit without touching disk. |
-
-### `work create datasource`
-
-```bash
-work create datasource <name> [--preset <id>] [--url <baseUrl>] [--force] [--dry-run]
-```
-
-Scaffolds a [`datasources.<name>`](./configuration#datasources) entry, **merged
-into** the project's `work.json` (the rest of the file is preserved). A datasource
-is a named external HTTP service a plain `run:` step can reach with a
-header-injected token it never actually sees: the secret is swapped in host-side,
-scoped to the datasource's host, so it never enters the guest. (For a credential a
-CLI must hold to sign, use [`secrets`](./configuration#secrets) instead.)
-
-The generated entry is a safe skeleton, not a live connection:
-
-```json
-{
-  "datasources": {
-    "grafana": {
-      "baseUrl": "https://grafana.example.com/api",
-      "token": "$GRAFANA_TOKEN",
-      "tokenEnv": "GRAFANA_TOKEN"
-    }
-  }
-}
-```
-
-- `token` is always a `$VAR` env-ref, never a literal secret. Set the real value
-  with `export GRAFANA_TOKEN=...`, never in workflow `env:`.
-- `tokenEnv` is emitted explicitly (derived as `<NAME>_TOKEN`) so you can see which
-  variable to export.
-- **Presets** supply only the *shape* of a product's base URL — edit `baseUrl` to
-  your real host. If `<name>` matches a preset id it's inferred; otherwise pass
-  `--preset` (or get the `generic` skeleton). Shipped presets: `kubernetes`,
-  `prometheus`, `grafana`, `loki`, `tempo`, `mimir`, `alertmanager`, `generic`.
-- For a host public DNS can't name (a loopback/kind service, an SSH tunnel, a
-  Tailscale peer), add `"resolve": "<ip>"` to the entry. The generator never
-  emits it because it's deployment-specific, and pinning also lifts the sandbox's
-  private-range block for that IP.
-
-```bash
-work create datasource grafana             # infers the grafana preset
-work create datasource metrics --preset prometheus
-work create datasource api --url https://internal.example.com/v1
-```
-
-| Option | Effect |
-|---|---|
-| `--preset <id>` | Use a known preset's base-URL shape (inferred from `<name>` if omitted). |
-| `--url <baseUrl>` | Override the preset's placeholder `baseUrl`. |
-| `--force` | Overwrite an existing `datasources.<name>` entry. |
-| `--dry-run` | Print the merged entry and exit without touching disk. |
 
 ### `work create image`
 
@@ -227,7 +172,7 @@ built-in of the same name. See [Custom images](../guide/custom-images).
 ### `work create webhook`
 
 ```bash
-work create webhook <name> --workflow <existing> [--source <id>] [--datasources a,b] [--force] [--dry-run]
+work create webhook <name> --workflow <existing> [--source <id>] [--force] [--dry-run]
 ```
 
 Pairs a webhook with an **already existing** workflow. It merges only the
@@ -254,7 +199,7 @@ on:
 The hook is served by `work serve` at `POST /hooks/<name>`; a smoke-test
 endpoint lives at `POST /api/webhooks/<name>/test`. The `secret` is always emitted
 as a `$VAR` env-ref (`$ALERTS_SECRET`), never a literal. Run `export ALERTS_SECRET=...`
-to set it. `--datasources` selects which datasource credentials the triggered run may use (it does not gate egress, which is open).
+to set it.
 
 `--source` selects the sender preset, which fixes the auth scheme (and the
 signature header for senders that sign their deliveries):
@@ -270,7 +215,6 @@ signature header for senders that sign their deliveries):
 |---|---|
 | `--workflow <existing>` | **Required.** The existing workflow `name:` this hook triggers. |
 | `--source <id>` | Sender preset for the webhook auth (`alertmanager`, `grafana`, `github`, `generic`). |
-| `--datasources <a,b>` | Datasource keys the webhook-triggered run may use. |
 | `--force` | Overwrite an existing `webhooks.<name>` entry. |
 | `--dry-run` | Print the merged entry and `on:` snippet, and exit without touching disk. |
 
@@ -465,7 +409,6 @@ v=$(work version)
 | `--port <n>` | `serve` | Port the host binds (default `4280`; `1`–`65535`). |
 | `--inputs '<json>'` | `run`, file, `resume`, `rerun`, `retry` | Values for the workflow's declared `inputs:`, as a JSON object — e.g. `'{"name":"ada"}'`. For `resume`/`rerun`/`retry`, overrides the inputs stored in history. |
 | `--config <file>` | `run`, file | Project-layer model/provider config file. Default: `./work.json`, or `$WORK_CONFIG`. |
-| `--datasources <a,b>` | `run`, file | [Datasources](./configuration#datasources) whose credentials this run's jobs may use (comma-separated; the CLI counterpart of a webhook's `datasources` scope). Deny-by-default: none injected when omitted. Selects credentials, not reachability — egress is open. |
 | `--no-global` | `run`, file | Skip the machine-wide global config layer, for a hermetic, reproducible run. |
 | `--workdir <dir>` | `run`, file | Where job workspaces are staged (default: a temp dir). |
 | `--resume <id>` | `run` | Continue an interrupted run instead of starting a new one (same run id; finished jobs are reused). Project workflows only. |

@@ -1,6 +1,6 @@
 /**
- * Merge a keyed section (`datasources` / `webhooks`) into an existing `work.json`
- * without clobbering the rest of it.
+ * Merge a keyed section (`webhooks`) into an existing `work.json` without
+ * clobbering the rest of it.
  *
  * This is the deliberate counterpart to the scaffold writer (`write.ts`), which
  * NEVER touches an existing `work.json` because it may hold creds. The *merge*
@@ -23,7 +23,7 @@ import { UserFacingError } from "../errors.ts";
 import { CODE, paint } from "../tui/palette.ts";
 
 /** The keyed config maps a generator may upsert into. */
-export type ConfigSection = "datasources" | "webhooks";
+export type ConfigSection = "webhooks";
 
 export interface ConfigMergePlan {
   /** Path relative to the project root (always `work.json`). */
@@ -49,7 +49,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
  * Throws on a collision (unless `force`) and validates the merged shape through
  * `parsePartialConfig` — shape-only on purpose, so a user's pre-existing
  * cross-layer reference (a model whose provider lives in the global layer) isn't
- * rejected by an unrelated `create datasource`.
+ * rejected by an unrelated `create webhook`.
  */
 export function mergeConfigSection(
   current: unknown,

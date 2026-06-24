@@ -48,16 +48,14 @@ describe("webhook — pure builders", () => {
     assert.match(String(entry.secret), /^\$/); // never a literal secret
   });
 
-  it("buildWebhookEntry: bearer source omits signatureHeader; datasources scope when given", () => {
+  it("buildWebhookEntry: bearer source omits signatureHeader", () => {
     const entry = buildWebhookEntry({
       hook: "alerts",
       workflow: "triage",
       source: SOURCE_PRESETS["alertmanager"]!,
-      datasources: ["prometheus", "loki"],
     });
     assert.equal(entry.auth, "bearer");
     assert.equal(entry.signatureHeader, undefined);
-    assert.deepEqual(entry.datasources, ["prometheus", "loki"]);
   });
 
   it("webhookTriggerBlock: includes source except for generic", () => {
@@ -97,12 +95,6 @@ describe("create workflow --webhook (greenfield)", () => {
     assert.equal(cfg.webhooks.triage.workflow, "triage");
     assert.equal(cfg.webhooks.triage.auth, "bearer");
     assert.equal(cfg.webhooks.triage.secret, "$TRIAGE_SECRET");
-  });
-
-  it("--datasources scopes the webhook entry", async () => {
-    await runCreate(["workflow", "triage", "--webhook", "--datasources", "prometheus,loki"], proj);
-    const cfg = await readJson(join(proj, "work.json"));
-    assert.deepEqual(cfg.webhooks.triage.datasources, ["prometheus", "loki"]);
   });
 
   it("merges the webhook half into a template's own work.json (agent-action)", async () => {

@@ -14,9 +14,8 @@
 
 > **Update (2026-06-14): items 1–4 shipped, plus a CLI-grammar refactor.** Landed:
 > the merge-into-`work.json` writer (`src/scaffold/config-merge.ts`); `create
-> datasource` (generic core + k8s/LGTM preset table — `src/scaffold/datasource.ts`);
-> `create image` (arch-agnostic build-config skeleton — `src/scaffold/image.ts`);
-> and **webhook pairing** (`src/scaffold/webhook.ts`) — both greenfield (`create
+> image` (arch-agnostic build-config skeleton — `src/scaffold/image.ts`); and
+> **webhook pairing** (`src/scaffold/webhook.ts`) — both greenfield (`create
 > workflow <name> --webhook [--source <id>]` bakes `on: webhook` into the generated
 > file *and* merges the `webhooks.<name>` config half) and retrofit (`create webhook
 > <name> --workflow <existing>` merges the config half + prints the opt-in snippet,
@@ -24,10 +23,10 @@
 > auth mode/header (`alertmanager`→bearer, `grafana`/`github`→hmac).
 >
 > The CLI grammar was also unified to **`create <noun> <name>`** (`workflow`,
-> `datasource`, `image`, `webhook`) — a deliberate **breaking change**: the bare
+> `image`, `webhook`) — a deliberate **breaking change**: the bare
 > `create <name>` form is gone (it errors with a `did you mean create workflow …?`
 > hint). This removes the old noun/name ambiguity, so a workflow may again be named
-> `image`/`datasource`. Still open: workflow-template variety (§4.3). The
+> `image`. Still open: workflow-template variety (§4.3). The
 > assessment below is preserved as the rationale record.
 
 ## 0. TL;DR
@@ -43,10 +42,10 @@
   scattered guide tips, **no dedicated page**, no template output shown, and the
   quickstart pivots to hand-authoring after ~9 lines.
 - The biggest **unaccounted-for surfaces** a user must hand-author today, ranked
-  by payoff: **(1) action packages** (`create action`), **(2) datasource /
-  webhook config sections** (the user's hypothesis — confirmed strong; there is
-  *no* worked datasource example anywhere in the repo), then workflow-template
-  variety and custom-image scaffolds.
+  by payoff: **(1) action packages** (`create action`), **(2) secret / webhook
+  config sections** (the user's hypothesis — confirmed strong; there is *no* worked
+  `secrets:` example anywhere in the repo), then workflow-template variety and
+  custom-image scaffolds.
 - One shared prerequisite unlocks the config-side generators: a
   **merge-into-existing-`work.json`** writer (today's writer only does
   whole-file, never-clobber writes).
@@ -178,7 +177,7 @@ rationale.**
 ## 4. Unaccounted-for use-cases (ranked)
 
 The full hand-authored surface a user touches today: workflow YAML, `work.json`
-(providers/models/datasources/webhooks), composite **and** JS action packages,
+(providers/models/secrets/webhooks), composite **and** JS action packages,
 custom-image `build-config.json`, and (optional) the developer skill. Only two of
 these have any generator. The gaps, by payoff:
 
@@ -197,24 +196,21 @@ generalizes it. Two sub-flavors (`--using node|composite`) mirror the two
 existing e2e examples, and the generated `action.yaml` validates through
 `loadAction` for the same free safety net.
 
-### 4.2 Datasource / webhook config generator (HIGH — the user's hypothesis)
+### 4.2 Secret / webhook config generator (HIGH — the user's hypothesis)
 
-**Hand-authored today, with no example to copy.** Datasources and webhooks live
+**Hand-authored today, with no example to copy.** Secrets and webhooks live
 in `work.json` (`src/config/index.ts:41-96`). A repo-wide search found **no
-datasource block anywhere** — not in examples, not in tests. A user learns the
-fields only from doc comments: `baseUrl` (the egress allowlist host), `token`
-(`$VAR`-expanded), `tokenEnv` (defaults to `<NAME>_TOKEN`), `tokenHeader`, and
-`resolve` (an IP literal, curl-`--resolve` style, which also lifts the
-private-range block) — `src/config/index.ts:41-63`, `src/egress/datasource.ts:58-110`.
+`secrets:` block anywhere** — not in examples, not in tests. A user learns the
+shape only from doc comments: each entry keys a name to either a literal or a
+`$VAR` env ref (`$GRAFANA_SERVICE_ACCOUNT_TOKEN`), resolved host-side at run
+time and addressed in a workflow as `${{ secrets.NAME }}` (`src/config/index.ts:41-63`).
 
-**Why it helps most per line.** This is security-critical config full of the exact
-footguns the source comments warn about: creds must route through the egress
-resolver and **never** through workflow `env:` (`datasource.ts:11-15`), `resolve`
-must be an IP literal (`config/index.ts:225-229`), `tokenEnv` casing. A
-correct-by-construction generator (a `$VAR`-ref token never a literal, the right
-`tokenEnv` casing, a commented `resolve` placeholder) is the only worked
-reference a user would have. The user's datasource hypothesis is well-founded and
-is the strongest single gap.
+**Why it helps most per line.** This is security-critical config with real
+footguns: a secret value should be a `$VAR` ref, not a committed literal, and the
+whitelist is the explicit boundary for what a guest may see. A
+correct-by-construction generator (a `$VAR`-ref value never a literal, the right
+key casing) is the only worked reference a user would have. The user's hypothesis
+is well-founded and is the strongest single gap.
 
 Webhooks are the natural pair: a webhook needs a workflow-side `on: webhook:`
 declaration **and** a name-matched `webhooks.<name>` config entry
@@ -224,7 +220,7 @@ two-sided coordination scaffolding is good at.
 
 **The one new piece of infrastructure these need:** `work.json` is JSON and the
 current writer only does whole-file, never-clobber writes
-(`src/scaffold/write.ts`; `init/index.ts:88`). A datasource/webhook generator
+(`src/scaffold/write.ts`; `init/index.ts:88`). A secret/webhook generator
 must **merge into** an existing `work.json` (read → `parsePartialConfig` → merge →
 re-validate via `parseConfig` → write). This is the shared prerequisite for §4.2
 and the webhook pairing.
@@ -263,11 +259,12 @@ selectable via an `init --provider` flag.
    `src/scaffold/write.ts`.
 2. **Ship `create action <name>` (`--using node|composite`)** — biggest
    boilerplate/ABI surface, and the pattern is already proven by `agent-action`.
-3. **Ship a datasource generator** (`init`/`create` sub-mode that merges a
-   `datasources.<name>` block, with an optional paired `webhooks.<name>`) — the
-   strongest correctness payoff and the only worked datasource reference in the
-   product. Pairs with [`tailnet-incident-response-research.md`](tailnet-incident-response-research.md),
-   which is entirely datasource + webhook driven.
+3. **Ship a secret generator** (`create secret <name>` that merges a
+   `secrets.<name>` entry via the config-merge writer, with an optional paired
+   `webhooks.<name>`) — the strongest correctness payoff and the only worked
+   `secrets:` reference in the product. Pairs with
+   [`tailnet-incident-response-research.md`](tailnet-incident-response-research.md),
+   which is entirely secret + webhook driven.
 4. **Add a docs-site "Scaffolding" guide page** with a sidebar entry that shows
    the actual generated output for each template, documents `--include-skill`'s
    dual write, the `-t` alias, and the `init` filename-from-template rule.
@@ -281,7 +278,7 @@ selectable via an `init --provider` flag.
 
 Implementation: `src/scaffold/{index,templates,write,slug}.ts`,
 `src/init/index.ts`, `src/cli.ts:436-441`, `src/config/index.ts:41-96`,
-`src/actions/load.ts`, `src/egress/datasource.ts`, `src/spec/types.ts:151-186`,
+`src/actions/load.ts`, `src/agent/egress.ts`, `src/spec/types.ts:151-186`,
 `src/doctor/checks.ts`. Docs: `docs-site/reference/cli.md:39-97`,
 `docs-site/guide/{quickstart,project-layout,agent-steps,composite-actions}.md`,
 `docs-site/.vitepress/config.ts`. Prior record:

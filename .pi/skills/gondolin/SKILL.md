@@ -191,7 +191,7 @@ Read before changing target behavior:
   (`memory`/`cpus` top-level); streamed output re-accumulated per the pipe
   caveat; `dispose()` nulls then closes.
 - **Mediation is conditional**: `createHttpHooks` is installed *only* when the
-  job has secrets/datasources/internal hosts to mediate. A job with none gets
+  job has secrets to inject (e.g. a host-scoped model key). A job with none gets
   **no hooks and therefore open outbound network** — that's how a plain
   `run: npm install` reaches the registry. The hooks scope *injected secrets*
   to their hosts; they are not a general egress sandbox for trusted steps.

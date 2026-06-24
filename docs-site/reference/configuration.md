@@ -1,10 +1,10 @@
 # Configuration
 
 `work.json` declares the **providers** and **models** that
-[agent steps](../guide/agent-steps) use, and optionally the **datasources** a
-`run:` step authenticates to and the **webhooks** that can trigger a workflow. You only
-need it if your workflows run `uses: work/agent` steps, call out to a declared
-datasource, or accept webhook triggers; plain `run:` workflows need no config at
+[agent steps](../guide/agent-steps) use, and optionally the **secrets** a step or
+action may read and the **webhooks** that can trigger a workflow. You only
+need it if your workflows run `uses: work/agent` steps, pass a declared secret into a
+step, or accept webhook triggers; plain `run:` workflows need no config at
 all.
 
 ## File resolution
@@ -34,7 +34,7 @@ existing config.
 
 The two layers are **deep-merged**, with the project layer winning:
 
-- `providers`, `models`, `datasources`, and `webhooks` are unioned by key; on a
+- `providers`, `models`, `secrets`, and `webhooks` are unioned by key; on a
   collision the project layer's entry **replaces** the global one wholesale (no
   field-level merging).
 - `defaultModel` is last-writer-wins (the project layer's, if set).
@@ -95,52 +95,15 @@ A map of model alias → model definition. The alias is what you reference (and 
 |---|---|---|
 | `defaultModel` | string | Optional. The model alias used when an agent step doesn't specify one. Must name a model in `models`. |
 
-## `datasources`
-
-A map of datasource name → an external HTTP service a `run:` step reaches with a
-header secret injected **host-side**. Like a provider's `apiKey`, the `token` is
-operator-owned and supports `$VAR` / `${VAR}` expansion, so the file need not hold
-it. The point is **token isolation**: the guest sees a placeholder env var, never
-the real token — the engine swaps it into the outbound header for the datasource's
-host only. Reach for a datasource when a token must **never** enter the guest; for a
-credential a CLI must hold to sign (`aws`/`kubectl`), use [`secrets`](#secrets)
-instead.
-
-```json
-{
-  "datasources": {
-    "grafana": {
-      "baseUrl": "https://grafana.example.com",
-      "token": "$GRAFANA_TOKEN",
-      "tokenHeader": "Authorization",
-      "tokenEnv": "GRAFANA_TOKEN"
-    }
-  }
-}
-```
-
-| Field | Type | Notes |
-|---|---|---|
-| `baseUrl` | string | **Required.** Its host scopes the injected token — the secret rides the outbound header for this host only. |
-| `token` | string | Secret token; literal, or `$VAR` / `${VAR}`. Injected into the outbound request host-side. |
-| `tokenHeader` | string | Outbound header the token rides in (defaults to the target's default, e.g. `Authorization`). |
-| `tokenEnv` | string | Env-var name the `run:` step references for the placeholder (defaults to `<NAME>_TOKEN`). |
-| `resolve` | string | Pin the address the engine dials, like `curl --resolve` — an IP literal the `baseUrl` hostname maps to host-side. For an upstream public DNS can't name: a local Postgres on loopback, a docker-published port, an SSH tunnel, a local kind cluster. Pinning is an explicit grant, so it also lifts the sandbox's private-address block for the pinned IP. |
-
-Scoping is per run: a webhook-triggered run gets the hook's `datasources` list; a
-CLI run opts in with `--datasources <a,b>`. This is deny-by-default for the
-**credential** — name nothing and no datasource token is injected (and a datasource's
-pinned private host stays unreachable). It does not gate general egress (open — see
-below); it selects which datasource tokens a run may use.
-
 ## `secrets`
 
 A flat whitelist of host secrets a workflow may address as
-<code v-pre>${{ secrets.&lt;name&gt; }}</code>. Each value is a literal **or** a `$VAR` / `${VAR}` env
-reference (the same pattern as a model `apiKey` or a datasource `token`), expanded
-host-side at run time. A whitelisted secret is materialized **into the step's guest
-environment** — so a CLI that must hold the credential to sign a request
-(`aws`, `gcloud`, `kubectl`) just works. Only listed names are addressable; the file
+<code v-pre>${{ secrets.&lt;name&gt; }}</code>. The secret's **name** is the key; its **value**
+is a literal **or** a `$VAR` / `${VAR}` env reference (the same pattern as a model
+`apiKey`), resolved host-side at run time. A referenced secret flows **into the guest
+environment** of the step or action that reads it — so a CLI that must hold the
+credential to sign a request (`aws`, `gcloud`, `kubectl`) just works, and an action
+can forward the value in a request header. Only listed names are addressable; the file
 is the explicit boundary between secrets on your host and secrets a guest may see.
 
 ```json
@@ -175,21 +138,21 @@ front** with a message naming each one, before any job starts. Only secrets the
 workflow actually references are checked, so an unrelated declared secret with an
 unset var never blocks a run.
 
-::: tip secrets vs datasources
-Both pull a credential from `work.json`. A **datasource** keeps the token *out* of
-the guest (header-swap, host-side) — best when the workload only needs an HTTP call
-made on its behalf. **secrets** put the value *in* the guest — necessary when the
-tool itself must hold the credential (client-side signing: AWS SigV4, kubeconfig).
-The micro-VM still isolates your host either way.
+::: tip Keep a secret out of an agent's reach
+A secret flows into the env of the step that reads it. To use a credential
+*without* exposing it to a later agent step, split the work across jobs: put the
+secret-using step in one job (say `fetch`) that publishes its result as a job
+[output](./workflow-syntax#outputs), then have a second job
+(`analyze`, `needs: [fetch]`) consume <code v-pre>${{ needs.fetch.outputs.&lt;name&gt; }}</code>.
+The agent job never has the secret in scope. The
+[trace-analysis example](../examples/trace-analysis) does exactly this.
 :::
 
 ::: info Egress is open
 Jobs reach the network freely — there's no egress allowlist to maintain. The
-sandbox's job is isolating your **host** (filesystem, processes), and provider
-tokens are kept out of agent calls by the header-swap above; walling off the
-network on a `run:` job you wrote yourself only added friction, so it's gone.
-Reaching *internal/private* addresses still takes an explicit datasource
-[`resolve`](#datasources) pin.
+sandbox's job is isolating your **host** (filesystem, processes), not walling jobs
+off from the internet. The only secret kept out of the guest is the model API key,
+injected **host-side** and scoped to the model endpoint for `work/agent` steps.
 :::
 
 ## `webhooks`
@@ -207,8 +170,7 @@ config alone can't make a workflow webhook-triggerable.
       "workflow": "alert-triage",
       "auth": "hmac-sha256",
       "secret": "$ALERTMANAGER_WEBHOOK_SECRET",
-      "signatureHeader": "X-Hub-Signature-256",
-      "datasources": ["grafana"]
+      "signatureHeader": "X-Hub-Signature-256"
     }
   }
 }
@@ -221,7 +183,6 @@ config alone can't make a workflow webhook-triggerable.
 | `auth` | `"hmac-sha256"` \| `"bearer"` | Delivery auth scheme. |
 | `secret` | string | Per-hook secret; literal, or `$VAR` / `${VAR}`. Verified constant-time. |
 | `signatureHeader` | string | Header the signature/token arrives in, e.g. `X-Hub-Signature-256`. |
-| `datasources` | string[] | Datasource keys whose credentials the triggered run may use — injects those tokens (and lifts access to any private host they pin) for that run. Not an egress scope; egress is open. |
 
 The receiver is **fail-closed**: a delivery is rejected unless the workflow opted
 in, a matching hook exists, and the request authenticates. Deliveries are de-duped
@@ -261,7 +222,7 @@ fully config-free; explicit config wins where both are set. See the
 
 ## Secrets and env expansion
 
-`apiKey`, datasource `token`, webhook `secret`, and `observability` header values
+`apiKey`, a `secrets` value, webhook `secret`, and `observability` header values
 support `$VAR` and `${VAR}` expansion against the host environment, so the file itself
 need not hold any secret:
 

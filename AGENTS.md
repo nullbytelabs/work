@@ -148,20 +148,22 @@ a step bundle that can itself `uses: work/agent`). The engine also ships built-i
 and `work/install-node` actions (bundled under `src/actions/builtin/`, run through the same path).
 A composite action's inner `uses:` sub-steps route through a late-bound dispatcher wired in `run.ts`.
 
-Key security property: the model is reached only through gondolin's **mediated egress** — the
-egress resolver (`makeAgentEgressResolver`) grants allow-all egress to any job with a `uses:` step
-(work/action) and **injects the API key host-side**, scoped to the model host, so the key never
-enters the guest. `startRun` composes that with a **datasource** egress resolver (`src/egress/`) so
-an allowlisted `run:` step can reach a scoped datasource host with a header-injected token. Both are
-deny-by-default. Per project memory: agents get the full toolset over their workspace — core does
-**not** govern agent permissions, and you must never mock the agent runner.
+Key security property: egress is **open** — `makeAgentEgressResolver` (`src/agent/egress.ts`,
+wired directly in `run.ts`) grants allow-all egress (`["*"]`) to every job. The load-bearing
+control is **host-side key injection**: for any model-running step the model's API key is injected
+host-side under a per-host env-var name, scoped to that one model host, so the **real key never
+enters the guest** (gondolin swaps the placeholder into the Authorization header for that host only).
+Credentials a step or action needs flow through the **`secrets:` whitelist** in `work.json` —
+each `secrets.NAME` is a literal or `$VAR` env ref resolved host-side, referenced as
+`${{ secrets.NAME }}` and passed into a step's `env:` or an action's `with:`. Per project memory:
+agents get the full toolset over their workspace — core does **not** govern agent permissions, and
+you must never mock the agent runner.
 
 **Before designing anything that touches sandbox networking, read
 `docs/egress-data-path.md`.** The headline invariant: guest DNS is synthetic and
 the host re-resolves the SNI hostname and dials from the engine process — the
-guest-dialed IP is ignored, so host-loopback upstreams are reachable (that's
-what datasource `resolve` pins are for) and no upstream ever needs to be made
-"routable from the VM". Gondolin's behavior is checkable in
+guest-dialed IP is ignored, so no upstream ever needs to be made "routable from
+the VM". Gondolin's behavior is checkable in
 `node_modules/@earendil-works/gondolin/dist` — that source is the spec; verify
 an assumed limitation there before building a workaround for it.
 
@@ -185,8 +187,8 @@ checks out the **project root** (parent) into each job; a standalone file checks
 - **`src/graph/`** — `graph` subcommand: emit the compiled DAG as mermaid/dot/json/ascii instead of
   running.
 - **`src/scaffold/` + `src/init/`** — `create <noun> <name>` (`workflow` [+ `--webhook`],
-  `datasource`, `image`, `webhook`) and `init`. Workflow templates: `hello-world`,
-  `agent-action`. The `datasource`/`webhook` generators merge a keyed section into
+  `image`, `webhook`) and `init`. Workflow templates: `hello-world`,
+  `agent-action`. The `webhook` generator merges a keyed section into
   `work.json` via the merge-writer (`config-merge.ts`); `image` scaffolds an
   arch-agnostic `.workflows/images/<name>/build-config.json`. **`src/doctor/`** —
   `doctor` preflight checks (QEMU, Node version, etc.).
@@ -227,10 +229,9 @@ live browser iteration) and should drive UI changes rather than ad-hoc edits.
   when you ship the thing they describe.
 - **Examples never drive core features.** Before adding engine surface to make an
   `examples/` workflow work, apply the deletion test: if the example were deleted
-  tomorrow, would the feature still be worth having, with independent precedent
-  (datasource `resolve` passes — curl `--resolve`, docker `--add-host`)? If not,
-  the example's constraint is probably a wrong assumption — verify it empirically
-  first (a one-line probe beats an architecture).
+  tomorrow, would the feature still be worth having, with independent precedent?
+  If not, the example's constraint is probably a wrong assumption — verify it
+  empirically first (a one-line probe beats an architecture).
 - Deep-dive design docs live in `docs/` (e.g. `gondolin-secure-execution.md`,
   `pi-in-gondolin.md`, `absurd-durable-workflows.md`, `agent-primitive-and-actions.md`,
   `reusable-workflows.md`) — see `docs/README.md` for the index.
