@@ -41,7 +41,7 @@ import {
 } from "../../compiler/index.ts";
 import { createAbsurdEngine, JOBS_QUEUE, type AbsurdEngine } from "./engine.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
-import type { JobHookMeta, JobResult, RunContext, Runtime, StepHookMeta, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
+import type { JobHookMeta, JobPhase, JobResult, RunContext, Runtime, StepHookMeta, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
 import { StepInterrupted } from "../types.ts";
 import { parseOutputFile } from "../output.ts";
 
@@ -430,6 +430,45 @@ type StepExprCtx = {
 };
 
 /**
+ * Bracket a job sub-phase (stage/provision/teardown) with the telemetry hooks so it
+ * becomes a child span of the job — making the boot/staging/teardown time that lives
+ * in the gap before the first step attributable. A throw is reported as a failed
+ * phase and re-raised (the caller still owns control flow); hooks are fire-and-forget.
+ */
+async function withJobPhase<T>(ctx: RunContext, jobId: string, phase: JobPhase, fn: () => Promise<T>): Promise<T> {
+  ctx.hooks?.onJobPhaseStart?.(jobId, phase);
+  try {
+    const result = await fn();
+    ctx.hooks?.onJobPhaseEnd?.(jobId, phase);
+    return result;
+  } catch (err) {
+    ctx.hooks?.onJobPhaseEnd?.(jobId, phase, { error: (err as Error).message });
+    throw err;
+  }
+}
+
+/**
+ * Dispose the job's target as the `teardown` phase span. **Best-effort: never
+ * rethrows.** A dispose throw must NEVER replace the in-flight exception — if a step
+ * was torn out, `JobInterrupted` is propagating through the caller's `finally`; were
+ * a `vm.close()` failure to overwrite it, runJobInTask's catch would see a
+ * non-JobInterrupted error, RETURN a terminal `failure` instead of re-throwing, and
+ * the run would be recorded non-resumable — silently breaking durable resume.
+ * (Symmetrically, a dispose throw after a clean run would mislabel a success as
+ * failure.) So a dispose failure is recorded on the teardown span for diagnosis and
+ * then swallowed; the VM is already going away.
+ */
+async function teardownTarget(ctx: RunContext, jobId: string, target: ExecutionTarget): Promise<void> {
+  ctx.hooks?.onJobPhaseStart?.(jobId, "teardown");
+  try {
+    await target.dispose();
+    ctx.hooks?.onJobPhaseEnd?.(jobId, "teardown");
+  } catch (err) {
+    ctx.hooks?.onJobPhaseEnd?.(jobId, "teardown", { error: (err as Error).message });
+  }
+}
+
+/**
  * Stage the job's checkout into `workdir` like a fresh `git checkout`: never carry
  * a foreign `node_modules` (a job installs its own — copying one across platforms
  * breaks native deps) or `.git`. Keeps staging fast and reproducible.
@@ -449,12 +488,18 @@ async function stageWorkspace(ctx: RunContext, workdir: string): Promise<void> {
 /**
  * Build + provision the job's target. On success returns the target; on failure
  * returns the synthetic `provision` step result so the caller can report it.
+ *
+ * The `provision` phase span (image resolve/build + micro-VM boot — gondolin boot
+ * time) is emitted here, where success/failure is known: provisionTarget catches its
+ * own errors into a synthetic step result rather than throwing, so the phase telemetry
+ * lives with it instead of the caller.
  */
 async function provisionTarget(
   job: PlannedJob,
   deps: JobDeps,
   workdir: string,
 ): Promise<{ target: ExecutionTarget } | { failure: StepResult }> {
+  deps.ctx.hooks?.onJobPhaseStart?.(job.id, "provision");
   try {
     // A sandbox target may need mediated egress (e.g. an in-guest agent reaching
     // the model API). The composition root supplies this per job; the core stays
@@ -472,8 +517,10 @@ async function provisionTarget(
       ...(resolveImagePath ? { resolveImagePath } : {}),
     });
     await target.provision();
+    deps.ctx.hooks?.onJobPhaseEnd?.(job.id, "provision");
     return { target };
   } catch (err) {
+    deps.ctx.hooks?.onJobPhaseEnd?.(job.id, "provision", { error: (err as Error).message });
     return {
       failure: { name: `${job.id}/provision`, status: "failure", exitCode: 1, stdout: "", stderr: (err as Error).message },
     };
@@ -624,18 +671,10 @@ async function runSteps(
       recordStep(step, result);
     }
   } finally {
-    // A dispose throw must NEVER replace the in-flight exception. If a step was torn
-    // out, `JobInterrupted` is propagating here; were a `vm.close()` failure to
-    // overwrite it, runJobInTask's catch would see a non-JobInterrupted error,
-    // RETURN a terminal `failure` instead of re-throwing, and the run would be
-    // recorded non-resumable — silently breaking durable resume. (Symmetrically, a
-    // dispose throw after a clean run would mislabel a success as failure.) Swallow
-    // it (best-effort teardown); the VM is already going away.
-    try {
-      await target.dispose();
-    } catch {
-      /* best-effort teardown — never clobber an in-flight throw or a success */
-    }
+    // Best-effort teardown (the `teardown` phase span). `teardownTarget` never
+    // rethrows — see its contract for why a dispose failure must not clobber an
+    // in-flight throw or a clean success.
+    await teardownTarget(ctx, job.id, target);
   }
 
   return { steps, stepOutputs, failed };
@@ -656,7 +695,7 @@ async function runJobInTask(
   try {
     const workdir = join(ctx.workRoot, job.id);
 
-    await stageWorkspace(ctx, workdir);
+    await withJobPhase(ctx, job.id, "stage", () => stageWorkspace(ctx, workdir));
 
     const prov = await provisionTarget(job, deps, workdir);
     if ("failure" in prov) {

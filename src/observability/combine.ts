@@ -23,6 +23,8 @@ export function combineRunHooks(...consumers: (RunHooks | undefined)[]): RunHook
     onWorkflowStart: (meta) => hs.forEach((h) => guard(() => h.onWorkflowStart?.(meta))),
     onJobStart: (jobId, meta) => hs.forEach((h) => guard(() => h.onJobStart?.(jobId, meta))),
     onStepStart: (jobId, stepName, meta) => hs.forEach((h) => guard(() => h.onStepStart?.(jobId, stepName, meta))),
+    onJobPhaseStart: (jobId, phase) => hs.forEach((h) => guard(() => h.onJobPhaseStart?.(jobId, phase))),
+    onJobPhaseEnd: (jobId, phase, info) => hs.forEach((h) => guard(() => h.onJobPhaseEnd?.(jobId, phase, info))),
     onOutput: (jobId, stepName, chunk) => hs.forEach((h) => guard(() => h.onOutput?.(jobId, stepName, chunk))),
     onStepEnd: (jobId, result) => hs.forEach((h) => guard(() => h.onStepEnd?.(jobId, result))),
     onJobEnd: (jobId, result) => hs.forEach((h) => guard(() => h.onJobEnd?.(jobId, result))),

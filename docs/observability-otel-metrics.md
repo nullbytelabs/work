@@ -101,14 +101,24 @@ the hook fan-out in `startRun` (`src/run.ts`).
 ```
 run {workflow}                         span, SpanKind.SERVER     work.run.id, cicd.pipeline.*
 └─ job {job}                           span, SpanKind.INTERNAL   work.job.*, host.image.*, runs-on
-   └─ step {step}                      span, SpanKind.INTERNAL   work.step.*, cicd.pipeline.task.*
-      └─ chat {model}   (agent steps)  span, SpanKind.INTERNAL   gen_ai.*
+   ├─ stage          (job sub-phase)   span, SpanKind.INTERNAL   work.job.phase
+   ├─ provision      (job sub-phase)   span, SpanKind.INTERNAL   work.job.phase  (VM boot)
+   ├─ step {step}                      span, SpanKind.INTERNAL   work.step.*, cicd.pipeline.task.*
+   │  └─ chat {model} (agent steps)    span, SpanKind.INTERNAL   gen_ai.*
+   └─ teardown       (job sub-phase)   span, SpanKind.INTERNAL   work.job.phase
 ```
 
 Three structural levels (run → job → step) plus a GenAI leaf for agent steps. This is the
 hierarchy every comparable engine converges on (Temporal workflow→activity, Airflow
 dag_run→task_instance, Argo workflow→node, the GH-Actions OTel exporters run→job→step), and
 it is exactly what the OpenTelemetry **CI/CD semantic conventions** model.
+
+**Job sub-phases.** Between a job span opening and its first step there is otherwise-dark
+time — host-side checkout staging and the micro-VM boot — and after the last step, teardown.
+Three child spans make it attributable: `stage` (checkout copy), `provision` (image
+resolve/build + gondolin boot), and `teardown` (VM dispose), each carrying
+`work.job.phase`. `provision` is where you read **gondolin boot time** directly. A phase
+that fails (a boot failure, say) is an ERROR span with `error.type = {phase}_error`.
 
 ### 3.2 Span names — low cardinality, detail in attributes
 
@@ -358,6 +368,7 @@ Alloy's OTLP→Prometheus conversion emits the wire names shown.
 | `work_steps_total` | counter | `workflow`, `job`, `result` | steps completed by outcome |
 | `work_run_duration_seconds` | histogram | `workflow`, `result` | run wall-clock |
 | `work_job_duration_seconds` | histogram | `workflow`, `job`, `result` | job wall-clock |
+| `work_job_phase_duration_seconds` | histogram | `workflow`, `phase` (`stage`/`provision`/`teardown`), `result` | job sub-phase wall-clock (boot time = `phase=provision`) |
 | `work_step_duration_seconds` | histogram | `job`, `result` | step wall-clock |
 | `work_jobs_in_flight` | UpDownCounter | `workflow` | currently-running jobs (vs the concurrency cap) |
 | `work_run_resumes_total` | counter | `workflow` | crash-resumes (durable-engine-specific) |
@@ -371,7 +382,8 @@ For the agent token histogram we can additionally emit the GenAI-semconv
 
 ### 5.3 Cardinality rules (non-negotiable)
 
-- **OK as labels** (bounded): `workflow`, `job`, `model`, `result`, `direction`. Treat
+- **OK as labels** (bounded): `workflow`, `job`, `model`, `result`, `direction`, `phase`
+  (the fixed set `stage`/`provision`/`teardown`). Treat
   `workflow`/`job` as *moderate* cardinality — Argo's metrics docs carry explicit warnings
   about per-name series blowup; fine at our scale, worth a note.
 - **NEVER as labels** (unbounded): `run id`, `job execution id`, `step id`, `trace id`,

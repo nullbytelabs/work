@@ -26,6 +26,7 @@ export const ATTR = {
   WORK_STEP_USES: "work.step.uses",
   WORK_STEP_RESULT: "work.step.result",
   WORK_RUN_RESUMED: "work.run.resumed",
+  WORK_JOB_PHASE: "work.job.phase",
 
   // Host / micro-VM image (a VM is a host, not a container).
   HOST_IMAGE_NAME: "host.image.name",

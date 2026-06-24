@@ -17,7 +17,7 @@
  */
 import { trace, context, SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import type { Tracer, Meter, Span, Context, SpanContext, Attributes, Link } from "@opentelemetry/api";
-import type { RunHooks, JobHookMeta, StepResult, JobResult, WorkflowResult, StepAgentInfo } from "../runtime/types.ts";
+import type { RunHooks, JobHookMeta, JobPhase, JobPhaseInfo, StepResult, JobResult, WorkflowResult, StepAgentInfo } from "../runtime/types.ts";
 import { ATTR, GEN_AI_PROVIDER_ANTHROPIC, runResult, taskResult } from "./semconv.ts";
 
 export interface TelemetryOptions {
@@ -50,6 +50,7 @@ export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
   const mSteps = meter.createCounter("work.steps");
   const mRunDuration = meter.createHistogram("work.run.duration", { unit: "s" });
   const mJobDuration = meter.createHistogram("work.job.duration", { unit: "s" });
+  const mJobPhaseDuration = meter.createHistogram("work.job.phase.duration", { unit: "s" });
   const mStepDuration = meter.createHistogram("work.step.duration", { unit: "s" });
   const mJobsInFlight = meter.createUpDownCounter("work.jobs.in_flight");
   const mAgentRequests = meter.createCounter("work.agent.requests");
@@ -70,6 +71,8 @@ export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
   let jobsRun = 0;
   const jobs = new Map<string, { span: Span; ctx: Context; start: number }>();
   const stepEntries = new Map<string, { span: Span; ctx: Context; start: number }>();
+  /** Active job-phase spans (stage/provision/teardown), keyed `${jobId} ${phase}`. */
+  const jobPhases = new Map<string, { span: Span; start: number }>();
   /** Persists past job end so a later fan-in job can link to it. */
   const jobSpanContexts = new Map<string, SpanContext>();
 
@@ -111,6 +114,7 @@ export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
       jobsRun = 0;
       jobs.clear();
       stepEntries.clear();
+      jobPhases.clear();
       jobSpanContexts.clear();
       const attributes: Attributes = {
         [ATTR.WORK_RUN_ID]: meta.runId,
@@ -149,6 +153,30 @@ export function createTelemetryHooks(opts: TelemetryOptions): RunHooks {
       jobSpanContexts.set(jobId, span.spanContext());
       jobsRun++;
       mJobsInFlight.add(1, { workflow });
+    },
+
+    onJobPhaseStart(jobId, phase: JobPhase) {
+      // Parent under the job span so stage/provision/teardown nest where they
+      // happen — the gap between the job opening and its first step.
+      const parent = jobs.get(jobId)?.ctx ?? rootCtx ?? context.active();
+      const span = tracer.startSpan(phase, { kind: SpanKind.INTERNAL, attributes: { [ATTR.WORK_JOB_PHASE]: phase } }, parent);
+      jobPhases.set(`${jobId} ${phase}`, { span, start: Date.now() });
+    },
+
+    onJobPhaseEnd(jobId, phase: JobPhase, info?: JobPhaseInfo) {
+      const key = `${jobId} ${phase}`;
+      const entry = jobPhases.get(key);
+      if (!entry) return;
+      jobPhases.delete(key);
+      const { span, start } = entry;
+      const result = info?.error ? "failure" : "success";
+      if (info?.error) {
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        span.setAttribute(ATTR.ERROR_TYPE, `${phase}_error`);
+        span.recordException({ message: info.error.slice(0, 500) });
+      }
+      mJobPhaseDuration.record((Date.now() - start) / 1000, { workflow, phase, result });
+      span.end();
     },
 
     onStepStart(jobId, stepName, meta) {
