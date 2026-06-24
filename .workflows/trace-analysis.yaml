@@ -68,9 +68,13 @@ jobs:
             You are a performance + reliability analyst. Below is a distilled
             OpenTelemetry span tree for a single `work` engine run.
 
-            The span shape is: run {workflow} → job {name} → step {name} → chat
-            {model}. Per-span durations are in `[Nms]`. `⚠ ERROR` marks a failed
-            span. Token usage lives on `chat` spans as `gen_ai.usage.input_tokens` /
+            The span shape is: run {workflow} → job {name} → {stage|provision|
+            teardown phases + step {name}} → chat {model}. Per-span durations are in
+            `[Nms]`. `⚠ ERROR` marks a failed span. Under each job, before its steps,
+            are sub-phase spans: `stage` (checkout copy), `provision` (image
+            resolve/build + micro-VM boot — this is gondolin boot time), and
+            `teardown` (VM dispose); they carry `work.job.phase`. Token usage lives
+            on `chat` spans as `gen_ai.usage.input_tokens` /
             `gen_ai.usage.output_tokens` (+ cache_read / cache_creation when present).
 
             Produce a concise markdown report with these sections:

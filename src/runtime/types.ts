@@ -92,6 +92,21 @@ export interface StepHookMeta {
 }
 
 /**
+ * A job's lifecycle phases that run OUTSIDE step execution — host-side checkout
+ * `stage`-ing, target `provision`-ing (image resolve/build + micro-VM boot), and
+ * `teardown` (dispose). They're the time hidden in the gap between a job starting
+ * and its first step; telemetry captures each as a child span of the job so that
+ * gap (boot time especially) is attributable instead of dark.
+ */
+export type JobPhase = "stage" | "provision" | "teardown";
+
+/** Outcome of a job phase, carried on `onJobPhaseEnd`. An `error` marks the phase's
+ *  span failed (the message is recorded as an exception); absence means success. */
+export interface JobPhaseInfo {
+  error?: string;
+}
+
+/**
  * The run lifecycle event stream. Consumers (TUI/web presenters, the observability
  * emitter) implement the subset they need. The metadata args are optional so a
  * consumer that only wants ids/results can implement the narrow form, and a caller
@@ -101,6 +116,10 @@ export interface RunHooks {
   onWorkflowStart?: (meta: WorkflowHookMeta) => void;
   onJobStart?: (jobId: string, meta?: JobHookMeta) => void;
   onStepStart?: (jobId: string, stepName: string, meta?: StepHookMeta) => void;
+  /** A job sub-phase (stage/provision/teardown) began — captured as a child span of the job. */
+  onJobPhaseStart?: (jobId: string, phase: JobPhase) => void;
+  /** A job sub-phase ended; `info.error` marks its span failed. */
+  onJobPhaseEnd?: (jobId: string, phase: JobPhase, info?: JobPhaseInfo) => void;
   onOutput?: (jobId: string, stepName: string, chunk: { stream: "stdout" | "stderr"; text: string }) => void;
   onStepEnd?: (jobId: string, result: StepResult) => void;
   /** Fired when a job finishes (success or failure) — the point to flush buffered per-job output. */

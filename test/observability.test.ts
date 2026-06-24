@@ -23,7 +23,7 @@ import { MeterProvider, InMemoryMetricExporter, PeriodicExportingMetricReader, A
 import { createTelemetryHooks } from "../src/observability/index.ts";
 
 /** Allowed metric label keys — the cardinality contract (§5.3). `run id` must NEVER appear. */
-const ALLOWED_LABELS = new Set(["workflow", "job", "model", "result", "direction", "state"]);
+const ALLOWED_LABELS = new Set(["workflow", "job", "model", "result", "direction", "state", "phase"]);
 
 interface Harness {
   hooks: any;
@@ -128,6 +128,43 @@ describe("observability emitter — Layer 1 (unit)", () => {
     assert.ok(!parentId(run), "run is the trace root (no parent)");
     assert.equal(parentId(job), spanId(run), "job parents to run");
     assert.equal(parentId(install), spanId(job), "step parents to job");
+  });
+
+  it("nests stage/provision/teardown phase spans under the job", () => {
+    h.hooks.onWorkflowStart({ runId: "4f9a2c", workflow: "ci" });
+    h.hooks.onJobStart("checks", { runsOn: "work:base", image: "work:base", arch: "arm64" });
+    h.hooks.onJobPhaseStart("checks", "stage");
+    h.hooks.onJobPhaseEnd("checks", "stage");
+    h.hooks.onJobPhaseStart("checks", "provision");
+    h.hooks.onJobPhaseEnd("checks", "provision");
+    h.hooks.onStepStart("checks", "install", { kind: "run" });
+    h.hooks.onStepEnd("checks", { name: "install", status: "success", exitCode: 0, stderr: "" });
+    h.hooks.onJobPhaseStart("checks", "teardown");
+    h.hooks.onJobPhaseEnd("checks", "teardown");
+    h.hooks.onJobEnd("checks", { id: "checks", status: "success" });
+    h.hooks.onWorkflowEnd({ name: "ci", status: "success" });
+
+    const spans = h.spans();
+    const job = one(spans, "job checks");
+    for (const phase of ["stage", "provision", "teardown"]) {
+      const ph = one(spans, phase);
+      assert.equal(parentId(ph), spanId(job), `${phase} span parents to the job`);
+      assert.equal(ph.attributes["work.job.phase"], phase);
+    }
+  });
+
+  it("marks a failed provision phase ERROR with a phase-scoped error.type", () => {
+    h.hooks.onWorkflowStart({ runId: "4f9a2c", workflow: "ci" });
+    h.hooks.onJobStart("checks", { runsOn: "work:base", image: "work:base" });
+    h.hooks.onJobPhaseStart("checks", "provision");
+    h.hooks.onJobPhaseEnd("checks", "provision", { error: "qemu: could not boot the guest" });
+    h.hooks.onJobEnd("checks", { id: "checks", status: "failure" });
+    h.hooks.onWorkflowEnd({ name: "ci", status: "failure" });
+
+    const ERROR = 2; // SpanStatusCode.ERROR
+    const prov = one(h.spans(), "provision");
+    assert.equal(prov.status.code, ERROR);
+    assert.equal(prov.attributes["error.type"], "provision_error");
   });
 
   it("emits the run span as a true root (empty parent) so backends recognize the trace root", () => {
