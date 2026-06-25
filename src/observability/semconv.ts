@@ -27,6 +27,9 @@ export const ATTR = {
   WORK_STEP_RESULT: "work.step.result",
   WORK_RUN_RESUMED: "work.run.resumed",
   WORK_JOB_PHASE: "work.job.phase",
+  // Agent step time split — setup (staging + in-guest Pi install) vs the agent loop.
+  WORK_AGENT_SETUP_MS: "work.agent.setup_ms",
+  WORK_AGENT_RUN_MS: "work.agent.run_ms",
 
   // Host / micro-VM image (a VM is a host, not a container).
   HOST_IMAGE_NAME: "host.image.name",

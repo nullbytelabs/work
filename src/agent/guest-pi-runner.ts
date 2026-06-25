@@ -112,6 +112,10 @@ export class GuestPiRunner implements AgentRunner {
       throw new UserFacingError(`agent step model baseUrl is not a valid URL: ${req.model.baseUrl}`);
     }
     const { exec, hostDir, guestDir, emit } = this.deps;
+    // Split the step's time into setup (staging + the in-guest Pi install) vs the
+    // agent loop (the wrapper exec — model calls + tools). Surfaced as telemetry
+    // attributes so a slow agent step is attributable to one or the other.
+    const setupStart = Date.now();
     const id = randomUUID().slice(0, 8);
     // Per-invocation, UNPREDICTABLE staging DIRECTORY — not a constant. The checkout
     // is attacker-controlled and lands in this same mount, so a constant `.pi-agent`
@@ -192,11 +196,14 @@ export class GuestPiRunner implements AgentRunner {
           `${install.stderr ? `: ${install.stderr.slice(0, 300)}` : ""}`,
       );
     }
+    const setupMs = Date.now() - setupStart;
 
+    const runStart = Date.now();
     const run = await exec(`node ${gWrapper} ${gReq} ${gRes}`, {
       env: { NODE_EXTRA_CA_CERTS: GUEST_CA_PATH, PI_SKIP_VERSION_CHECK: "1" },
       ...(emit ? { onOutput: emit } : {}),
     });
+    const runMs = Date.now() - runStart;
 
     const resultText = await readResultFile(hostRes);
     // Best-effort cleanup of the per-invocation wrapper/request/result.
@@ -220,6 +227,8 @@ export class GuestPiRunner implements AgentRunner {
           text: parsed.text,
           ...(parsed.finishReason ? { finishReason: parsed.finishReason } : {}),
           ...(parsed.usage ? { usage: parsed.usage } : {}),
+          setupMs,
+          runMs,
         };
       }
     }

@@ -45,6 +45,10 @@ export interface AgentResult {
   /** Cumulative token usage across the whole agent loop (from Pi's session stats),
    *  for telemetry. Absent when the runner/SDK didn't surface it. */
   usage?: StepAgentUsage;
+  /** Wall-clock spent on setup (staging + the in-guest Pi install), in ms. */
+  setupMs?: number;
+  /** Wall-clock spent in the agent loop itself (the wrapper exec — model + tools), in ms. */
+  runMs?: number;
 }
 
 export interface AgentRunner {
