@@ -54,7 +54,7 @@ jobs:
   # Feeds on `fetch`'s distilled tree (via needs.fetch.outputs.tree) — no secret
   # in scope. Runs the agent and prints the report.
   analyze:
-    runs-on: work:base
+    runs-on: work:pi
     machine: small
     needs: [fetch]
     outputs:

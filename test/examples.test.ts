@@ -30,7 +30,7 @@ const RUN_NETWORK = process.env["WORK_TEST_NETWORK"] === "1";
 // Examples that build a custom `work:<image>` (a real `gondolin build` — slow, and
 // fetches apk packages), skipped by default like the network examples. Run with
 // WORK_TEST_IMAGES=1.
-const IMAGE_EXAMPLES = new Set(["work-base-image"]);
+const IMAGE_EXAMPLES = new Set(["work-base-image", "work-pi-image"]);
 const RUN_IMAGES = process.env["WORK_TEST_IMAGES"] === "1";
 
 /** Skip reason for an example that needs an opt-in (network / image build), else false. */

@@ -56,7 +56,7 @@ export interface AgentRunner {
 }
 
 // The in-guest runner (every job is sandboxed) + the env var its model key arrives under.
-export { GuestPiRunner, GUEST_MODEL_KEY_ENV, modelHostOf, modelKeyEnv, type GuestPiRunnerDeps } from "./guest-pi-runner.ts";
+export { GuestPiRunner, GUEST_MODEL_KEY_ENV, PI_PACKAGE, modelHostOf, modelKeyEnv, type GuestPiRunnerDeps } from "./guest-pi-runner.ts";
 // The `work` uses-handler (work/agent primitive + built-in actions) — register at the composition root.
 export { createWorkHandler, type WorkHandlerOptions } from "./work-handler.ts";
 // Per-job sandbox egress for agent steps (allow-all egress + model-host-scoped key).

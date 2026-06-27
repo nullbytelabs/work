@@ -1,0 +1,15 @@
+# The work:pi bundled image — work:base plus a Pi agent baked in (its build-config
+# postBuild installs @earendil-works/pi-coding-agent globally). Booted via
+# `runs-on: work:pi`; this asserts the baked-in Pi resolves on PATH in-guest, so
+# agent steps reuse it instead of installing per run. Gated behind WORK_TEST_IMAGES=1
+# in the suite (a real gondolin build is slow + needs network), like work-base-image.
+name: work-pi-image
+jobs:
+  pi:
+    runs-on: work:pi
+    steps:
+      - name: the baked-in Pi is on PATH
+        run: |
+          command -v pi
+          pi --version
+          echo "work:pi ok"
