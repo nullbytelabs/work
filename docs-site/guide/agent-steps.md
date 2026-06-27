@@ -92,6 +92,27 @@ the job, working directly against the job's checkout. The host injects the API k
 into the model request **host-side**, scoped to the model endpoint, so the key
 reaches the model without ever being visible inside the guest.
 
+## Faster startup with `work:pi`
+
+On `work:base` an agent step installs Pi into the guest at the start of each run.
+The bundled **`work:pi`** image is `work:base` with Pi already baked in, so agent
+steps reuse it and start immediately — set `runs-on: work:pi` on any job with a
+`work/agent` step:
+
+```yaml
+jobs:
+  review:
+    runs-on: work:pi            # Pi baked in — skips the per-run install
+    steps:
+      - id: a
+        uses: work/agent
+        with:
+          prompt: Review the diff under /workspace and summarize the risks.
+```
+
+Like any image, `work:pi` is built on first use and cached, so the first run that
+needs it takes a few minutes; later runs boot the baked-in agent with no install.
+
 ::: tip Complete example
 [`test/e2e/agent-project/`](https://github.com/nullbytelabs/work/tree/main/test/e2e/agent-project)
 is a full, runnable example — a verification workflow (install → typecheck → smoke

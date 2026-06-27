@@ -4,11 +4,14 @@ Every job runs in a Gondolin micro-VM. **`runs-on`** picks which guest image boo
 inside it: the stock guest, the bundled `work:base`, or a custom image you define.
 Reach for a richer image when your jobs need tools the stock guest doesn't ship.
 
-## `work:base` vs the stock guest
+## Bundled images vs the stock guest
 
 - **`work:base`** — a bundled image that adds **git** and **jq** on top of the
   stock guest, and **the default when you omit `runs-on`**. It's built on first use
   (then cached), so a checkout or a `jq` filter works out of the box.
+- **`work:pi`** — `work:base` plus a baked-in [Pi agent](./agent-steps), so
+  [`work/agent`](./agent-steps) steps skip the per-run Pi install. Reach for it on
+  agent-heavy jobs.
 - **`gondolin`** — the stock guest, and nothing more. It ships `sh`/`bash`,
   `node`/`npm`, `python3`, `curl`, and `ca-certificates`, and boots immediately
   (nothing to build). Pin it explicitly when those tools are enough and you want
