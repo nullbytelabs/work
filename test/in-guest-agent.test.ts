@@ -76,6 +76,8 @@ describe("GuestPiRunner", () => {
     // Fake guest exec: record commands; npm install no-ops; the wrapper writes a result.
     const exec = async (command: string) => {
       commands.push(command);
+      // No Pi baked into this (stock) target: the link probe fails → install runs.
+      if (/npm root -g/.test(command)) return { exitCode: 1, stdout: "", stderr: "", ok: false };
       const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
       if (m) {
         const resHost = (m[2] as string).replace(`${dir}/`, `${dir}/`); // guestDir==hostDir==dir here
@@ -108,6 +110,40 @@ describe("GuestPiRunner", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  // When the guest image bakes Pi in (e.g. `work:pi`), the runner links that copy
+  // into the stage instead of paying a ~30s `npm install` every step.
+  it("reuses a Pi baked into the guest image, skipping the install", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      // A guest image with Pi baked in: the link probe succeeds.
+      if (/npm root -g/.test(command)) return { exitCode: 0, stdout: "", stderr: "", ok: true };
+      const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+      if (m) {
+        const { writeFile } = await import("node:fs/promises");
+        await writeFile(m[2] as string, JSON.stringify({ text: "BAKED", finishReason: "stop" }));
+      }
+      return { exitCode: 0, stdout: "", stderr: "", ok: true };
+    };
+
+    const runner = new GuestPiRunner({ exec, hostDir: dir, guestDir: dir });
+    const res = await runner.run({
+      prompt: "hi",
+      model: { baseUrl: "https://model.example.com/v1", apiKey: "k", model: "m" },
+    });
+
+    assert.equal(res.text, "BAKED");
+    // It linked the baked-in Pi (probe) and ran the wrapper — without installing.
+    assert.ok(
+      commands.some((c) => /npm root -g/.test(c) && /ln -sfn/.test(c)),
+      "should link the baked-in Pi into the stage",
+    );
+    assert.ok(!commands.some((c) => /npm install/.test(c)), "should NOT npm install when Pi is baked in");
+    assert.ok(commands.some((c) => /node .*guest-runner-\w+\.mjs/.test(c)), "should run the wrapper");
+    await rm(dir, { recursive: true, force: true });
+  });
+
   // Regression: a hostile checkout can pre-plant a constant staging prefix
   // (`.pi-agent`) as a symlink (host-write escape) or a real dir with a malicious
   // `.npmrc`/`node_modules` (registry redirect → in-guest code-exec). The staging
@@ -119,6 +155,7 @@ describe("GuestPiRunner", () => {
     const stageDirs: string[] = [];
     let installCmd = "";
     const exec = async (command: string) => {
+      if (/npm root -g/.test(command)) return { exitCode: 1, stdout: "", stderr: "", ok: false };
       const cd = /cd (\S+\/(\.pi-agent-\w+)) &&/.exec(command);
       if (cd) stageDirs.push(cd[2] as string);
       if (/npm install/.test(command)) installCmd = command;
@@ -152,6 +189,7 @@ describe("GuestPiRunner", () => {
     const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
     let capturedReq = "";
     const exec = async (command: string) => {
+      if (/npm root -g/.test(command)) return { exitCode: 1, stdout: "", stderr: "", ok: false };
       const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
       if (m) {
         capturedReq = await readFile(m[1] as string, "utf-8");
@@ -184,6 +222,7 @@ describe("GuestPiRunner", () => {
       // Fake exec: instead of writing a regular result file, plant a symlink to a
       // host file at the result path (what a hostile in-guest actor would do).
       const exec = async (command: string) => {
+        if (/npm root -g/.test(command)) return { exitCode: 1, stdout: "", stderr: "", ok: false };
         const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
         if (m) await symlink(secret, m[2] as string);
         return { exitCode: 0, stdout: "", stderr: "", ok: true };
@@ -202,6 +241,7 @@ describe("GuestPiRunner", () => {
   it("fails clearly when the in-guest install fails", async () => {
     const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
     const exec = async (command: string) => {
+      if (/npm root -g/.test(command)) return { exitCode: 1, stdout: "", stderr: "", ok: false };
       if (/npm install/.test(command)) return { exitCode: 1, stdout: "", stderr: "network down", ok: false };
       return { exitCode: 0, stdout: "", stderr: "", ok: true };
     };

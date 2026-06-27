@@ -13,9 +13,10 @@
  * Mechanics (Option B in docs/pi-in-gondolin.md):
  *   1. copy the standalone wrapper (`guest-runner-script.mjs`) + a request JSON
  *      into a private subdir of the shared workspace (host writes, guest reads);
- *   2. `npm install` the Pi package into that dir in-guest (native deps build
- *      for the guest platform), then `exec("node <wrapper> <req> <res>")` — Pi
- *      drives the model call through the allowlisted egress;
+ *   2. make Pi loadable there — reuse a copy baked into the guest image when one
+ *      is present (link it in; no install), else `npm install` it in-guest (native
+ *      deps build for the guest platform) — then `exec("node <wrapper> <req>
+ *      <res>")` — Pi drives the model call through the allowlisted egress;
  *   3. read the result JSON back from the host side of the mount.
  *
  * The request file carries baseUrl + model id but **never the key**: the wrapper
@@ -70,8 +71,13 @@ export function modelKeyEnv(host: string): string {
 /** Default guest path for Gondolin's MITM CA, so in-guest Node trusts the proxy. */
 const GUEST_CA_PATH = "/etc/gondolin/mitm/ca.crt";
 
-/** The Pi package (+ range) installed into the guest so the wrapper can load it. */
-const PI_PACKAGE = "@earendil-works/pi-coding-agent@^0.79.1";
+/** The Pi package name — what the wrapper imports and what a guest image bakes in. */
+const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
+
+/** The Pi package (+ range) installed into the guest so the wrapper can load it.
+ *  The bundled `work:pi` image bakes in this SAME spec (its build-config postBuild);
+ *  `test/images.test.ts` asserts the two never drift. */
+export const PI_PACKAGE = `${PI_PACKAGE_NAME}@^0.79.1`;
 
 /** The exec capability + workspace paths a sandboxed handler is handed. */
 export interface GuestPiRunnerDeps {
@@ -175,26 +181,34 @@ export class GuestPiRunner implements AgentRunner {
     const gReq = `${gStage}/req-${id}.json`;
     const gRes = `${gStage}/res-${id}.json`;
 
-    // Install the Pi package into the guest (runs in-guest, so native deps build
-    // for the guest platform). Hardened against a hostile checkout:
-    //   * `cd ${gStage}` runs npm with its project dir = the unguessable stage dir,
-    //     so npm reads only THAT dir's `.npmrc` (which the checkout can't plant) —
-    //     never a `.npmrc` sitting at the checkout root.
-    //   * `--ignore-scripts` blocks lifecycle-script code-exec from any fetched
-    //     package, defense in depth.
-    const install = await exec(
-      // `--registry` pins the default registry on the CLI (overrides any `.npmrc`
-      // registry= a hostile process could plant in the stage dir), so the wrapper
-      // can't be tricked into loading an attacker-served Pi package. `--ignore-scripts`
-      // blocks lifecycle-script execution as defense in depth.
-      `cd ${gStage} && npm install --prefix ${gStage} --registry=https://registry.npmjs.org/ --no-save --no-audit --no-fund --ignore-scripts ${PI_PACKAGE}`,
-      { ...(emit ? { onOutput: emit } : {}) },
-    );
-    if (!install.ok) {
-      throw new UserFacingError(
-        `failed to install ${PI_PACKAGE} in the sandbox guest (exit ${install.exitCode})` +
-          `${install.stderr ? `: ${install.stderr.slice(0, 300)}` : ""}`,
+    // Make Pi loadable in the stage dir. First try to reuse a copy baked into the
+    // guest image (e.g. the `work:pi` image): linking it in lets the wrapper resolve
+    // it exactly as an installed copy while skipping a ~30s per-run npm install.
+    // Only when no baked-in Pi is present do we install it.
+    if (await this.linkPreinstalledPi(exec, gStage)) {
+      emit?.({ stream: "stdout", text: "pi: reusing the copy baked into the guest image (skipping install)\n" });
+    } else {
+      // Install the Pi package into the guest (runs in-guest, so native deps build
+      // for the guest platform). Hardened against a hostile checkout:
+      //   * `cd ${gStage}` runs npm with its project dir = the unguessable stage dir,
+      //     so npm reads only THAT dir's `.npmrc` (which the checkout can't plant) —
+      //     never a `.npmrc` sitting at the checkout root.
+      //   * `--ignore-scripts` blocks lifecycle-script code-exec from any fetched
+      //     package, defense in depth.
+      const install = await exec(
+        // `--registry` pins the default registry on the CLI (overrides any `.npmrc`
+        // registry= a hostile process could plant in the stage dir), so the wrapper
+        // can't be tricked into loading an attacker-served Pi package. `--ignore-scripts`
+        // blocks lifecycle-script execution as defense in depth.
+        `cd ${gStage} && npm install --prefix ${gStage} --registry=https://registry.npmjs.org/ --no-save --no-audit --no-fund --ignore-scripts ${PI_PACKAGE}`,
+        { ...(emit ? { onOutput: emit } : {}) },
       );
+      if (!install.ok) {
+        throw new UserFacingError(
+          `failed to install ${PI_PACKAGE} in the sandbox guest (exit ${install.exitCode})` +
+            `${install.stderr ? `: ${install.stderr.slice(0, 300)}` : ""}`,
+        );
+      }
     }
     const setupMs = Date.now() - setupStart;
 
@@ -235,6 +249,31 @@ export class GuestPiRunner implements AgentRunner {
     throw new UserFacingError(
       `in-guest agent produced no result (exit ${run.exitCode})${run.stderr ? `: ${run.stderr.slice(0, 300)}` : ""}`,
     );
+  }
+
+  /**
+   * Reuse a Pi already baked into the guest image instead of installing per-run.
+   * If npm's global root holds the Pi package (the `work:pi` image installs it
+   * there), symlink it into the stage's `node_modules` so the wrapper resolves it
+   * exactly as it would a freshly-installed copy — then the caller skips the
+   * `npm install`. Returns false when no global Pi is present (caller installs).
+   *
+   * The link sits inside the unguessable, host-created stage dir and targets the
+   * image's global module dir, which lives outside the writable workspace mount —
+   * so a hostile checkout can neither pre-plant the link nor tamper with what it
+   * points at (strictly safer than fetching Pi over the network each run).
+   */
+  private async linkPreinstalledPi(exec: GuestPiRunnerDeps["exec"], gStage: string): Promise<boolean> {
+    const dest = `${gStage}/node_modules/${PI_PACKAGE_NAME}`;
+    // One round-trip, quiet on the not-present path: resolve npm's global root,
+    // require the Pi package dir to exist there, then link it under the stage's
+    // node_modules. `set -e` makes any missing piece (no npm, no global Pi) exit
+    // non-zero → the caller installs instead.
+    const probe = await exec(
+      `set -e; root="$(npm root -g 2>/dev/null)"; src="$root/${PI_PACKAGE_NAME}"; ` +
+        `test -d "$src"; mkdir -p "$(dirname "${dest}")"; ln -sfn "$src" "${dest}"`,
+    );
+    return probe.ok;
   }
 }
 
