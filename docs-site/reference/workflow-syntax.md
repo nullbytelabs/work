@@ -104,7 +104,7 @@ jobs:
 
 | Key | Type | Notes |
 |---|---|---|
-| `runs-on` | string | The guest image the job's micro-VM boots: `work:base` (our capable base — git/jq on the stock guest — **and the default**, built on first use), `gondolin` (the stock guest), or any custom `work:<image>`. Per-job only — not valid at the workflow level. `runsOn` is also accepted. See [`runs-on`](../guide/writing-workflows#runs-on). |
+| `runs-on` | string | The guest image the job's micro-VM boots: `work:base` (our capable base — git/jq on the stock guest — **and the default**, built on first use), `work:pi` (`work:base` with a Pi agent baked in, for `work/agent` steps), `gondolin` (the stock guest), or any custom `work:<image>`. Per-job only — not valid at the workflow level. `runsOn` is also accepted. See [`runs-on`](../guide/writing-workflows#runs-on). |
 | `machine` | string \| map | Micro-VM sizing. A named type from the catalog, or an inline `{ cpus, memory }`. See [Machine types](#machine-types). Defaults to `medium`. |
 | `needs` | string \| string[] | Job ids that must succeed first. Independent jobs run in parallel. |
 | `if` / `when` | string | Conditional guard; a false result skips the job. Use one, not both. See [Conditionals](#conditionals). |

@@ -69,6 +69,9 @@ boots inside it:
   adds **git** and **jq** on top of the stock guest (which ships `sh`/`bash`,
   `node`/`npm`, `python3`, `curl`, and `ca-certificates`), so a checkout or a `jq`
   filter just works.
+- **`work:pi`** — `work:base` with a [Pi coding agent](./agent-steps) baked in. Use
+  it for jobs with `uses: work/agent` steps so the agent starts immediately instead
+  of installing Pi on each run.
 - **`gondolin`** — the stock guest, with no git or jq. Pin it explicitly for a job
   that wants the leanest possible image and doesn't need the extra tools.
 
