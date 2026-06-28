@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseConfig, resolveModel, mergeConfig } from "../src/config/index.ts";
+import { parseConfig, resolveModel, mergeConfig, parseJsonc, stripJsonc } from "../src/config/index.ts";
 import { UserFacingError } from "../src/errors.ts";
 
 const sample = {
@@ -91,5 +91,39 @@ describe("config — observability", () => {
 
   it("leaves observability undefined when absent", () => {
     assert.equal(parseConfig(sample).observability, undefined);
+  });
+});
+
+describe("JSONC (work.json's on-disk form)", () => {
+  it("strips line and block comments and trailing commas", () => {
+    const text = `{
+      // a line comment
+      "providers": {
+        /* a block
+           comment */
+        "p": { "baseUrl": "https://x/v1", "apiKey": "$K" },
+      },
+      "models": { "m": { "provider": "p", "model": "id" }, },
+      "defaultModel": "m",
+    }`;
+    const cfg = parseConfig(parseJsonc(text));
+    assert.equal(cfg.defaultModel, "m");
+    assert.equal(cfg.providers.p!.baseUrl, "https://x/v1");
+  });
+
+  it("preserves `//` and commas that live inside strings", () => {
+    const out = parseJsonc('{ "baseUrl": "https://api.example/v1", "note": "a, b]" }') as Record<string, string>;
+    assert.equal(out["baseUrl"], "https://api.example/v1"); // the // in the URL survived
+    assert.equal(out["note"], "a, b]"); // the comma-before-bracket inside a string survived
+  });
+
+  it("keeps line numbers so a parse error still points at the right place", () => {
+    // The comment lines are blanked, not removed, so the bad token stays on line 3.
+    const stripped = stripJsonc(`{\n  // c\n  bad\n}`);
+    assert.equal(stripped.split("\n").length, 4);
+  });
+
+  it("still rejects genuinely malformed JSON", () => {
+    assert.throws(() => parseJsonc("{ not: valid }"));
   });
 });

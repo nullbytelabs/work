@@ -9,6 +9,7 @@ import { scaffoldFiles, workflowPath, CONFIG_FILENAME, TEMPLATES } from "../src/
 import { runCreate } from "../src/scaffold/index.ts";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
+import { parseConfig, parseJsonc } from "../src/config/index.ts";
 import { UserFacingError } from "../src/errors.ts";
 
 describe("slug", () => {
@@ -62,10 +63,15 @@ describe("scaffoldFiles — agent-action", () => {
     assert.match(action, /promptFile:/);
     assert.doesNotMatch(action, /instructions/);
     assert.ok(files.get(".workflows/actions/review/prompt.md")!.trim().length > 0);
-    // work.json is valid JSON and parses as a config object.
-    const cfg = JSON.parse(files.get(CONFIG_FILENAME)!);
-    assert.equal(cfg.defaultModel, "kimi");
-    assert.equal(cfg.providers.fireworks.apiKey, "$FIREWORKS_API_KEY"); // $ENV ref, never a literal secret
+    // work.json is a self-documenting JSONC placeholder skeleton — no presumed
+    // vendor/model — that still parses as a structurally valid config.
+    const text = files.get(CONFIG_FILENAME)!;
+    assert.match(text, /\/\//); // carries explanatory comments
+    assert.doesNotMatch(text, /fireworks|kimi/); // no vendor opinion baked in
+    const cfg = parseConfig(parseJsonc(text));
+    assert.equal(cfg.defaultModel, "<model>");
+    const apiKey = Object.values(cfg.providers)[0]!.apiKey;
+    assert.match(apiKey, /^\$/); // $ENV ref, never a literal secret
   });
 });
 

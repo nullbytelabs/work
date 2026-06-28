@@ -210,7 +210,7 @@ async function runCreateWorkflow(argv: string[], cwd: string): Promise<number> {
   process.stdout.write(`  run it:   ${p} run ${name}\n`);
   process.stdout.write(`  inspect:  ${p} graph ${name}\n`);
   if (opts.template === "agent-action") {
-    process.stdout.write(`  add a key: set $FIREWORKS_API_KEY and edit ${CONFIG_FILENAME}\n`);
+    process.stdout.write(`  add a model: fill in the <placeholders> in ${CONFIG_FILENAME} (provider, model, $API_KEY ref)\n`);
   }
   if (source) {
     process.stdout.write(
