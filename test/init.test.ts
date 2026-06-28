@@ -18,14 +18,28 @@ describe("runInit (integration, real temp dir)", () => {
     await rm(proj, { recursive: true, force: true });
   });
 
-  it("scaffolds the default project: hello-world workflow + config", async () => {
+  it("scaffolds the default project: hello-world workflow, and NO presumed config", async () => {
     const code = await runInit([], proj);
     assert.equal(code, 0);
     assert.ok(existsSync(join(proj, ".workflows", "hello-world.yaml")));
-    assert.ok(existsSync(join(proj, CONFIG_FILENAME)));
+    // A plain shell workflow has no agent step, so init must not foist a
+    // provider/model work.json onto it.
+    assert.equal(existsSync(join(proj, CONFIG_FILENAME)), false);
     // The generated workflow compiles.
     const yaml = await readFile(join(proj, ".workflows", "hello-world.yaml"), "utf-8");
     assert.doesNotThrow(() => compile(parseWorkflow(yaml)));
+  });
+
+  it("agent-action init writes a work.json skeleton (the one template that needs a model)", async () => {
+    const code = await runInit(["--from-template", "agent-action"], proj);
+    assert.equal(code, 0);
+    assert.ok(existsSync(join(proj, ".workflows", "agent-action.yaml")));
+    const cfg = join(proj, CONFIG_FILENAME);
+    assert.ok(existsSync(cfg));
+    const text = await readFile(cfg, "utf-8");
+    assert.match(text, /\/\//); // self-documenting: carries comments
+    assert.match(text, /<provider>/); // placeholders, not a presumed vendor
+    assert.doesNotMatch(text, /fireworks|kimi/); // no vendor opinion baked in
   });
 
   it("does NOT write the skill unless --include-skill is passed", async () => {
@@ -55,10 +69,10 @@ describe("runInit (integration, real temp dir)", () => {
 
   it("never overwrites an existing config, even with --force", async () => {
     const original = '{"providers":{},"models":{},"_mine":true}';
-    await runInit([], proj); // creates config
+    await runInit(["--from-template", "agent-action"], proj); // creates config
     const { writeFile } = await import("node:fs/promises");
     await writeFile(join(proj, CONFIG_FILENAME), original);
-    await runInit(["--force"], proj);
+    await runInit(["--from-template", "agent-action", "--force"], proj);
     assert.equal(await readFile(join(proj, CONFIG_FILENAME), "utf-8"), original);
   });
 

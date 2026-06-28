@@ -82,13 +82,11 @@ function parseInitArgs(argv: string[]): InitOptions {
 /** Assemble the file set a project init writes. */
 function initFiles(opts: InitOptions): Map<string, string> {
   const name = slug(opts.template); // "hello-world" or "agent-action"
+  // Only templates that actually run an agent get a `work.json` — `scaffoldFiles`
+  // emits the starter config for agent-action and nothing for a plain shell
+  // workflow. We deliberately do NOT force a provider/model config onto a project
+  // that has no agent step to use it.
   const files = scaffoldFiles({ name, template: opts.template });
-  // Always include the project config (agent-action already emits one; this is a
-  // no-op overwrite of the identical generator output for that template).
-  if (!files.has(CONFIG_FILENAME)) {
-    const cfg = starterConfigFile();
-    files.set(cfg.path, cfg.contents);
-  }
   if (opts.includeSkill) {
     for (const [path, contents] of skillFiles()) files.set(path, contents);
   }
@@ -115,7 +113,7 @@ async function runInitGlobal(opts: InitOptions, color: boolean): Promise<number>
   await writeFile(path, contents);
   process.stdout.write(`  ${paint(color, CODE.green, "✓")} created ${path}\n`);
   process.stdout.write(`\n${paint(color, CODE.bold, "Next steps:")}\n`);
-  process.stdout.write(`  add a key: set $FIREWORKS_API_KEY — the global config holds your providers/models\n`);
+  process.stdout.write(`  fill it in: replace the <placeholders> in ${path} with your provider, model, and $API_KEY ref\n`);
   process.stdout.write(`  per project: ${prog()} init   (a project config overrides the global one)\n`);
   return 0;
 }
@@ -148,7 +146,9 @@ export async function runInit(argv: string[], cwd: string = process.cwd()): Prom
   process.stdout.write(`\n${paint(color, CODE.bold, "Next steps:")}\n`);
   process.stdout.write(`  run it:   ${p} run ${name}\n`);
   process.stdout.write(`  inspect:  ${p} graph ${name}\n`);
-  process.stdout.write(`  add a key: set $FIREWORKS_API_KEY and edit ${CONFIG_FILENAME}\n`);
+  if (files.has(CONFIG_FILENAME)) {
+    process.stdout.write(`  add a model: fill in the <placeholders> in ${CONFIG_FILENAME} (provider, model, $API_KEY ref)\n`);
+  }
   if (opts.includeSkill) {
     process.stdout.write(`  your coding agent can now drive \`work\` (see .claude/skills/work-workflows/)\n`);
   }

@@ -115,24 +115,42 @@ Task: describe the task for the {{name}} agent here. The agent runs in the job's
 workspace (the checkout) and can read the files directly.
 `;
 
-/** The starter project config (codegen). Mirrors work.example.json. */
-const STARTER_CONFIG = {
-  providers: {
-    fireworks: {
-      baseUrl: "https://api.fireworks.ai/inference/v1",
-      apiKey: "$FIREWORKS_API_KEY",
-    },
+/**
+ * The starter project config — a vendor-neutral JSONC skeleton, not a working
+ * setup. The engine has no business presuming a provider, a model, or tuning
+ * numbers on your behalf, so every value here is a placeholder to fill in. JSONC
+ * (comments + trailing commas) is accepted by the loader, so the file documents
+ * its own shape. An agent step won't run until you replace the placeholders and
+ * export the API key env var.
+ */
+const STARTER_CONFIG_JSONC = `{
+  // work.json — providers + models for agent steps (\`uses: work/agent\`).
+  // JSONC: comments and trailing commas are allowed. Replace every <placeholder>;
+  // nothing below is a default the engine chose for you.
+
+  // An OpenAI-compatible endpoint. The API key is injected host-side and never
+  // enters the sandbox, so keep it as a $ENV reference, not a literal secret.
+  "providers": {
+    "<provider>": {
+      "baseUrl": "https://your-endpoint.example/v1",
+      "apiKey": "$YOUR_API_KEY"
+    }
   },
-  models: {
-    kimi: {
-      provider: "fireworks",
-      model: "accounts/fireworks/models/kimi-k2p6",
-      maxTokens: 2048,
-      temperature: 0,
-    },
+
+  // Give a model a short alias, point it at a provider above, and use the
+  // provider-native model id. Agent steps select one with \`model: <alias>\`.
+  // Optional per-model knobs: "maxTokens", "temperature".
+  "models": {
+    "<model>": {
+      "provider": "<provider>",
+      "model": "provider/native-model-id"
+    }
   },
-  defaultModel: "kimi",
-};
+
+  // Alias used when an agent step doesn't set \`model:\` in its \`with:\`.
+  "defaultModel": "<model>"
+}
+`;
 
 export interface ScaffoldOptions {
   /** The already-slugged workflow name (use `slug()` upstream). */
@@ -184,13 +202,13 @@ export function scaffoldFiles(opts: ScaffoldOptions): Map<string, string> {
 }
 
 /**
- * The starter project config (codegen). `init` always writes this; the writer
- * preserves an existing one (it may hold real creds). Mirrors the
- * `work.example.json` shape — `apiKey` is an `$ENV` ref, never a
- * literal secret.
+ * The starter project config: the commented JSONC placeholder skeleton. The
+ * agent-action scaffold and `init --global` write it; the writer preserves an
+ * existing `work.json` (it may hold real creds). `apiKey` is a `$ENV` ref, never
+ * a literal secret.
  */
 export function starterConfigFile(): { path: string; contents: string } {
-  return { path: CONFIG_FILENAME, contents: JSON.stringify(STARTER_CONFIG, null, 2) + "\n" };
+  return { path: CONFIG_FILENAME, contents: STARTER_CONFIG_JSONC };
 }
 
 // A skill for the developer's OWN coding agent (Claude Code / Amp) — files on

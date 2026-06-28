@@ -133,6 +133,89 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * Strip `//` line comments, `/* *\/` block comments, and trailing commas from
+ * JSONC text. `work.json` is hand-edited, so we accept the comment-friendly
+ * superset (the scaffolded starter is itself self-documenting). String-aware on
+ * purpose: a `//` inside a URL or a `,]` inside a string is preserved, and
+ * newlines are kept so a downstream `JSON.parse` error still points at the right
+ * line.
+ */
+export function stripJsonc(text: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inString) {
+      out += ch;
+      if (ch === "\\") {
+        if (i + 1 < text.length) out += text[++i];
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      i += 2;
+      while (i < text.length && text[i] !== "\n") i++;
+      i--; // let the loop's i++ land on (and keep) the newline
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
+        if (text[i] === "\n") out += "\n"; // preserve line numbers
+        i++;
+      }
+      i++; // land on the closing '/'
+      continue;
+    }
+    out += ch;
+  }
+  return stripTrailingCommas(out);
+}
+
+/** Drop a comma that is followed only by whitespace before a `}` or `]`. Runs on
+ *  comment-free text and stays string-aware so a comma inside a string survives. */
+function stripTrailingCommas(text: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inString) {
+      out += ch;
+      if (ch === "\\") {
+        if (i + 1 < text.length) out += text[++i];
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j]!)) j++;
+      if (text[j] === "}" || text[j] === "]") continue; // drop the trailing comma
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** Parse JSONC (JSON + comments + trailing commas) — `work.json`'s on-disk form. */
+export function parseJsonc(text: string): unknown {
+  return JSON.parse(stripJsonc(text));
+}
+
+/**
  * Parse a config object's field types/shapes ONLY — deliberately no
  * cross-references. Because config is layered (global + project), a model whose
  * `provider` lives in a *different* layer must not be rejected here; cross-refs
@@ -429,7 +512,7 @@ export async function loadMergedConfig(layers: ConfigLayer[]): Promise<PiWorkflo
     }
     let raw: unknown;
     try {
-      raw = JSON.parse(text);
+      raw = parseJsonc(text);
     } catch {
       throw new UserFacingError(`config file is not valid JSON: ${layer.path}`);
     }

@@ -12,13 +12,18 @@
  *   - validating the merged result through the real config parser before any
  *     write — a malformed entry refuses to write rather than corrupting the file.
  *
+ * Caveat: the merge reads JSONC but rewrites canonical JSON via `JSON.stringify`,
+ * so any `//` comments a user added to `work.json` are dropped on a webhook upsert.
+ * Acceptable for an operator-run `create webhook`; preserving comments would need a
+ * comment-aware JSON editor we don't carry.
+ *
  * `mergeConfigSection` is pure (no FS) so the merge logic is unit-testable; the
  * plan/write pair owns the disk read, the JSON round-trip, and the report line.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { parsePartialConfig, PROJECT_CONFIG_FILENAME } from "../config/index.ts";
+import { parsePartialConfig, parseJsonc, PROJECT_CONFIG_FILENAME } from "../config/index.ts";
 import { UserFacingError } from "../errors.ts";
 import { CODE, paint } from "../tui/palette.ts";
 
@@ -96,7 +101,7 @@ export async function planConfigMerge(
       throw new UserFacingError(`cannot read ${PROJECT_CONFIG_FILENAME}`);
     }
     try {
-      current = JSON.parse(text);
+      current = parseJsonc(text);
     } catch {
       throw new UserFacingError(
         `${PROJECT_CONFIG_FILENAME} is not valid JSON — fix it before adding to ${section}`,
