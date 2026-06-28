@@ -87,7 +87,7 @@ matching `vX.Y.Z` tag. The tag push triggers `.github/workflows/release.yml`, wh
 the tag equals `package.json`'s version, builds, runs `npm publish --provenance` (auth via the
 `NPM_TOKEN` secret + OIDC build provenance — no local 2FA/`--otp`), and creates the GitHub
 Release with auto-generated notes. So the agent's job at release time is the version-bump commit
-and (if asked) the tag; the publish is CI's. Only an admin can push `v*` tags.
+and (when asked to cut the release) pushing the `vX.Y.Z` tag; the publish itself is CI's.
 
 > **Footgun:** because the shim prefers `dist/`, running `npm run build` locally (e.g. to
 > verify packaging) leaves a `dist/` that **shadows your `src/` edits** for `./bin/work.mjs`
