@@ -38,7 +38,7 @@ jobs:
     uses: workflow/web-review
 
   collect:
-    runs-on: work:base
+    runs-on: work:pi
     machine: small
     needs: [security, compiler, runtime, web]
     outputs:
