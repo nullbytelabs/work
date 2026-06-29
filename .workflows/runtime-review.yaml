@@ -27,7 +27,7 @@ on:
 
 jobs:
   scan:
-    runs-on: work:base
+    runs-on: work:pi
     machine: small
     outputs:
       findings: ${{ steps.r.outputs.output }}
@@ -39,7 +39,7 @@ jobs:
           promptFile: .workflows/prompts/review-runtime.md
 
   collect:
-    runs-on: work:base
+    runs-on: work:pi
     machine: small
     needs: [scan]
     outputs:
