@@ -290,6 +290,19 @@ describe("reusable — guards", () => {
     );
   });
 
+  // Regression: a single ${{ }} span with surrounding literal text (e.g. a
+  // `https://` prefix) passed validation, then silently dropped the literal since
+  // the exposed output is only the producer's raw value.
+  it("rejects a workflow_call.outputs value with a literal around the ${{ }} span", () => {
+    assert.throws(
+      () =>
+        plan(`name: caller\njobs:\n  call:\n    uses: workflow/lib`, {
+          lib: `name: lib\non:\n  workflow_call:\n    outputs:\n      url: "https://\${{ jobs.a.outputs.host }}"\njobs:\n  a:\n    steps:\n      - id: m\n        run: 'true'\n    outputs:\n      host: "\${{ steps.m.outputs.host }}"`,
+        }),
+      (e) => e instanceof WorkflowCompileError && /must be the entire value/.test(e.message),
+    );
+  });
+
   it("rejects a matrix uses: call whose callee exposes workflow_call.outputs", () => {
     assert.throws(
       () =>

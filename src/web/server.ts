@@ -553,24 +553,43 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
       return;
     }
 
+    // Reserve a run slot BEFORE mutating the durable journal. prepareRetry
+    // irreversibly deletes the failed job tasks (they can't be restored), so shedding
+    // at capacity *after* that would leave a zombie run — journal cleared, status
+    // 'running', nothing relaunched. Reserving first lets us 429 with the journal
+    // untouched, and guarantees the dispatch below is admitted.
+    if (!runManager.tryReserve()) {
+      sendJson(res, 429, { error: "server at run capacity — retry shortly" });
+      return;
+    }
+
     // Clear the failed jobs (+ orchestrator) from the journal. Nothing cleared means
-    // the run had no failed jobs to retry — answer 409 and dispatch nothing.
-    const { jobsReset } = await runManager.prepareRetry(id);
+    // the run had no failed jobs to retry — hand the slot back, answer 409, dispatch nothing.
+    let jobsReset: string[];
+    try {
+      ({ jobsReset } = await runManager.prepareRetry(id));
+    } catch (err) {
+      runManager.releaseReservation();
+      throw err;
+    }
     if (jobsReset.length === 0) {
+      runManager.releaseReservation();
       sendJson(res, 409, { error: `run "${id}" has no failed jobs to retry` });
       return;
     }
 
     // Same run id → the durable journal resumes: the cleared failed jobs re-run, the
-    // surviving successful ones are reused.
+    // surviving successful ones are reused. `reserved` consumes the slot held above,
+    // so this dispatch is always admitted.
     const result = runManager.dispatch({
       name: stored.name,
       layout: layoutFields(layout),
       plan,
       runId: id,
       trigger: "dispatch",
+      reserved: true,
     });
-    if (!result.accepted) { sendJson(res, 429, { error: "server at run capacity — retry shortly" }); return; }
+    if (!result.accepted) { sendJson(res, 500, { error: "internal error: reserved dispatch was shed" }); return; }
     sendJson(res, 202, { runId: result.record.id, jobsReset });
   }
 

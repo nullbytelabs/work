@@ -30,7 +30,12 @@ export function resolveInputs(
   const deferredKeys = deferred ?? new Set<string>();
 
   for (const key of Object.keys(provided)) {
-    if (!(key in decl)) {
+    // `Object.hasOwn`, not `in` — `in` walks the prototype, so a provided key that
+    // is an Object.prototype member (`toString`, `constructor`, `__proto__`, …)
+    // would read as "declared" and slip past this check, then get silently dropped
+    // by the own-properties-only `Object.entries(decl)` loop below. Matches the
+    // convention in compile.ts/reusable.ts/expr.ts.
+    if (!Object.hasOwn(decl, key)) {
       throw new WorkflowCompileError(`unknown input "${key}" (not declared in inputs:)`);
     }
   }

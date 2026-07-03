@@ -284,6 +284,17 @@ function parseOutputProducer(
       `workflow "${W.name}" workflow_call.outputs.${name}: only "\${{ jobs.<id>.outputs.<key> }}" is allowed (got "\${{ ${body} }}")`,
     );
   }
+  // The single span must be the WHOLE value. A surrounding literal — e.g.
+  // `https://${{ jobs.host.outputs.h }}` — can't be represented in the exposed
+  // output (curateSingleOutputs/buildOutputRewrites emit only the producer's raw
+  // value), so it would silently drop the `https://` prefix. Reject it as a clean
+  // compile error instead of losing the author's literal.
+  if (!/^\$\{\{[\s\S]*\}\}$/.test(expr.trim())) {
+    throw new WorkflowCompileError(
+      `workflow "${W.name}" workflow_call.outputs.${name}: the \${{ }} expression must be the entire value ` +
+        `(no surrounding text like a "https://" prefix, which would be silently dropped) — got "${expr}"`,
+    );
+  }
   const jobId = m[1]!;
   // `Object.hasOwn`, not `in` — `in` walks the prototype, so a producer named
   // `toString`/`constructor`/etc. would resolve to an Object.prototype member and
