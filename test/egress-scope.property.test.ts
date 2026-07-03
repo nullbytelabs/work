@@ -31,7 +31,7 @@ import fc from "fast-check";
 import { matchHostname } from "../node_modules/@earendil-works/gondolin/dist/src/host/patterns.js";
 import { modelHostOf } from "../src/agent/guest-pi-runner.ts";
 import { makeAgentEgressResolver } from "../src/agent/index.ts";
-import type { PiWorkflowsConfig } from "../src/config/index.ts";
+import type { WorkConfig } from "../src/config/index.ts";
 import type { PlannedJob, PlannedStep } from "../src/compiler/index.ts";
 
 // ── arbitraries ──────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ test("egress-scope · a derived host is an exact matchHostname pattern (no wildc
 // reach. A `*`-bearing model host must drop the key entirely (fail closed).
 const providerHostArb = fc.oneof(dnsHost, specialHost); // includes the `a*b.example` wildcard probe
 const modelConfigArb = providerHostArb.chain((host) =>
-  fc.tuple(port, literalSecret).map(([p, key]): PiWorkflowsConfig => ({
+  fc.tuple(port, literalSecret).map(([p, key]): WorkConfig => ({
     providers: { prov: { baseUrl: `https://${host}${p ? `:${p}` : ""}/v1`, apiKey: key } },
     models: { m: { provider: "prov", model: "some-model" } },
     defaultModel: "m",

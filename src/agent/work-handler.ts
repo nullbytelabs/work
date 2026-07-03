@@ -18,14 +18,14 @@ import { isAbsolute, join, relative } from "node:path";
 import { readFile, realpath } from "node:fs/promises";
 import type { UsesHandler, UsesContext, UsesResult } from "../runtime/types.ts";
 import { StepInterrupted } from "../runtime/types.ts";
-import { resolveModel, type PiWorkflowsConfig } from "../config/index.ts";
+import { resolveModel, type WorkConfig } from "../config/index.ts";
 import type { AgentRunner } from "./index.ts";
 import { GuestPiRunner } from "./guest-pi-runner.ts";
 import { loadBuiltinAction, runAction, BUILTIN_ACTIONS, type SubUsesDispatch } from "../actions/index.ts";
 
 export interface WorkHandlerOptions {
   /** Provider/model config (for resolving the model a `work/agent` step runs on). */
-  config?: PiWorkflowsConfig;
+  config?: WorkConfig;
   /**
    * Force a specific agent runner (tests inject a mock so no inference happens).
    * When omitted, `work/agent` runs in-guest via `GuestPiRunner` — every job is a

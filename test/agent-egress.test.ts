@@ -16,12 +16,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { makeAgentEgressResolver } from "../src/agent/index.ts";
-import type { PiWorkflowsConfig } from "../src/config/index.ts";
+import type { WorkConfig } from "../src/config/index.ts";
 import type { PlannedJob, PlannedStep } from "../src/compiler/index.ts";
 
 // Two providers, two models, two keys — the inference-arbitrage setup ("cheap
 // model here, expensive model there").
-const config: PiWorkflowsConfig = {
+const config: WorkConfig = {
   providers: {
     anthropic: { baseUrl: "https://api.anthropic.com", apiKey: "anthropic-key-AAA" },
     fireworks: { baseUrl: "https://api.fireworks.ai/inference/v1", apiKey: "fireworks-key-FFF" },

@@ -98,13 +98,13 @@ The run presenter is selected automatically from the terminal context. Source: `
 
 ```
 1. --quiet              → NullPresenter
-2. PI_WORKFLOWS_TUI=1   → force LayeredPresenter
-3. PI_WORKFLOWS_TUI=0   → force BufferedPresenter
+2. WORK_TUI=1   → force LayeredPresenter
+3. WORK_TUI=0   → force BufferedPresenter
 4. isTTY && !isCI       → LayeredPresenter
 5. else                 → BufferedPresenter
 ```
 
-`PI_WORKFLOWS_TUI` is an explicit override for testing or forcing a mode. CI detection (`detectCI`) checks `CI`, `CONTINUOUS_INTEGRATION`, `GITHUB_ACTIONS`, `BUILDKITE`, `GITLAB_CI`, `CIRCLECI`.
+`WORK_TUI` is an explicit override for testing or forcing a mode. CI detection (`detectCI`) checks `CI`, `CONTINUOUS_INTEGRATION`, `GITHUB_ACTIONS`, `BUILDKITE`, `GITLAB_CI`, `CIRCLECI`.
 
 ### Color policy
 

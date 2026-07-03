@@ -100,7 +100,7 @@ interface DoctorProbes {
   pathAccess(p: string, mode: number): boolean;  // /dev/kvm
   hasGuestAssets(): boolean;
   platform: NodeJS.Platform; arch: string;
-  readConfig(path: string): Promise<PiWorkflowsConfig>;
+  readConfig(path: string): Promise<WorkConfig>;
   exists(path: string): boolean;
 }
 ```
@@ -159,16 +159,16 @@ for a hermetic CI config.
 ### Code changes (PROPOSED, NEEDS-BUILDING)
 In `src/config/index.ts`, split parse into lenient-structural + post-merge cross-ref:
 ```ts
-export function parsePartialConfig(raw): PiWorkflowsConfig   // field types only, NO cross-refs
-export function mergeConfig(base, over): PiWorkflowsConfig {
+export function parsePartialConfig(raw): WorkConfig   // field types only, NO cross-refs
+export function mergeConfig(base, over): WorkConfig {
   return {
     providers: { ...base.providers, ...over.providers },
     models:    { ...base.models,    ...over.models },
     defaultModel: over.defaultModel ?? base.defaultModel,
   };
 }
-export function validateConfig(c): PiWorkflowsConfig          // the cross-ref checks, ONCE, post-merge
-export async function loadConfig(paths: string[]): Promise<PiWorkflowsConfig> {
+export function validateConfig(c): WorkConfig          // the cross-ref checks, ONCE, post-merge
+export async function loadConfig(paths: string[]): Promise<WorkConfig> {
   let merged = { providers: {}, models: {} };
   for (const p of paths) { if (!existsSync(p)) continue;       // global is optional
     merged = mergeConfig(merged, parsePartialConfig(JSON.parse(await readFile(p, "utf-8")))); }

@@ -24,7 +24,7 @@ import type { UsesHandler } from "./runtime/index.ts";
 import { RunRepository } from "./persistence/runs.ts";
 import { RunEventRepository } from "./persistence/run-events.ts";
 import { WebPresenter } from "./web/web-presenter.ts";
-import { expandEnvStrict, type PiWorkflowsConfig } from "./config/index.ts";
+import { expandEnvStrict, type WorkConfig } from "./config/index.ts";
 import { UserFacingError } from "./errors.ts";
 import { startTelemetry, createTelemetryHooks, combineRunHooks, type TelemetryHandle } from "./observability/index.ts";
 
@@ -43,7 +43,7 @@ export interface StartRunOptions {
   /** Caller-supplied stable run id (web mints it up front); defaults to a UUID. */
   runId?: string;
   /** Provider/model config for agent steps. */
-  config?: PiWorkflowsConfig | undefined;
+  config?: WorkConfig | undefined;
   /** Base working directory; a fresh temp dir is allocated when omitted. */
   workdir?: string;
   /**
@@ -103,7 +103,7 @@ function referencedSecrets(plan: ExecutionPlan): Set<string> {
  * an unrelated declared secret with an unset var never blocks a run. Returns `{}`
  * when the workflow references none (the option stays unset; the feature is inert).
  */
-function secretsOption(plan: ExecutionPlan, config?: PiWorkflowsConfig): { secrets?: Record<string, string> } {
+function secretsOption(plan: ExecutionPlan, config?: WorkConfig): { secrets?: Record<string, string> } {
   const referenced = referencedSecrets(plan);
   if (referenced.size === 0) return {};
   const declared = config?.secrets ?? {};

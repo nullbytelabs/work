@@ -17,7 +17,7 @@ import type { ExecutionPlan } from "../compiler/index.ts";
 import { resetFailedJobs } from "../runtime/index.ts";
 import type { AbsurdEngine } from "../runtime/index.ts";
 import type { TargetFactory } from "../targets/index.ts";
-import type { PiWorkflowsConfig } from "../config/index.ts";
+import type { WorkConfig } from "../config/index.ts";
 import { startRun } from "../run.ts";
 import type { TelemetryHandle } from "../observability/index.ts";
 import type { RunRepository } from "../persistence/runs.ts";
@@ -80,7 +80,7 @@ export interface RunManagerOptions {
   /** The shared engine every run executes on (booted once by the server). */
   engine: AbsurdEngine;
   /** Provider/model config for agent steps. */
-  config?: PiWorkflowsConfig | undefined;
+  config?: WorkConfig | undefined;
   /** Override the runs-on → target factory (tests inject a host double). */
   makeTarget?: TargetFactory;
   /**
@@ -122,7 +122,7 @@ const DEFAULT_MAX_QUEUED_RUNS = 100;
 
 export class RunManager {
   private readonly engine: AbsurdEngine;
-  private readonly config: PiWorkflowsConfig | undefined;
+  private readonly config: WorkConfig | undefined;
   private readonly makeTarget: TargetFactory | undefined;
   private readonly runStore: RunRepository | undefined;
   private readonly eventStore: RunEventRepository | undefined;

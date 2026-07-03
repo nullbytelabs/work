@@ -25,7 +25,7 @@
  * agnostic — it only forwards the result to the target.
  */
 import type { PlannedJob } from "../compiler/index.ts";
-import { resolveModel, type PiWorkflowsConfig } from "../config/index.ts";
+import { resolveModel, type WorkConfig } from "../config/index.ts";
 import { modelHostOf, modelKeyEnv } from "./guest-pi-runner.ts";
 
 /** Structural `JobNetwork` (kept local to avoid an agent→runtime import cycle). */
@@ -50,7 +50,7 @@ function stepModelAlias(job: PlannedJob, i: number): string | undefined {
  * injects per-host model keys for any model-running step.
  */
 export function makeAgentEgressResolver(
-  config?: PiWorkflowsConfig,
+  config?: WorkConfig,
 ): (job: PlannedJob) => AgentJobNetwork | undefined {
   return (job) => {
     const net: AgentJobNetwork = { allowedHosts: ["*"] };

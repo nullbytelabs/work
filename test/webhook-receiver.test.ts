@@ -15,7 +15,7 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAbsurdEngine, type AbsurdEngine } from "../src/runtime/index.ts";
-import type { PiWorkflowsConfig } from "../src/config/index.ts";
+import type { WorkConfig } from "../src/config/index.ts";
 import { collectSse, hostTargetFactory } from "./_support.ts";
 import { startWebServer, type WebServerHandle } from "../src/web/index.ts";
 
@@ -51,7 +51,7 @@ jobs:
 
 const SECRET = "s3cr3t-bearer-token";
 
-const config: PiWorkflowsConfig = {
+const config: WorkConfig = {
   providers: {},
   models: {},
   webhooks: {

@@ -20,7 +20,7 @@ import { startRun } from "../src/run.ts";
 import { AbsurdRuntime, createAbsurdEngine, type UsesHandler } from "../src/runtime/index.ts";
 import { createTelemetryHooks } from "../src/observability/index.ts";
 import { createWorkHandler, type AgentRunner } from "../src/agent/index.ts";
-import type { PiWorkflowsConfig } from "../src/config/index.ts";
+import type { WorkConfig } from "../src/config/index.ts";
 import { hostTargetFactory } from "./_support.ts";
 
 const WORKFLOW = `
@@ -106,7 +106,7 @@ describe("observability — Layer 2 (runtime integration)", () => {
   });
 
   it("emits a chat {model} span with gen_ai.usage.* for a work/agent step (token capture)", async () => {
-    const config: PiWorkflowsConfig = {
+    const config: WorkConfig = {
       providers: { anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKey: "sk-test" } },
       models: { opus: { provider: "anthropic", model: "claude-opus-4" } },
       defaultModel: "opus",
