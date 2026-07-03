@@ -7,7 +7,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { UserFacingError } from "../src/errors.ts";
+import { UserFacingError, formatUserFacing } from "../src/errors.ts";
 import { WorkflowCompileError, ConditionError } from "../src/compiler/index.ts";
 import { parseWorkflow, WorkflowParseError } from "../src/spec/index.ts";
 
@@ -39,5 +39,49 @@ describe("error contract — authoring errors are UserFacingError", () => {
       () => parseWorkflow("name: w\njobs: {}\n"),
       (e) => e instanceof UserFacingError && e instanceof WorkflowParseError,
     );
+  });
+});
+
+describe("error contract — structured path / hint / docs", () => {
+  it("path is prefixed onto the message AND exposed as a field", () => {
+    const e = new WorkflowCompileError("references needs.build.*", { path: "jobs.deploy" });
+    assert.equal(e.path, "jobs.deploy");
+    assert.equal(e.message, "jobs.deploy: references needs.build.*");
+  });
+
+  it("carries hint + docs as fields (for the web JSON + agent consumers)", () => {
+    const e = new WorkflowCompileError("unknown input \"x\"", {
+      path: "inputs",
+      hint: "declared inputs: foo",
+      docs: "https://example/docs",
+    });
+    assert.equal(e.hint, "declared inputs: foo");
+    assert.equal(e.docs, "https://example/docs");
+  });
+
+  it("formatUserFacing renders message, then hint: and see: lines only when present", () => {
+    const bare = new UserFacingError("boom");
+    assert.equal(formatUserFacing(bare), "boom");
+
+    const full = new WorkflowCompileError("references needs.build.*", {
+      path: "jobs.deploy",
+      hint: "reference a specific leg",
+      docs: "https://example/docs",
+    });
+    assert.equal(
+      formatUserFacing(full),
+      "jobs.deploy: references needs.build.*\n  hint: reference a specific leg\n  see:  https://example/docs",
+    );
+
+    // hint without docs → no `see:` line.
+    const hintOnly = new ConditionError("bad", { hint: "did you mean &&?" });
+    assert.equal(formatUserFacing(hintOnly), "bad\n  hint: did you mean &&?");
+  });
+
+  it("existing single-arg construction still works (backward compatible)", () => {
+    const e = new WorkflowCompileError("just a message");
+    assert.equal(e.message, "just a message");
+    assert.equal(e.path, undefined);
+    assert.equal(formatUserFacing(e), "just a message");
   });
 });

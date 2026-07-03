@@ -23,6 +23,7 @@
  * unknown root (`github`, …) always errors — never silently passes.
  */
 import { WorkflowCompileError } from "./compile.ts";
+import { DOCS } from "../errors.ts";
 
 export interface OutputBag {
   outputs: Record<string, string>;
@@ -143,7 +144,10 @@ const resolveNeeds: Resolver = (expr, ctx, whole) => {
   // that isn't a real dep must read as missing, matching walkPath's guard below.
   const bag = Object.hasOwn(ctx.needs, job) ? ctx.needs[job] : undefined;
   if (!bag || !Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
-    throw new WorkflowCompileError(`expression references missing output: needs.${job}.outputs.${key}`);
+    throw new WorkflowCompileError(`expression references missing output: needs.${job}.outputs.${key}`, {
+      hint: `declare "${key}" as an output of job "${job}" (write it to $WORK_OUTPUT, or set it under that job's outputs:)`,
+      docs: DOCS.workflowSyntax,
+    });
   }
   return bag.outputs[key]!;
 };
@@ -211,6 +215,7 @@ function resolveExpr(expr: string, ctx: ExprContext, whole: string): string {
   }
   throw new WorkflowCompileError(
     `unsupported expression "\${{ ${expr} }}" — supported: inputs.<name>, needs.<job>.outputs.<name>, steps.<id>.outputs.<key>, steps.<id>.(logs|outcome|exitCode), event.<path>, secrets.<name>`,
+    { docs: DOCS.workflowSyntax },
   );
 }
 

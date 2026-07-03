@@ -27,7 +27,7 @@ import { emitGraph, isGraphFormat, GRAPH_FORMATS, type GraphFormat } from "./gra
 import { runDoctor } from "./doctor/index.ts";
 import { runCreate } from "./scaffold/index.ts";
 import { runInit } from "./init/index.ts";
-import { UserFacingError } from "./errors.ts";
+import { UserFacingError, formatUserFacing } from "./errors.ts";
 import { VERSION } from "./version.ts";
 
 interface CliArgs {
@@ -680,7 +680,7 @@ async function main(): Promise<void> {
     });
   } catch (err) {
     if (err instanceof WorkflowParseError || err instanceof WorkflowCompileError) {
-      fail(err.message);
+      fail(formatUserFacing(err));
     }
     throw err;
   }
@@ -777,7 +777,7 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
 
 main().catch((err) => {
   if (err instanceof UserFacingError) {
-    process.stderr.write(`work: ${err.message}\n`);
+    process.stderr.write(`work: ${formatUserFacing(err)}\n`);
   } else {
     process.stderr.write(`work: unexpected error: ${(err as Error).stack ?? err}\n`);
   }

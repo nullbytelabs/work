@@ -41,6 +41,32 @@ describe("inputs — resolveInputs", () => {
     );
   });
 
+  it("unknown-input error carries structured path/hint/docs (locate + remediate)", () => {
+    assert.throws(
+      () => resolveInputs({ foo: {}, bar: {} }, { nope: 1 }),
+      (e) => {
+        assert.ok(e instanceof WorkflowCompileError);
+        assert.equal(e.path, "inputs");
+        assert.equal(e.message, 'inputs: unknown input "nope"');
+        assert.match(e.hint ?? "", /declared inputs: bar, foo|declared inputs: foo, bar/);
+        assert.match(e.docs ?? "", /reference\/configuration/);
+        return true;
+      },
+    );
+  });
+
+  it("required-input error points at the specific input with a --inputs hint", () => {
+    assert.throws(
+      () => resolveInputs({ token: { required: true } }, {}),
+      (e) => {
+        assert.ok(e instanceof WorkflowCompileError);
+        assert.equal(e.path, "inputs.token");
+        assert.match(e.hint ?? "", /--inputs/);
+        return true;
+      },
+    );
+  });
+
   it("accepts values whose JSON type matches the declaration", () => {
     assert.deepEqual(resolveInputs({ n: { type: "number" } }, { n: 42 }), { n: 42 });
     assert.deepEqual(resolveInputs({ b: { type: "boolean" } }, { b: true }), { b: true });

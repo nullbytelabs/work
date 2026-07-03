@@ -21,7 +21,7 @@
  * silently passing, so an unsupported condition is never mistaken for `true`.
  */
 import { parseAccessPath, walkPath, closingBracket, type Segment } from "./expr.ts";
-import { UserFacingError } from "../errors.ts";
+import { UserFacingError, type UserFacingErrorInit } from "../errors.ts";
 
 /** A scalar value flowing through the evaluator. */
 type Value = string | number | boolean | null | undefined;
@@ -68,8 +68,8 @@ export interface ConditionContext {
 // it ever surfaces to the top level; the runtime still catches the concrete type
 // to convert it into a job-condition failure.
 export class ConditionError extends UserFacingError {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, init: UserFacingErrorInit = {}) {
+    super(message, init);
     this.name = "ConditionError";
   }
 }
