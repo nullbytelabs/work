@@ -653,19 +653,32 @@ async function runSteps(
       }
 
       ctx.hooks?.onStepStart?.(job.id, step.name, stepHookMeta(step));
-      // A throw from executeStep means the step never reached a verdict — the
-      // target/VM was torn out under it. Surface it to the presenter (so the step
-      // isn't left "running"), then raise `JobInterrupted` so the job *task* fails
-      // and a later invocation can resume from here. This is distinct from a step
-      // that runs and exits non-zero (a normal failure StepResult below).
+      // A throw from executeStep is one of two kinds, and they must NOT be
+      // conflated (the bug: everything used to become JobInterrupted):
+      //   - StepInterrupted — the target/VM was torn out under the step (it never
+      //     reached a verdict). Raise JobInterrupted so the job task fails and a
+      //     later invocation RESUMES from here.
+      //   - anything else — a terminal, deterministic error (e.g. a bad
+      //     expression: a missing needs/steps output). Re-running would throw the
+      //     identical error forever, so record a terminal failure and stop the job
+      //     (a real `failure`, not a perpetual `interrupted`).
+      // A step that runs and exits non-zero is a normal failure StepResult below,
+      // never a throw.
       let result: StepResult;
       try {
         result = await executeStep(step, job, target, workdir, deps, taskCtx, exprCtx());
       } catch (err) {
-        const interrupted: StepResult = { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: `step interrupted: ${(err as Error).message}` };
-        ctx.hooks?.onStepEnd?.(job.id, interrupted);
-        recordStep(step, interrupted);
-        throw new JobInterrupted(step.name, err);
+        if (err instanceof StepInterrupted) {
+          const interrupted: StepResult = { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: `step interrupted: ${err.message}` };
+          ctx.hooks?.onStepEnd?.(job.id, interrupted);
+          recordStep(step, interrupted);
+          throw new JobInterrupted(step.name, err);
+        }
+        const errored: StepResult = { name: step.name, status: "failure", exitCode: 1, stdout: "", stderr: `step error: ${(err as Error).message}` };
+        ctx.hooks?.onStepEnd?.(job.id, errored);
+        recordStep(step, errored);
+        failed = true; // terminal: don't run later steps, don't resume
+        break;
       }
       ctx.hooks?.onStepEnd?.(job.id, result);
       recordStep(step, result);
@@ -760,6 +773,10 @@ async function runShellStep(
   ctx: RunContext,
   expr: StepExprCtx,
 ): Promise<StepResult> {
+  // Expression resolution runs BEFORE target.run and is deterministic: a throw
+  // here (e.g. a missing needs/steps output from a skipped upstream) is a terminal
+  // authoring error, NOT a tear-out — let it propagate raw so runSteps records a
+  // terminal failure rather than an endlessly-resumable interruption.
   const command = interpolate(step.run!, expr);
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(step.env)) env[k] = interpolate(v, expr);
@@ -769,10 +786,19 @@ async function runShellStep(
   env["WORK_OUTPUT"] = `${target.workspacePath}/${outName}`; // the command writes here
   await rm(hostOutFile, { force: true });
 
-  const run = await target.run(command, {
-    env,
-    onOutput: (chunk) => ctx.hooks?.onOutput?.(job.id, step.name, chunk),
-  });
+  // A target.run REJECTION (a VM/target tear-out, not a non-zero exit) is a
+  // resumable interruption — mark it StepInterrupted so runSteps routes it to
+  // JobInterrupted, mirroring the uses: path's exec wrapper. (A non-zero exit
+  // comes back as run.ok === false below, a normal failure StepResult.)
+  let run;
+  try {
+    run = await target.run(command, {
+      env,
+      onOutput: (chunk) => ctx.hooks?.onOutput?.(job.id, step.name, chunk),
+    });
+  } catch (err) {
+    throw new StepInterrupted(err);
+  }
 
   const result: StepResult = {
     name: step.name,

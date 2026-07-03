@@ -49,6 +49,14 @@ jobs:
         run: echo noop
 `;
 
+// `broken` is valid YAML (so it resolves by name) but fails full parse (no jobs),
+// so a hook pointing at it exercises loadOptedInSpec's parse-error path — which must
+// only be reachable AFTER authentication (never disclosed to an unauthenticated caller).
+const BROKEN = `name: broken
+on: webhook
+jobs: {}
+`;
+
 const SECRET = "s3cr3t-bearer-token";
 
 const config: WorkConfig = {
@@ -62,6 +70,7 @@ const config: WorkConfig = {
     // GitHub-style HMAC (sha256= prefix) and Grafana-style (bare hex).
     "signed-hook": { workflow: "incident", auth: "hmac-sha256", secret: "$WEBHOOK_TEST_SECRET", signatureHeader: "X-Hub-Signature-256" },
     "grafana-hook": { workflow: "incident", auth: "hmac-sha256", secret: "$WEBHOOK_TEST_SECRET", signatureHeader: "X-Grafana-Alerting-Signature" },
+    "broken-hook": { workflow: "broken", auth: "bearer", secret: "$WEBHOOK_TEST_SECRET" },
   },
 };
 
@@ -77,6 +86,7 @@ before(async () => {
   await mkdir(wfDir, { recursive: true });
   await writeFile(join(wfDir, "incident.yaml"), INCIDENT);
   await writeFile(join(wfDir, "plain.yaml"), PLAIN);
+  await writeFile(join(wfDir, "broken.yaml"), BROKEN);
 
   engine = await createAbsurdEngine();
   server = await startWebServer({ workspace, port: 0, engine, config, makeTarget: hostTargetFactory });
@@ -130,6 +140,29 @@ describe("webhook receiver — auth & fail-closed", () => {
   it("hook whose workflow hasn't opted into `on: webhook` → 404", async () => {
     const r = await postHook("plain-hook", {}, SECRET);
     assert.equal(r.status, 404);
+  });
+
+  // Regression: authenticate BEFORE loading/parsing the target workflow. An
+  // unauthenticated request to a hook whose workflow is broken must NOT reach the
+  // parse (which would disclose the error inline and write an audit row) — it gets
+  // a plain 401 with no parse detail leaked.
+  it("unauthenticated request to a broken-workflow hook → 401, no parse-error disclosure", async () => {
+    const r = await fetch(`${base}/hooks/broken-hook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(r.status, 401);
+    const text = await r.text();
+    assert.doesNotMatch(text, /job|parse|yaml|broken/i, `leaked workflow detail pre-auth: ${text}`);
+  });
+
+  // ...but an AUTHENTICATED operator still gets the real parse error (post-auth is
+  // the legitimate place to surface it), proving the check moved, not disappeared.
+  it("authenticated request to a broken-workflow hook → 400 with the parse error", async () => {
+    const r = await postHook("broken-hook", {}, SECRET);
+    assert.equal(r.status, 400);
+    await r.text();
   });
 
   it("oversized body is rejected (413 or aborted) and never dispatched", async () => {

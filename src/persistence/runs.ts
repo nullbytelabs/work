@@ -96,13 +96,23 @@ export class RunRepository {
     );
   }
 
-  /** Update a run's status (and, for a terminal status, its finish time/error). */
+  /**
+   * Update a run's status, and SET (not merge) its finish time + error to the
+   * given opts — an omitted field is written as NULL, so it's cleared.
+   *
+   * This is deliberate, not a coalesce-merge: a status change carries its own
+   * terminal state. A terminal `success` write passes no `error`, which must clear
+   * any error from a prior *failed* attempt (a retry re-runs under the same run id);
+   * and flipping back to `running` on retry clears the prior finish time + error so
+   * the run reads as freshly in-flight. Every caller passes exactly the fields the
+   * new status should have, so plain assignment is the correct semantics.
+   */
   async setStatus(id: string, status: RunStatus, opts?: { finishedAt?: number; error?: string }): Promise<void> {
     await this.engine.query(
       `update work.runs
          set status = $2,
-             finished_at = coalesce($3, finished_at),
-             error = coalesce($4, error)
+             finished_at = $3,
+             error = $4
        where run_id = $1`,
       [id, status, opts?.finishedAt ?? null, opts?.error ?? null],
     );

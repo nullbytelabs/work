@@ -291,3 +291,44 @@ jobs:
     assert.equal(plan.event, undefined);
   });
 });
+
+describe("event context — expression-injection neutralization", () => {
+  // Regression (security): `event` is the ONE untrusted root — an internet-facing
+  // webhook body. A payload value of `${{ secrets.token }}` used to bake VERBATIM
+  // into the plan's run/env/with strings, which the runtime re-interpolates with
+  // `secrets` in scope — resolving attacker text into the real secret (the GHA
+  // pull_request_target injection class). Event-sourced `${{` must be neutralized.
+
+  it("a payload ${{ secrets.* }} baked into run: does NOT resolve at runtime", () => {
+    const spec = parseWorkflow(`
+name: incident
+on: webhook
+jobs:
+  echo:
+    steps:
+      - run: 'echo "\${{ event.alerts[0].labels.severity }}"'
+`);
+    const evil = { alerts: [{ labels: { severity: "${{ secrets.token }}" } }] };
+    const plan = compile(spec, { event: evil });
+    const baked = plan.jobs["echo"]!.steps[0]!.run!;
+    // The opener is broken at bake time — no live `${{ }}` span survives.
+    assert.ok(!baked.includes("${{"), `plan still contains a live opener: ${baked}`);
+    // The runtime re-interpolation (needs/steps/secrets in scope) resolves nothing.
+    const resolved = interpolate(baked, { secrets: { token: "SUPERSECRET-abc-123" } });
+    assert.ok(!resolved.includes("SUPERSECRET"), `secret exfiltrated: ${resolved}`);
+  });
+
+  it("neutralizes ${{ in JSON-stringified whole-event/object values too", () => {
+    const evil = { note: "${{ needs.build.outputs.version }}" };
+    const asJson = interpolate("${{ event }}", { event: evil });
+    assert.ok(!asJson.includes("${{"), `JSON branch leaked an opener: ${asJson}`);
+    assert.match(asJson, /needs\.build\.outputs\.version/);
+  });
+
+  it("benign payload text (no ${{ ) passes through byte-for-byte", () => {
+    assert.equal(
+      interpolate("${{ event.msg }}", { event: { msg: "deploy ${VERSION} now { } $$" } }),
+      "deploy ${VERSION} now { } $$",
+    );
+  });
+});
