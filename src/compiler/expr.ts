@@ -137,7 +137,11 @@ const resolveNeeds: Resolver = (expr, ctx, whole) => {
   if (!ctx.needs) return whole; // defer to runtime
   const job = m[1]!;
   const key = m[2]!;
-  const bag = ctx.needs[job];
+  // `Object.hasOwn`, not a bare index — `ctx.needs` is a plain object with a live
+  // prototype, so `ctx.needs["toString"]` would return the inherited function
+  // (truthy) and slip past the `!bag` guard, then crash on `bag.outputs`. A name
+  // that isn't a real dep must read as missing, matching walkPath's guard below.
+  const bag = Object.hasOwn(ctx.needs, job) ? ctx.needs[job] : undefined;
   if (!bag || !Object.prototype.hasOwnProperty.call(bag.outputs, key)) {
     throw new WorkflowCompileError(`expression references missing output: needs.${job}.outputs.${key}`);
   }
@@ -151,7 +155,11 @@ const resolveSteps: Resolver = (expr, ctx, whole) => {
   if (!m) return null;
   if (!ctx.steps) return whole; // defer to runtime
   const id = m[1]!;
-  const bag = ctx.steps[id];
+  // `Object.hasOwn`, not a bare index — an inherited Object.prototype member
+  // (`toString`, `constructor`, …) would otherwise resolve to a function, sail
+  // past the `!bag` guard, and return a silent "" for `.logs`/an output instead
+  // of the clean "unknown step" error.
+  const bag = Object.hasOwn(ctx.steps, id) ? ctx.steps[id] : undefined;
   if (!bag) {
     throw new WorkflowCompileError(`expression references unknown step: steps.${id}`);
   }

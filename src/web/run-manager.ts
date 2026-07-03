@@ -68,6 +68,12 @@ export interface DispatchOptions {
   runId?: string;
   /** What started this run (default "dispatch"). */
   trigger?: RunTrigger;
+  /**
+   * Set when consuming a slot already held via `tryReserve()` (the retry path,
+   * which must mutate the durable journal *before* dispatching). Such a dispatch
+   * is guaranteed admission and never sheds — the capacity was reserved up front.
+   */
+  reserved?: boolean;
 }
 
 export interface RunManagerOptions {
@@ -128,6 +134,13 @@ export class RunManager {
   private readonly maxQueuedRuns: number;
   /** Runs currently executing (each holds one concurrency slot). */
   private active = 0;
+  /**
+   * Slots reserved via `tryReserve()` but not yet dispatched — held by a retry
+   * while it mutates the durable journal, so a concurrent dispatch can't steal the
+   * capacity out from under it (which would force the retry's dispatch to shed
+   * *after* it had already cleared the journal, corrupting the run).
+   */
+  private reserved = 0;
   /** FIFO of queued launch thunks, run as slots free up. */
   private readonly queue: Array<() => void> = [];
   /**
@@ -162,11 +175,16 @@ export class RunManager {
   dispatch(opts: DispatchOptions): DispatchResult {
     const id = opts.runId ?? randomUUID();
 
-    const atCapacity = this.active >= this.maxConcurrentRuns;
-    if (atCapacity && this.queue.length >= this.maxQueuedRuns) {
+    if (opts.reserved) {
+      // Consume the slot held by tryReserve(); a reserved dispatch is always admitted.
+      this.reserved = Math.max(0, this.reserved - 1);
+    } else if (this.active + this.reserved >= this.maxConcurrentRuns && this.queue.length >= this.maxQueuedRuns) {
+      // Every slot busy (or reserved) AND the queue full → shed so the caller 429s.
       return { accepted: false, reason: "full" };
     }
 
+    // Run now only if a physical slot is free; otherwise queue behind the FIFO.
+    const atCapacity = this.active >= this.maxConcurrentRuns;
     const record: RunRecord = {
       id,
       name: opts.name,
@@ -202,6 +220,28 @@ export class RunManager {
     }
 
     return { accepted: true, record };
+  }
+
+  /**
+   * Atomically reserve a run slot for a caller that must do irreversible async work
+   * before dispatching (the retry path clears the failed jobs from the durable
+   * journal first). Returns `true` and holds the slot when there's capacity, `false`
+   * (nothing held) when at capacity — so the caller can 429 *without* having mutated
+   * anything. The reservation MUST be consumed by a later `dispatch({ reserved: true })`
+   * or handed back with `releaseReservation()`. Synchronous, so no dispatch can race
+   * in between the check and the hold.
+   */
+  tryReserve(): boolean {
+    if (this.active + this.reserved >= this.maxConcurrentRuns && this.queue.length >= this.maxQueuedRuns) {
+      return false;
+    }
+    this.reserved++;
+    return true;
+  }
+
+  /** Hand back a slot taken by `tryReserve()` without dispatching (nothing to run). */
+  releaseReservation(): void {
+    this.reserved = Math.max(0, this.reserved - 1);
   }
 
   /** Actually run a dispatched workflow in the background; release its slot on settle. */
@@ -332,7 +372,25 @@ export class RunManager {
       Connection: "keep-alive",
     });
     res.flushHeaders?.();
-    for (const frame of frames) res.write(frameToSse(frame));
+    let sawRunEnd = false;
+    for (const frame of frames) {
+      if (frame.event === "run-end") sawRunEnd = true;
+      res.write(frameToSse(frame));
+    }
+    // The stored frames may lack a terminal `run-end` — the live append is
+    // fire-and-forget (see `broadcast`) and `close()` doesn't await pending
+    // appends, so a run finishing at shutdown (or any swallowed append failure)
+    // persists its frames without the closer while `work.runs` still records the
+    // terminal status. The client only stops reconnecting on `run-end` (its
+    // `onerror` is a deliberate no-op), so synthesize one from the run row's
+    // status — mirroring `replayStoredStatus` — to always close the stream.
+    if (!sawRunEnd) {
+      const row = this.runStore ? await this.runStore.get(runId) : undefined;
+      const status = row?.status ?? "interrupted";
+      const data: Record<string, unknown> = { runId, ts: Date.now(), status };
+      if (row?.error !== undefined) data.error = row.error;
+      res.write(frameToSse({ event: "run-end", data }));
+    }
     res.end();
     return true;
   }

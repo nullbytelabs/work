@@ -31,6 +31,16 @@ describe("inputs — resolveInputs", () => {
     );
   });
 
+  // Regression: the unknown-input check used `key in decl`, which walks the
+  // prototype — a provided `toString`/`constructor`/… slipped past as "declared"
+  // and was then silently dropped.
+  it("errors on a provided input named like an Object.prototype member", () => {
+    assert.throws(
+      () => resolveInputs({ name: {} }, { toString: "evil" }),
+      (e) => e instanceof WorkflowCompileError && /unknown input "toString"/.test(e.message),
+    );
+  });
+
   it("accepts values whose JSON type matches the declaration", () => {
     assert.deepEqual(resolveInputs({ n: { type: "number" } }, { n: 42 }), { n: 42 });
     assert.deepEqual(resolveInputs({ b: { type: "boolean" } }, { b: true }), { b: true });
@@ -139,6 +149,29 @@ describe("inputs — interpolate", () => {
   it("resolves needs/steps when that context is provided", () => {
     assert.equal(interpolate("${{ needs.a.outputs.x }}", { needs: { a: { outputs: { x: "X" } } } }), "X");
     assert.equal(interpolate("${{ steps.s.outputs.y }}", { steps: { s: { outputs: { y: "Y" } } } }), "Y");
+  });
+
+  // Regression: `needs`/`steps` are plain objects with a live prototype, so a
+  // reference whose name is an Object.prototype member (`toString`, …) must read as
+  // missing — not fall through the guard onto the inherited function (a raw
+  // TypeError for needs, a silent "" for steps).
+  it("treats a prototype-member needs.<name> as a clean 'missing output', not a TypeError", () => {
+    assert.throws(
+      () => interpolate("${{ needs.toString.outputs.x }}", { needs: { real: { outputs: { x: "1" } } } }),
+      (e) => e instanceof WorkflowCompileError && /missing output: needs\.toString\.outputs\.x/.test(e.message),
+    );
+  });
+
+  it("treats a prototype-member steps.<name> as a clean 'unknown step', not a silent \"\"", () => {
+    assert.throws(
+      () => interpolate("${{ steps.toString.logs }}", { steps: { real: { outputs: {} } } }),
+      (e) => e instanceof WorkflowCompileError && /unknown step: steps\.toString/.test(e.message),
+    );
+  });
+
+  it("still resolves a real dependency/step literally named like a prototype member", () => {
+    assert.equal(interpolate("${{ needs.toString.outputs.x }}", { needs: { toString: { outputs: { x: "ok" } } } }), "ok");
+    assert.equal(interpolate("${{ steps.valueOf.outputs.y }}", { steps: { valueOf: { outputs: { y: "ok" } } } }), "ok");
   });
 
   it("leaves shell ${VAR} and $(...) untouched", () => {

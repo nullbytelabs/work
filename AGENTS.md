@@ -235,3 +235,14 @@ live browser iteration) and should drive UI changes rather than ad-hoc edits.
 - Deep-dive design docs live in `docs/` (e.g. `gondolin-secure-execution.md`,
   `pi-in-gondolin.md`, `absurd-durable-workflows.md`, `agent-primitive-and-actions.md`,
   `reusable-workflows.md`) — see `docs/README.md` for the index.
+
+## OpenWiki
+
+This repository has documentation located in the /openwiki directory.
+
+Start here:
+- [OpenWiki quickstart](openwiki/quickstart.md)
+
+OpenWiki includes repository overview, architecture notes, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+When working in this repository, read the OpenWiki quickstart first, then follow its links to the relevant architecture, workflow, domain, operation, and testing notes.

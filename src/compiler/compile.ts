@@ -342,6 +342,62 @@ function applyOutputRewrites(job: PlannedJob, byBase: Map<string, Record<string,
   }
 }
 
+/**
+ * A plain (`steps:`) matrix job fans out into one leg per cell (`build::node-20`,
+ * `build::node-22`, …), so its outputs are ambiguous when referenced by the *base*
+ * id: the runtime keys the `needs` context by leg id, never the base. Pass 3
+ * rewrites a dependent's `needs:` array to the concrete leg ids, but it can't
+ * rewrite a `${{ needs.<base>.outputs.* }}` expression (which leg's value?) — so at
+ * runtime that interpolation throws a confusing "missing output" (the output IS
+ * declared, just on the legs) and an `if: needs.<base>.result` silently resolves to
+ * undefined and skips the dependent. Reject the reference at compile time instead,
+ * mirroring the reusable path's `assertNoMatrixOutputs`.
+ */
+function assertNoMatrixBaseRefs(spec: WorkflowSpec): void {
+  const matrixBases = new Set(
+    Object.entries(spec.jobs)
+      .filter(([, j]) => j.uses === undefined && j.strategy?.matrix)
+      .map(([id]) => id),
+  );
+  if (matrixBases.size === 0) return;
+
+  for (const [jobId, job] of Object.entries(spec.jobs)) {
+    const deps = (job.needs ?? []).filter((d) => matrixBases.has(d));
+    if (deps.length === 0) continue;
+    const texts = referenceableTexts(job);
+    for (const base of deps) {
+      // Job ids are `[A-Za-z_][\w-]*` (no regex metachars), and the trailing `.`
+      // keeps `needs.build` from matching `needs.buildx`.
+      const re = new RegExp(`\\bneeds\\.${base}\\.(outputs\\.[A-Za-z_][\\w-]*|result)\\b`);
+      if (texts.some((t) => re.test(t))) {
+        throw new WorkflowCompileError(
+          `job "${jobId}" references needs.${base}.* but "${base}" is a matrix job — its outputs/result ` +
+            `are ambiguous across legs (one set per matrix cell). Reference a specific leg, or make "${base}" non-matrix.`,
+        );
+      }
+    }
+  }
+}
+
+/** Every string a job exposes to `${{ }}` interpolation or `if:`/`when:` conditions
+ *  — i.e. everywhere a `needs.<base>.*` reference could surface at runtime. */
+function referenceableTexts(job: WorkflowSpec["jobs"][string]): string[] {
+  const texts: string[] = [];
+  const strings = (rec: Record<string, unknown> | undefined): void => {
+    for (const v of Object.values(rec ?? {})) if (typeof v === "string") texts.push(v);
+  };
+  if (job.if !== undefined) texts.push(job.if);
+  strings(job.outputs);
+  strings(job.with);
+  for (const st of job.steps ?? []) {
+    if (st.run !== undefined) texts.push(st.run);
+    if (st.if !== undefined) texts.push(st.if);
+    strings(st.env);
+    strings(st.with);
+  }
+  return texts;
+}
+
 /** Compile a validated spec into an execution plan, binding any provided inputs. */
 export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): ExecutionPlan {
   const inputs = resolveInputs(spec.inputs, opts.inputs ?? {}, opts._deferredInputs);
@@ -353,6 +409,10 @@ export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): Executio
       `reusable-workflow nesting too deep (> ${REUSABLE_DEPTH_CAP}): ${(opts._chain ?? []).join(" -> ")}`,
     );
   }
+
+  // Reject `needs.<matrixBase>.outputs.*` / `.result` refs up front — ambiguous
+  // across legs, and otherwise a confusing runtime failure (see the helper).
+  assertNoMatrixBaseRefs(spec);
 
   // Pass 1: expand each base job into its legs (matrix fan-out; a non-matrix or
   // `uses:` job yields one leg).

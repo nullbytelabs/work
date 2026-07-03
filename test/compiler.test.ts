@@ -377,3 +377,82 @@ jobs:
     assert.deepEqual(leg.outputs, { used: "20" });
   });
 });
+
+describe("compile — matrix base references (ambiguous across legs)", () => {
+  const build = `
+  build:
+    strategy:
+      matrix:
+        node: [20, 22]
+    outputs: { version: "\${{ matrix.node }}" }
+    steps: [{ run: "true" }]`;
+
+  it("rejects a dependent that reads needs.<matrixJob>.outputs.* in a step", () => {
+    assert.throws(
+      () =>
+        plan(`name: w\njobs:${build}
+  deploy:
+    needs: [build]
+    steps:
+      - run: 'echo \${{ needs.build.outputs.version }}'
+`),
+      (e) => e instanceof WorkflowCompileError && /"build" is a matrix job/.test(e.message),
+    );
+  });
+
+  it("rejects an if: needs.<matrixJob>.result condition", () => {
+    assert.throws(
+      () =>
+        plan(`name: w\njobs:${build}
+  deploy:
+    needs: [build]
+    if: needs.build.result == 'success'
+    steps: [{ run: "true" }]
+`),
+      (e) => e instanceof WorkflowCompileError && /"build" is a matrix job/.test(e.message),
+    );
+  });
+
+  it("still allows depending on a matrix job for ordering (no outputs/result ref)", () => {
+    const p = plan(`name: w\njobs:${build}
+  deploy:
+    needs: [build]
+    steps: [{ run: "true" }]
+`);
+    assert.deepEqual(p.jobs["deploy"]!.needs, ["build::node-20", "build::node-22"]);
+  });
+
+  it("still allows referencing a NON-matrix dependency's outputs", () => {
+    const p = plan(`name: w
+jobs:
+  build:
+    outputs: { version: "1" }
+    steps: [{ run: "true" }]
+  deploy:
+    needs: [build]
+    steps:
+      - run: 'echo \${{ needs.build.outputs.version }}'
+`);
+    assert.match(p.jobs["deploy"]!.steps[0]!.run!, /needs\.build\.outputs\.version/);
+  });
+
+  it("does not false-match a job whose id is a prefix of the matrix job", () => {
+    // deploy reads the NON-matrix `build`'s output while also ordering on matrix `buildx`.
+    const p = plan(`name: w
+jobs:
+  build:
+    outputs: { version: "1" }
+    steps: [{ run: "true" }]
+  buildx:
+    strategy:
+      matrix:
+        node: [20]
+    steps: [{ run: "true" }]
+  deploy:
+    needs: [build, buildx]
+    steps:
+      - run: 'echo \${{ needs.build.outputs.version }}'
+`);
+    assert.match(p.jobs["deploy"]!.steps[0]!.run!, /needs\.build\.outputs\.version/);
+  });
+});
