@@ -634,16 +634,23 @@ export async function startWebServer(opts: StartWebServerOptions): Promise<WebSe
     if (!gate) return;
     const { secret, mode } = gate;
 
-    // Opt-in gate (defense-in-depth), before buffering any body: the target
-    // workflow must itself declare `on: webhook`, so a config entry alone can't
-    // make an un-opted workflow remotely triggerable.
-    const opted = await loadOptedInSpec(name, entry, res, sourceIp);
-    if (!opted) return;
-    const { spec, layout } = opted;
-
+    // Authenticate BEFORE touching the target workflow. loadOptedInSpec reads +
+    // parses the workflow and, on a parse error, discloses the message inline (400)
+    // and writes an audit row — doing that pre-auth would leak that the hook exists
+    // (and how its workflow is broken) and let an unauthenticated caller spam the
+    // audit log. Bearer is header-only; HMAC reads the (capped) body — either way no
+    // workflow I/O happens until the caller is authenticated. Keeps the file's
+    // documented fail-closed, non-disclosing posture.
     const auth = await authorizeHook({ name, entry, secret, mode, req, res, sourceIp });
     if (!auth) return;
     const raw = auth.raw;
+
+    // Opt-in gate (defense-in-depth): the target workflow must itself declare
+    // `on: webhook`, so a config entry alone can't make an un-opted workflow
+    // remotely triggerable.
+    const opted = await loadOptedInSpec(name, entry, res, sourceIp);
+    if (!opted) return;
+    const { spec, layout } = opted;
 
     // Dedupe an identical re-delivery (retry / repeat send) within the window —
     // return the original run, start nothing. Keyed on the authenticated raw body.

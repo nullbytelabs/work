@@ -22,7 +22,7 @@ export class WorkflowCompileError extends Error {
 // with inputs.ts / expr.ts are resolved by the time these are called.
 import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
 import { parseRunsOn } from "./runs-on.ts";
-import { interpolate } from "./expr.ts";
+import { interpolate, expressionBodies } from "./expr.ts";
 import { expandMatrix, cellId, cellLabel, type MatrixCell } from "./matrix.ts";
 import { resolveMachine } from "./machines.ts";
 import { inlineCall, rewriteOutputRefs, REUSABLE_DEPTH_CAP, type InlineResult, type ResolveWorkflow } from "./reusable.ts";
@@ -364,12 +364,12 @@ function assertNoMatrixBaseRefs(spec: WorkflowSpec): void {
   for (const [jobId, job] of Object.entries(spec.jobs)) {
     const deps = (job.needs ?? []).filter((d) => matrixBases.has(d));
     if (deps.length === 0) continue;
-    const texts = referenceableTexts(job);
+    const { exprBodies, conditions } = referenceableRefs(job);
     for (const base of deps) {
       // Job ids are `[A-Za-z_][\w-]*` (no regex metachars), and the trailing `.`
       // keeps `needs.build` from matching `needs.buildx`.
       const re = new RegExp(`\\bneeds\\.${base}\\.(outputs\\.[A-Za-z_][\\w-]*|result)\\b`);
-      if (texts.some((t) => re.test(t))) {
+      if (exprBodies.some((b) => re.test(b)) || conditions.some((c) => re.test(c))) {
         throw new WorkflowCompileError(
           `job "${jobId}" references needs.${base}.* but "${base}" is a matrix job — its outputs/result ` +
             `are ambiguous across legs (one set per matrix cell). Reference a specific leg, or make "${base}" non-matrix.`,
@@ -379,23 +379,33 @@ function assertNoMatrixBaseRefs(spec: WorkflowSpec): void {
   }
 }
 
-/** Every string a job exposes to `${{ }}` interpolation or `if:`/`when:` conditions
- *  — i.e. everywhere a `needs.<base>.*` reference could surface at runtime. */
-function referenceableTexts(job: WorkflowSpec["jobs"][string]): string[] {
-  const texts: string[] = [];
-  const strings = (rec: Record<string, unknown> | undefined): void => {
-    for (const v of Object.values(rec ?? {})) if (typeof v === "string") texts.push(v);
+/**
+ * A job's `needs.*`-carrying references, split by how they're written — because a
+ * bare `needs.<base>.result` means different things in different fields:
+ *   - `exprBodies` — the trimmed bodies of every `${{ }}` span in run/env/with/
+ *     outputs. In these fields a `needs.<base>.*` reference is ONLY live inside a
+ *     span; bare text (a shell token, a prompt sentence mentioning `needs.x.result`)
+ *     is a literal and must NOT trip the guard. So we scan span bodies, not raw text.
+ *   - `conditions` — raw `if:`/`when:` strings (job + step), which DO support a bare
+ *     `needs.<base>.result` condition (and a `${{ }}`-wrapped one), so the whole
+ *     string is scanned.
+ */
+function referenceableRefs(job: WorkflowSpec["jobs"][string]): { exprBodies: string[]; conditions: string[] } {
+  const exprBodies: string[] = [];
+  const conditions: string[] = [];
+  const spansOf = (rec: Record<string, unknown> | undefined): void => {
+    for (const v of Object.values(rec ?? {})) if (typeof v === "string") exprBodies.push(...expressionBodies(v));
   };
-  if (job.if !== undefined) texts.push(job.if);
-  strings(job.outputs);
-  strings(job.with);
+  if (job.if !== undefined) conditions.push(job.if);
+  spansOf(job.outputs);
+  spansOf(job.with);
   for (const st of job.steps ?? []) {
-    if (st.run !== undefined) texts.push(st.run);
-    if (st.if !== undefined) texts.push(st.if);
-    strings(st.env);
-    strings(st.with);
+    if (st.run !== undefined) exprBodies.push(...expressionBodies(st.run));
+    if (st.if !== undefined) conditions.push(st.if);
+    spansOf(st.env);
+    spansOf(st.with);
   }
-  return texts;
+  return { exprBodies, conditions };
 }
 
 /** Compile a validated spec into an execution plan, binding any provided inputs. */

@@ -98,6 +98,28 @@ jobs:
     assert.equal(result.jobs.find((j) => j.id === "first")!.status, "failure");
     assert.equal(result.jobs.find((j) => j.id === "second")!.status, "skipped");
   });
+
+  // Regression: a step whose expression can't resolve (a missing needs output —
+  // deterministic, thrown by interpolate BEFORE target.run) is a TERMINAL error,
+  // not a resumable tear-out. It must reach a real `failure`, not be misclassified
+  // as JobInterrupted → a run stuck `interrupted` forever (re-running rethrows).
+  it("a missing-output interpolation error is a terminal failure, not an interruption", async () => {
+    const { result } = await runWorkflow(`
+name: badref
+jobs:
+  first:
+    steps: [{ run: "true" }]
+  second:
+    needs: [first]
+    steps:
+      - name: read
+        run: 'echo \${{ needs.first.outputs.missing }}'
+`);
+    assert.equal(result.status, "failure", "run terminates failure, never 'interrupted'");
+    assert.notEqual(result.status, "interrupted");
+    assert.equal(result.jobs.find((j) => j.id === "first")!.status, "success");
+    assert.equal(result.jobs.find((j) => j.id === "second")!.status, "failure");
+  });
 });
 
 describe("pipeline — ordering and data flow", () => {

@@ -455,4 +455,44 @@ jobs:
 `);
     assert.match(p.jobs["deploy"]!.steps[0]!.run!, /needs\.build\.outputs\.version/);
   });
+
+  // Regression: the guard must only fire on a LIVE reference. Bare `needs.build.result`
+  // text in run/env/with/outputs (a shell token, prose, a prompt) is a literal, not a
+  // `${{ }}` expression — it must NOT be rejected. (Only if:/when: support bare conditions.)
+  it("does not false-positive on bare needs.<matrixJob>.result prose in run/env/with/outputs", () => {
+    const p = plan(`name: w
+jobs:
+  build:
+    strategy: { matrix: { node: [20, 22] } }
+    steps: [{ run: "true" }]
+  report:
+    needs: [build]
+    outputs: { note: "needs.build.result is documented here" }
+    steps:
+      - run: 'echo "the syntax needs.build.result gates jobs"'
+        env: { NOTE: "see needs.build.result docs" }
+      - uses: work/agent
+        with: { prompt: "explain how needs.build.result works" }
+`);
+    // Compiles fine — all four are bare literal text, not live spans.
+    assert.ok(p.jobs["report"]);
+  });
+
+  it("still rejects a real ${{ needs.<matrixJob>.outputs.* }} span even amid literal text", () => {
+    assert.throws(
+      () =>
+        plan(`name: w
+jobs:
+  build:
+    strategy: { matrix: { node: [20, 22] } }
+    outputs: { version: "\${{ matrix.node }}" }
+    steps: [{ run: "true" }]
+  deploy:
+    needs: [build]
+    steps:
+      - run: 'echo "prose then \${{ needs.build.outputs.version }} live"'
+`),
+      (e) => e instanceof WorkflowCompileError && /"build" is a matrix job/.test(e.message),
+    );
+  });
 });

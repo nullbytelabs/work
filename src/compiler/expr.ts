@@ -325,12 +325,31 @@ export function walkPath(root: unknown, segments: Segment[]): unknown {
  *   - `null` / `undefined` (missing) → "" (empty string)
  *   - a scalar (string/number/boolean) → `String(value)`
  *   - any non-scalar (object/array, incl. the whole `${{ event }}`) → `JSON.stringify(value)`
+ *
+ * Every string is passed through `neutralizeExpressionOpeners` first — `event` is
+ * the ONE untrusted context root (an internet-facing webhook body), and its values
+ * bake into plan strings at compile time that the runtime later re-interpolates
+ * with `needs`/`steps`/`secrets` in scope. Without neutralization, a payload field
+ * whose value is `${{ secrets.token }}` would become a live deferred expression
+ * and resolve to the real secret at runtime (the GHA `pull_request_target`
+ * injection class) — with open egress carrying it anywhere.
  */
 function stringifyValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   const t = typeof value;
-  if (t === "string") return value as string;
+  if (t === "string") return neutralizeExpressionOpeners(value as string);
   if (t === "number" || t === "boolean") return String(value);
   // object | array (functions/symbols won't occur in JSON payloads)
-  return JSON.stringify(value);
+  return neutralizeExpressionOpeners(JSON.stringify(value));
+}
+
+/**
+ * Break every `${{` in untrusted text so it can never re-form a `${{ … }}` span
+ * in the interpolated output. The inserted space (`${ {`) keeps the text readable
+ * while making it unmatchable by `EXPR` (which requires the literal `${{` pair) —
+ * and the replacement can't recombine with adjacent text into a new opener, since
+ * every original `${{` is consumed and `${ {` never ends in `$` or `${`.
+ */
+function neutralizeExpressionOpeners(s: string): string {
+  return s.replaceAll("${{", "${ {");
 }
