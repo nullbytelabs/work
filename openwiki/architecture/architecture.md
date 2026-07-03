@@ -32,13 +32,39 @@ The spec is **completely runtime-agnostic** — it describes intent only. The `o
 
 `compile(spec, opts)` produces an `ExecutionPlan` via a 5-pass compilation:
 
-1. **Matrix expansion** (`matrix.ts`) — Cartesian product + `include`/`exclude` (GHA semantics)
-2. **Reusable inlining** (`reusable.ts`) — `uses: workflow/<name>` callees are resolved, recursively compiled, and spliced into the flat plan
+1. **Matrix expansion** (`matrix.ts`) — Cartesian product + `include`/`exclude` (GHA semantics). `exclude` is applied before `include`. An `include` entry extends a matching cell with extra keys (without overwriting an axis value), or appends a standalone cell when it matches nothing. An axis-less matrix starts empty and is defined entirely by `include`. Each cell becomes a `PlannedJob` with id `<base>::<cell>` (path-safe).
+2. **Reusable inlining** (`reusable.ts`) — `uses: workflow/<name>` callees are resolved, recursively compiled, and spliced into the flat plan. A `with:` value containing `${{ needs.* }}` is marked **deferred** — passed through verbatim (not type-checked), resolving at runtime through the callee's inherited `needs`. `steps.*` in `with:` is rejected (a reusable call has no steps).
 3. **Step emission** — each job's steps are emitted with interpolated env
 4. **Splice inlined jobs** — single-job callee adopts the call's id; multi-job callee gets namespaced `<call>__<subjob>` ids
 5. **Output reference rewriting** — output expressions are rewired to the inlined ids
 
 `topoSort(jobs)` uses Kahn's algorithm with **deterministic alphabetical tie-breaking** — critical for replay-stable orchestration.
+
+### The `ExecutionPlan` (`plan.ts`)
+
+The plan is the seam between "what to run" (the spec) and "how durably / where" (a Runtime + ExecutionTarget). It is fully runtime-agnostic.
+
+Key types:
+- `ExecutionPlan` — `name`, `jobs` (id → `PlannedJob`), `jobOrder` (topological), resolved `inputs`, resolved `event` payload, `warnings` (non-fatal authoring warnings surfaced on stderr)
+- `PlannedJob` — `id` (`<base>::<cell>` for a matrix leg), `title`, `runsOn`, `machine` (`ResolvedMachine`), `needs`, `if`, `matrix` cell, `steps`, `outputs`
+- `PlannedStep` — `name` (`<jobId>/<stepId-or-index>`), `title`, `id`, `run`/`uses`, `with`, `if`, `continueOnError`, resolved `env` (workflow ← job ← step, may carry deferred expressions)
+
+The `event` payload rides along on the plan so the runtime can evaluate `event.*` in deferred `if:`/`when:` conditions — `${{ event.* }}` references in `run:`/`env:`/`with:`/`outputs:` strings are baked at compile time like `inputs`, but `if:`/`when:` is a runtime evaluation.
+
+Before the passes run, `assertNoMatrixBaseRefs` rejects `needs.<matrixJob>.outputs.*` / `.result` references up front — a matrix job fans out into one leg per cell, so its outputs are ambiguous when keyed by the base id (the runtime keys `needs` by leg id). This mirrors `assertNoMatrixOutputs` on the reusable-workflow path. See [Workflow Syntax — Expressions](../workflows/workflow-syntax.md#expressions).
+
+### Machine Sizing (`machines.ts`)
+
+`machine:` resolves to a concrete `ResolvedMachine` (cpus + qemu-syntax memory) stored on each `PlannedJob`. Four named catalog types:
+
+| Type | vCPU | RAM |
+|---|---|---|
+| `small` | 2 | 2G |
+| `medium` (default) | 2 | 8G |
+| `large` | 4 | 12G |
+| `xlarge` | 8 | 24G |
+
+A custom spec (`machine: { cpus: 8, memory: 16G }`) may set either dimension — an unset one inherits from `medium`. The default is `medium` (8G) because knip's parser (oxc) eagerly reserves a single ~6 GiB `ArrayBuffer` per parse; the reservation must fit under the guest's commit limit or knip dies at `new ArrayBuffer` with "Array buffer allocation failed." Disk sizing is not exposed in the machine spec — gondolin's `rootfs.size` mechanism (guest-side `resize2fs` at boot) is not wired into `machines.ts`, so there is no `disk:` dimension to set. See [Workflow Syntax — Machine Sizing](../workflows/workflow-syntax.md#machine-sizing).
 
 ### Two-Phase Expression Resolution (`expr.ts`)
 
@@ -48,6 +74,36 @@ Expressions (`${{ ... }}`) are resolved in two phases:
 - **Runtime** (left intact for later): `needs.*`, `steps.*`, `secrets.*`
 
 Unknown roots always error — never silently pass. `condition.ts` has a hand-written tokenizer + recursive-descent parser for `if:`/`when:` (no `eval`, no deps).
+
+### Conditionals Grammar
+
+The condition engine is a pragmatic subset of the GitHub-Actions expression language:
+
+- **Context access**: `inputs.<name>`, `matrix.<axis>`, `needs.<job>.result`, `needs.<job>.outputs.<key>`, `steps.<id>.result`, `steps.<id>.outputs.<key>`, `steps.<id>.outcome`, `steps.<id>.exitCode`, `event.<path>` (including array indexing: `event.alerts[0].labels.severity`).
+- **Literals**: single/double-quoted strings, numbers, `true`/`false`/`null`.
+- **Operators**: `==` `!=` `&&` `||` `!` and parentheses. Equality is loose — numeric when both operands look numeric, else string.
+- **Status functions**: `success()` `failure()` `always()` `cancelled()`.
+
+A condition may be wrapped in `${{ ... }}` (as in README examples) or written bare — both are accepted. Anything outside this grammar (unknown context root, comparison operators like `<`, helpers like `contains()`) raises a clear error rather than silently passing, so an unsupported condition is never mistaken for `true`.
+
+**`secrets.*` is deliberately absent from the condition context.** Secrets are available in `run:`/`env:`/`with:` interpolation but **not** in `if:`/`when:` conditions or job-output interpolation — this prevents a secret from leaking via a skip-pattern branch or persisting into a journaled job output. The runtime threads `secrets` into the expression context (`exprCtx`) but omits it from the condition context (`condCtx`) and job-output interpolation (see [Durable Execution](../runtime/durable-execution.md#secrets-isolation)).
+
+### Input Resolution (`inputs.ts`)
+
+`resolveInputs(declared, provided, deferred?)` validates provided inputs against the declared spec and produces concrete values:
+
+- **Strict typing — no coercion.** A string `"36"` is rejected for a `number` input; mismatches are errors, not silent conversions.
+- **Defaults** are applied when an input is not provided. A **required** input that's missing (and has no default) throws.
+- **Optional + unprovided + no default** → a type-appropriate empty sentinel: `0` for number, `false` for boolean, `""` for string. These sentinels are **not** constraint-validated — only inputs that were actually supplied (or have an explicit default) are checked against `options`/`pattern`.
+- **`options`** — value must be one of the listed options.
+- **`pattern`** — a regex the value must match (string inputs only).
+- **Deferred inputs** — when a reusable-workflow caller passes `${{ needs.* }}` through `with:`, the input is marked deferred: its value isn't known at compile time, so it's passed through verbatim as a string for substitution into the callee, where `${{ inputs.<name> }}` expands to that expression and resolves at runtime.
+
+Unknown provided keys (not declared in `inputs:`) are rejected up front.
+
+### Prototype-Pollution Hardening
+
+Input, `needs`, and `steps` lookups all use `Object.hasOwn` rather than `in` or a bare index — a key colliding with an `Object.prototype` member (`toString`, `constructor`, `__proto__`, …) reads as missing/undeclared instead of resolving to the inherited function. This matters because untrusted webhook payloads flow through `event.*` path access (`walkPath`); the same guard is applied in `resolveInputs`, `resolveNeeds`, `resolveSteps`, `addJob`, and `parseOutputProducer`. See [Workflow Syntax — Expressions](../workflows/workflow-syntax.md#expressions).
 
 ### Filesystem-Pure Compiler
 

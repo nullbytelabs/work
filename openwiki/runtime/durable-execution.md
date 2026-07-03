@@ -19,6 +19,14 @@ interface Runtime {
 
 `RunHooks` is the lifecycle event stream: `onWorkflowStart`, `onJobStart`, `onStepStart`, `onOutput`, `onStepEnd`, `onJobEnd`, `onWorkflowEnd`, plus `onJobPhaseStart/End` (stage/provision/teardown). The TUI presenter and web SSE sink both implement `RunHooks`.
 
+### Job Phases — `stage` / `provision` / `teardown`
+
+Each job is bracketed with three sub-phase spans (`withJobPhase`):
+
+- **`stage`** — staging the checkout into the workdir like a fresh `git checkout`: never carries a foreign `node_modules` (a job installs its own — copying one across platforms breaks native deps) or `.git`.
+- **`provision`** — booting the micro-VM. A provision failure produces a synthetic step result so the failure is attributable without a real step.
+- **`teardown`** — disposing the target. **Best-effort and never rethrows**: a `vm.close()` failure must not overwrite an in-flight `JobInterrupted` (the caller's `finally` is propagating it) — were it to, `runJobInTask`'s catch would see a non-`JobInterrupted` error, return a terminal `failure` instead of re-throwing, and silently break durable resume. A dispose failure is recorded on the teardown span for diagnosis and then swallowed; the VM is already going away.
+
 ### How It Works
 
 - Each **job** is its own durable Absurd task (idempotency key: `${runId}:${jobId}`).
@@ -26,6 +34,34 @@ interface Runtime {
 - The whole run's DAG walk runs inside a **durable orchestrator task** (separate queue from job tasks to avoid deadlock).
 - Jobs run in parallel (concurrency cap: 16) via worker tasks on a dedicated `JOBS_QUEUE`.
 - **Heartbeats** every 150s (claim timeout 600s) keep long-running agent steps alive.
+
+### Fine-Grained Scheduling
+
+The DAG walk is not wave-barriered: a job spawns the instant its dependencies resolve, so a long fan-out doesn't wait for the slowest sibling of the previous level. The orchestrator's `Promise.all` over `jobOrder` resolves as each job settles; a job whose task ends `failed` (an interruption) throws `JobInterrupted` so the orchestrator task fails and a later re-spawn re-drives the whole run.
+
+### Job `if:` Gating
+
+With no `if:`, a job runs only if **every** dependency succeeded — the default. An `if:` takes over entirely, enabling `always()` / `failure()` to run a job after an upstream failure. A malformed `if:` produces a synthetic error step (`jobConditionError`) rather than a silent skip. Note `needs` is keyed by leg id for matrix jobs — see the compile-time `assertNoMatrixBaseRefs` guard in [Architecture](../architecture/architecture.md).
+
+### `continue-on-error`
+
+A step with `continue-on-error: true` records its failure outcome (visible in `steps.<id>.result` / `.outcome` / `.exitCode`) but does **not** set the job's `failed` flag — the job carries on and can still succeed. This pairs with output capture below: the step can run a tool, record its combined output, exit non-zero, and still expose that output to a consumer while preserving the real failure in `status`.
+
+### Secrets Isolation
+
+Secrets are available in `run:`/`env:`/`with:` interpolation but **deliberately not** threaded into the condition context (`condCtx`) or job-output interpolation. This prevents a secret from leaking via a skip-pattern branch (e.g. `if: ${{ secrets.token != '' }}` would otherwise reveal whether a secret is set) or persisting into a journaled job output. The runtime constructs `exprCtx` with `secrets` but builds `condCtx` without them (`src/runtime/absurd/runtime.ts`).
+
+### `StepInterrupted` — `uses:` Interruption Symmetry
+
+A `run:` step gets the resumable interruption path for free: a `target.run` rejection (a VM tear-out) propagates and becomes a `JobInterrupted`. A `uses:` step's handler would otherwise swallow the same rejection into a terminal failure. So the `uses:` dispatcher wraps `exec` to throw `StepInterrupted` (`src/runtime/types.ts`) on a `target.run` rejection, and every handler's `catch` re-throws it (never `fail()`s it) — so the run is recorded `interrupted` (resumable), not `failure`. This `run:`/`uses:` symmetry is what durable resume depends on.
+
+### Output Capture (`src/runtime/output.ts`)
+
+A `run:` step's `$WORK_OUTPUT` file lives at `target.workspacePath/.work-output-<stepName>` (where `<stepName>` is sanitized: non-word characters → `_`) and is **pre-deleted before each run** so a stale file from a prior attempt can't leak outputs into a resumed step. After the command finishes, the file is parsed (`parseOutputFile`) with GitHub-Actions `$GITHUB_OUTPUT` semantics: `key=value` for single-line values and a heredoc block (`key<<DELIM` … `DELIM`) for multi-line values; a later write to the same key wins. Keys are trimmed; values are **not** trimmed (leading/trailing whitespace is preserved). Lines with no `=` or an empty key are silently skipped. The heredoc delimiter line must exactly match the declared delimiter.
+
+**Outputs are captured regardless of exit code** (GitHub captures `$GITHUB_OUTPUT` either way). This is what lets a `continue-on-error` step that runs a tool, records its combined output, and exits non-zero still expose that output to a consumer — the step's real failure is preserved in `status`. The same ABI is shared by JS actions (`runGuestNode`), so a user-space action writes outputs identically.
+
+See [Workflow Syntax — `$WORK_OUTPUT`](../workflows/workflow-syntax.md#work_output) for the author-facing syntax.
 
 ### Interrupted vs. Failure
 
@@ -58,7 +94,7 @@ The orchestrator runs on its own queue, separate from the `JOBS_QUEUE`. This pre
 |---|---|
 | `work resume <id>` | Re-invoke `run()` with the same `runId`. Finished jobs are reused (memoized); interrupted jobs are re-driven. |
 | `work rerun <id>` | Fresh run with the same inputs but a **new** `runId`. Everything re-executes. |
-| `work retry <id>` | Same `runId`, but `resetFailedJobs()` (`src/runtime/absurd/retry-failed.ts`) clears **only failed** job tasks' journal + the orchestrator task. Passing jobs are reused; only failed ones re-run. Skipped downstream jobs never spawned tasks. |
+| `work retry <id>` | Same `runId`, but `resetFailedJobs()` (`src/runtime/absurd/retry-failed.ts`) clears **only failed** job tasks' journal + the orchestrator task. A failed job is detected as either `state === "failed"` (an interruption) or `state === "completed" && status === "failure"` (a clean non-zero exit). Passing jobs are reused; only failed ones re-run. Skipped downstream jobs never spawned tasks. Returns `jobsReset` — the cleared job IDs (empty = nothing failed). |
 
 `applyRecover()` in `src/cli.ts` looks up the prior run's workflow + inputs from history and folds them into the run args.
 
@@ -81,8 +117,9 @@ interface ExecutionTarget {
 `GondolinTarget` (`src/targets/gondolin.ts`) is the **only production target**. It runs steps inside a hardware-virtualized micro-VM (QEMU via `@earendil-works/gondolin`).
 
 - Gondolin is an **optional dependency** — loaded **lazily** via dynamic `import()` inside `provision()`. The module is importable and tests pass without it.
-- Guest workspace mounted at `/workspace` (read-write).
-- Egress policy: deny-by-default with `allowedHosts`, `allowedInternalHosts`, `hostResolves` (dial pins), and `secrets` (injected into outbound headers **host-side only**).
+- Guest workspace mounted at `/workspace` (read-write) via `RealFSProvider` (host filesystem passthrough).
+- Commands run with `/bin/sh -lc` (login shell) — the `-l` flag sets up PATH so installed tools resolve.
+- Egress policy: deny-by-default with `allowedHosts`, `allowedInternalHosts`, `hostResolves` (dial pins), and `secrets` (injected into outbound headers **host-side only**). **Network mediation is conditional** — `httpHooks` are only installed when one of `allowedHosts`, `allowedInternalHosts`, or `secrets` is configured. A job with none of these gets **open outbound network** (no hooks installed), which is how a plain `run: npm install` reaches the registry. Mediation scopes *injected secrets* to their host; it is not a sandbox over general egress for trusted workflow steps.
 - `resolveImagePath` — lazily resolves/builds a `work:<image>` custom guest at provision time.
 
 **No host-execution target exists.** `runs-on: local` is explicitly rejected. Every job runs in the sandbox — this is a security-first decision.
@@ -118,10 +155,10 @@ All repositories ride the engine's generic `query` seam (their own `work.*` tabl
 
 | Repository | Table | Purpose |
 |---|---|---|
-| `RunRepository` | `work.runs` | Run metadata: id, workflow, status, trigger, timestamps, inputs, event, error |
-| `RunEventRepository` | `work.run_events` | Per-run event stream: `(run_id, seq)` → frame, for log replay |
+| `RunRepository` | `work.runs` | Run metadata: id, workflow, status, trigger, timestamps, inputs, `event` (resolved trigger payload, so `${{ event.* }}` survives resume/rerun), error. `listNonTerminal()` returns all running/queued/interrupted runs (unbounded, oldest-first) for boot-time reconciliation. `list()` defaults to 200 rows newest-first. |
+| `RunEventRepository` | `work.run_events` | Per-run event stream: `(run_id, seq)` → frame, for log replay. `has()` distinguishes a real past run from an unknown id. |
 | `ScheduleRepository` | `work.schedules` | Per-`(workflow, cron)` last-fired baseline for the scheduler |
-| `DeliveryRepository` | `work.webhook_deliveries` | Webhook delivery audit log (never payload/secret) |
+| `DeliveryRepository` | `work.webhook_deliveries` | Webhook delivery audit log (never payload/secret). `DeliveryResult` enum: `accepted` \| `duplicate` \| `unauthorized` \| `forbidden` \| `disabled` \| `not_opted_in` \| `too_large` \| `bad_request` \| `at_capacity` \| `test`. `listForHook()` defaults to 50 newest. |
 
 `RunStatus` = `queued | running | success | failure | interrupted`. `RunTrigger` = `dispatch | webhook | schedule`.
 
@@ -131,7 +168,7 @@ Timestamps are `bigint` epoch-ms (sidesteps timestamptz parsing). `on conflict d
 
 | Area | Key files |
 |---|---|
-| Runtime interface | `src/runtime/types.ts` |
+| Runtime interface | `src/runtime/types.ts` (`Runtime`, `RunHooks`, `StepInterrupted`, `UsesHandler`) |
 | AbsurdRuntime | `src/runtime/absurd/runtime.ts` |
 | AbsurdEngine | `src/runtime/absurd/engine.ts` |
 | Retry failed jobs | `src/runtime/absurd/retry-failed.ts` |

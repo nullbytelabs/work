@@ -57,10 +57,10 @@ jobs:
 | **`runs-on`** | The micro-VM guest image: `work:base` (capable default — git/jq/curl/node), `gondolin` (stock guest), or any custom `work:<image>`. Every job runs in a micro-VM. |
 | **`needs`** | `needs: [build]` — a job waits for its dependencies. Independent jobs run **in parallel**. |
 | **`env`** | Declared at workflow, job, or step level; inner scopes override outer. |
-| **Inputs** | `inputs:` declares typed params (`string`/`number`/`boolean`, with `required`/`default`/`options`/`pattern`). Pass at run time with `--inputs`, read via `${{ inputs.name }}`. |
+| **Inputs** | `inputs:` declares typed params (`string`/`number`/`boolean`, with `required`/`default`/`options`/`pattern`). Pass at run time with `--inputs`, read via `${{ inputs.name }`. Types are strict — no coercion (a string `"36"` is rejected for a `number`). An optional input with no default gets a type-appropriate empty sentinel (`0`/`false`/`""`). |
 | **Outputs** | A step writes `key=value` to `$WORK_OUTPUT`; a job re-exposes them via `outputs:`; downstream reads `${{ needs.<job>.outputs.<key> }}`. |
 | **Matrix** | `strategy.matrix:` fans a job out into one run per combination, with `include`/`exclude`; read the cell via `${{ matrix.<axis> }}`. |
-| **Conditionals** | `if:` (or `when:`) on a step or job — a false result skips it. Supports `inputs.*`, `matrix.*`, `needs.*`, `steps.*`, `==`/`!=`/`&&`/`||`/`!`, and `success()`/`failure()`/`always()`/`cancelled()`. |
+| **Conditionals** | `if:` (or `when:`) on a step or job — a false result skips it. Supports `inputs.*`, `matrix.*`, `needs.*`, `steps.*` (`.result`/`.outputs`/`.outcome`/`.exitCode`), `event.*` (incl. array indexing), `==`/`!=`/`&&`/`||`/`!`, and `success()`/`failure()`/`always()`/`cancelled()`. `secrets.*` is deliberately excluded from conditions to prevent leakage via skip patterns. |
 
 ## Expressions
 
@@ -69,7 +69,9 @@ jobs:
 - **Compile-time** (baked into plan): `inputs.*`, `matrix.*`, `event.*`
 - **Runtime** (resolved during execution): `needs.*`, `steps.*`, `secrets.*`
 
-Unknown roots always error — never silently pass. The expression parser and condition evaluator are hand-written (tokenizer + recursive-descent), no `eval`, no dependencies.
+Unknown roots always error — never silently pass. Prototype-member names (`toString`, `constructor`, `__proto__`, …) read as missing rather than slipping through — input, `needs`, and `steps` lookups all use `Object.hasOwn`, so a key colliding with an `Object.prototype` member is treated as undeclared, not resolved to the inherited function. The expression parser and condition evaluator are hand-written (tokenizer + recursive-descent), no `eval`, no dependencies.
+
+A downstream job **cannot** reference a matrix job's outputs or result by its base id — `needs.<matrixJob>.outputs.*` and `needs.<matrixJob>.result` are rejected at compile time (`assertNoMatrixBaseRefs` in `compile.ts`). A matrix job fans out into one leg per cell, so its outputs are ambiguous when keyed by the base id (the runtime keys the `needs` context by leg id, never the base). Reference a specific leg instead, or make the job non-matrix. This mirrors the same rule the reusable-workflow path applies to `workflow_call.outputs`.
 
 ### `$WORK_OUTPUT`
 
@@ -101,7 +103,7 @@ jobs:
       - run: echo "testing on ${{ matrix.os }} with node ${{ matrix.node }}"
 ```
 
-`expandMatrix()` (`src/compiler/matrix.ts`) computes the Cartesian product, then applies `exclude` (removes combinations) and `include` (adds extra combinations). Each cell becomes a separate `PlannedJob` with a concrete leg id.
+`expandMatrix()` (`src/compiler/matrix.ts`) computes the Cartesian product, then applies `exclude` (removes any cell matching all key/values of an exclude entry) and `include` (extends matching cells with extra keys without overwriting an axis value, or appends a standalone cell when it matches nothing). `exclude` runs before `include`. An axis-less matrix (only `include`) starts empty and is defined entirely by its `include` entries. Each cell becomes a separate `PlannedJob` with a concrete leg id (`<base>::<cell>`, path-safe).
 
 ## Reusable Workflows
 
@@ -120,6 +122,8 @@ The callee is **inlined at compile time** — resolved, recursively compiled, an
 - Single-job callee → adopts the call's id (collapse).
 - Multi-job callee → namespaced `<call>__<subjob>` ids.
 - Depth cap: 10 levels. Cycle detection prevents infinite recursion.
+
+A `workflow_call.outputs` value must be a **whole** `${{ jobs.<id>.outputs.<key> }}` span — a literal-wrapped value like `https://${{ jobs.host.outputs.h }}` is rejected at compile time (`reusable.ts`), because the exposed output can only carry the producer's raw value and the surrounding literal would be silently dropped.
 
 ## Triggers (`on:`)
 

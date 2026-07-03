@@ -69,15 +69,18 @@ work graph <file|name> [--format mermaid|dot|json|ascii] [--steps]
 work resume <id>          # continue an interrupted run
 work rerun <id>           # fresh run with same inputs
 work retry <id>           # re-run only failed jobs
-work runs [--status <s>]  # list run history
+work runs [--status <s>] [--full]  # list run history (--full prints the full UUID)
 work logs <id>            # replay a past run's log frames
 work serve [--port <n>]   # web console + webhooks + scheduler
-work init                 # scaffold a project
+work init [--global] [--include-skill]  # scaffold a project (or a global config)
 work create <noun> <name> # create workflow/image/webhook
-work doctor               # preflight checks
+work doctor [--json]      # preflight checks
+work version              # print the version
 ```
 
-Key flags: `--workspace` (project root), `--inputs` (typed params as JSON), `--config` (model config, default `./work.json`), `--workdir` (job staging dir), `--quiet`.
+Key flags: `--workspace` (project root), `--inputs` (typed params as JSON object), `--config` (model config, default `./work.json`; or `$WORK_CONFIG`), `--no-global` (skip the global config layer), `--workdir` (job staging dir), `--quiet`.
+
+**Run commands** accept the short 8-char ID prefix from `work runs` output (ambiguous prefix → error with suggestions). A bare `<workflow.yaml>` path runs ephemerally (no persistent store, no resume). A `.workflows/` project persists to `.workflows/db` — enabling `resume`, `retry`, `runs`, and `logs`. On an interrupted run, the CLI suggests `--resume`; on failure, it suggests `retry`. Exit code: `0` on success, `1` on failure or interruption.
 
 ## Configuration
 
@@ -104,6 +107,8 @@ Agent steps need a model configured in `work.json` (loaded from the working dire
 
 `apiKey` supports `$VAR` / `${VAR}` expansion — secrets stay in your environment. See [`work.example.json`](../work.example.json).
 
+`work.json` is **JSONC** (line/block comments and trailing commas allowed) and loaded in **layers**: an optional global file (`$XDG_CONFIG_HOME/work/work.json`, then `~/.config/work/`, then `~/.work/` as a read-only fallback) merged under the project file, with `--config` / `$WORK_CONFIG` overriding the project path and `--no-global` dropping the global layer. `providers`/`models`/`webhooks`/`secrets` merge by key; `defaultModel` and `observability` are last-writer-wins. Cross-references (model→provider, `defaultModel`→models, webhook workflow non-empty) are validated once after the merge. See [Configuration](operations/config.md) for the full config shape (`secrets`, `webhooks`, `observability` sub-toggles) and the two env-expansion modes.
+
 ## Documentation Sections
 
 | Section | What it covers |
@@ -113,6 +118,8 @@ Agent steps need a model configured in `work.json` (loaded from the working dire
 | [Agent Steps & Actions](agent/agent-steps.md) | The `work/agent` primitive, in-guest Pi execution, host-side key injection, the action system |
 | [Durable Execution & Targets](runtime/durable-execution.md) | AbsurdRuntime, checkpointing, resume/retry, PGLite, GondolinTarget, custom images |
 | [Serving, Triggers & Observability](operations/serve-and-triggers.md) | Web console, webhook/schedule triggers, run history, OpenTelemetry |
+| [Configuration](operations/config.md) | `work.json` shape, layered config, JSONC, `$VAR` expansion, secrets/webhooks/observability |
+| [CLI Tools](operations/cli-tools.md) | `work doctor` preflight checks, `work graph` DAG export, `work create`/`work init` scaffolding, TUI presenters |
 | [Development & Testing](development/development.md) | Commands, test tiers, structural reports, building/publishing, conventions, dogfooded CI |
 
 ## Key Design Principles

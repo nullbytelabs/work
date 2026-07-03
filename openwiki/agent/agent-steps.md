@@ -55,7 +55,7 @@ A standalone `.mjs` that runs in a **separate Node process inside the guest VM**
 
 ### The `work:pi` Image
 
-The `work:pi` image (`src/images/image-builtin/pi/build-config.json`) is `work:base` with `@earendil-works/pi-coding-agent` globally pre-installed. Agent steps reuse the baked-in Pi, skipping the ~30s npm install on every run.
+The `work:pi` image (`src/images/image-builtin/pi/build-config.json`) is `work:base` with `@earendil-works/pi-coding-agent@^0.79.1` globally pre-installed (via `npm install -g` in the image's `postBuild.commands`, with `NODE_PATH=/usr/local/lib/node_modules`). Agent steps reuse the baked-in Pi, skipping the ~30s npm install on every run. The guest exec env also sets `PI_SKIP_VERSION_CHECK=1`.
 
 ## Host-Side Key Injection & Egress
 
@@ -66,6 +66,8 @@ The `work:pi` image (`src/images/image-builtin/pi/build-config.json`) is `work:b
 1. Resolves the model → extracts `modelHostOf(baseUrl)` (refuses `*` wildcards — fail-closed).
 2. Creates a secret entry: `{ [modelKeyEnv(host)]: { hosts: [host], value: model.apiKey } }`.
 3. Multiple steps on the same host collapse to one entry; different providers get distinct host-scoped keys.
+
+> **`action/*` steps use the default model's key.** The egress resolver can't introspect inside composite actions to see which inner `work/agent` step uses which model, so an `action/*` step gets the *default model's* key. If an action wraps `work/agent` with a non-default `with.model`, the wrong key may be injected — an open limitation to be aware of.
 
 ### Security Model
 
@@ -87,7 +89,7 @@ An **action** is a project-owned directory (`<workflow-dir>/actions/<name>/`) wi
 
 | Kind | `runs.using` | How it runs |
 |---|---|---|
-| **JS action** | `node` | Runs an `index.mjs` in-guest via `runGuestNode()`. Env: `INPUT_<NAME>` for each input, `WORK_OUTPUT` for output capture. The action's code never runs on the host. |
+| **JS action** | `node` | Runs an `index.mjs` in-guest via `runGuestNode()`. Env: `INPUT_<NAME>` for each input, `WORK_OUTPUT` for output capture. The action's code never runs on the host. `npm install` runs in-guest only if a `package.json` exists. Only **declared** outputs (from `action.yaml`'s `outputs:`) are surfaced — undeclared `$WORK_OUTPUT` keys are silently ignored; declared-but-missing keys become `""`. |
 | **Composite action** | `composite` | A step bundle — each inner step is a `run:` command, a `uses: work/agent`, or a `uses:` of another action. The whole action runs as the caller's single durable `uses:` checkpoint. |
 
 ### Composite Actions
@@ -114,7 +116,7 @@ outputs:
     value: ${{ steps.agent.outputs.output }}
 ```
 
-Inner step outputs are stored by `step.id` and available to later steps via `${{ steps.<id>.outputs.<key> }}`. Agent telemetry from inner `work/agent` sub-steps is **bubbled up** via `mergeAgent()` — sums token usage across inner agent calls, keeps the first model — so a composite wrapping an agent still reports one `chat` span.
+Inner step outputs are stored by `step.id` and available to later steps via `${{ steps.<id>.outputs.<key> }}`. Composite `run:` step `env:` values are interpolated through `interpolate()`, same as `with:` values. Composite step output files use the naming `.work-output-composite-<n>`. Agent telemetry from inner `work/agent` sub-steps is **bubbled up** via `mergeAgent()` — sums token usage (including `cacheReadTokens`, `cacheCreationTokens`, `requests`) across inner agent calls, keeps the first model — so a composite wrapping an agent still reports one `chat` span.
 
 ### Builtin Actions
 
@@ -122,8 +124,8 @@ The engine ships two builtin composite actions (`src/actions/builtin/`), reached
 
 | Action | What it does |
 |---|---|
-| `work/checkout` | Installs git via `apk`, trusts gondolin's MITM CA, resolves `owner/name` shorthand to GitHub HTTPS, shallow-clones, outputs `ref` and `sha`. |
-| `work/install-node` | Downloads musl Node build, extracts into `/tmp/.work-node`, symlinks `node`/`npm`/`npx` into `/usr/local/bin` so later steps resolve the new version. Outputs `version`. |
+| `work/checkout` | Installs git via `apk`, trusts gondolin's MITM CA, resolves `owner/name` shorthand to GitHub HTTPS, shallow-clones, outputs `ref` and `sha`. Inputs: `repo` (required), `ref` (branch/tag), `path` (checkout subdirectory), `depth` (clone depth). Sets `safe.directory '*'` for git. |
+| `work/install-node` | Downloads musl Node build, extracts into `/tmp/.work-node`, symlinks `node`/`npm`/`npx` into `/usr/local/bin` so later steps resolve the new version. Outputs `version`. Arch detection: `x86_64`→`x64`, `aarch64`/`arm64`→`arm64`. **Note**: arm64 musl builds only exist for Node v24+. Runs `hash -r` after symlinking. |
 
 Both run through the same `runAction()` path as user-space actions.
 
@@ -133,7 +135,7 @@ Both run through the same `runAction()` path as user-space actions.
 steps:
   - uses: work/checkout
     with:
-      repository: owner/repo
+      repo: owner/repo
   - uses: action/review           # user-space action from .workflows/actions/review/
     with:
       prompt: Review the changes
