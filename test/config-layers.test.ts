@@ -11,7 +11,7 @@ import {
   globalConfigCandidates,
   resolveGlobalConfigPath,
   globalConfigWritePath,
-  type PiWorkflowsConfig,
+  type WorkConfig,
 } from "../src/config/index.ts";
 import { UserFacingError } from "../src/errors.ts";
 
@@ -33,13 +33,13 @@ describe("parsePartialConfig (shape only, no cross-refs)", () => {
 });
 
 describe("mergeConfig", () => {
-  const base: PiWorkflowsConfig = {
+  const base: WorkConfig = {
     providers: { fw: { baseUrl: "b", apiKey: "$K" } },
     models: { kimi: { provider: "fw", model: "m1" }, shared: { provider: "fw", model: "old" } },
     defaultModel: "kimi",
   };
   it("unions providers/models and lets the higher layer replace a colliding entry wholesale", () => {
-    const over: PiWorkflowsConfig = { providers: {}, models: { shared: { provider: "fw", model: "new" } } };
+    const over: WorkConfig = { providers: {}, models: { shared: { provider: "fw", model: "new" } } };
     const m = mergeConfig(base, over);
     assert.equal(m.models["shared"]!.model, "new"); // replaced
     assert.equal(m.models["kimi"]!.model, "m1"); // inherited

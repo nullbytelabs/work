@@ -511,7 +511,7 @@ shared-`engine` rule).
 
 ## 8. Config surface
 
-Extend `PiWorkflowsConfig` (`src/config/index.ts`) with an optional block, layered and
+Extend `WorkConfig` (`src/config/index.ts`) with an optional block, layered and
 `$VAR`-expanded like the rest of the config (so OTLP auth tokens come from the environment):
 
 ```jsonc

@@ -44,8 +44,8 @@ export function detectCI(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 export function selectPresenter(opts: SelectOptions): Presenter {
-  // Explicit override for testing / forcing a mode: PI_WORKFLOWS_TUI=1|0.
-  const override = process.env["PI_WORKFLOWS_TUI"];
+  // Explicit override for testing / forcing a mode: WORK_TUI=1|0.
+  const override = process.env["WORK_TUI"];
   if (opts.quiet) return new NullPresenter();
   const wantLayered = override === "1" || (override !== "0" && opts.isTTY && !opts.isCI);
   return wantLayered ? new LayeredPresenter(opts.out) : new BufferedPresenter(opts.out, opts.isCI);

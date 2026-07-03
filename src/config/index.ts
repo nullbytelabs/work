@@ -70,7 +70,7 @@ export interface ObservabilityConfig {
   metrics?: { enabled?: boolean };
 }
 
-export interface PiWorkflowsConfig {
+export interface WorkConfig {
   providers: Record<string, ProviderConfig>;
   models: Record<string, ModelConfig>;
   /** Model alias used when an agent step doesn't specify `with.model`. */
@@ -223,10 +223,10 @@ export function parseJsonc(text: string): unknown {
  * optional so a project layer can shrink to just `{ "defaultModel": "kimi" }`
  * once global supplies the catalog.
  */
-export function parsePartialConfig(raw: unknown): PiWorkflowsConfig {
+export function parsePartialConfig(raw: unknown): WorkConfig {
   if (!isObject(raw)) throw new UserFacingError("config must be a JSON object");
 
-  const config: PiWorkflowsConfig = {
+  const config: WorkConfig = {
     providers: parseProviders(raw),
     models: parseModels(raw),
   };
@@ -384,8 +384,8 @@ function parseSignalToggle(v: unknown, label: string): { enabled?: boolean } | u
  * a colliding entry replaced *wholesale* (predictable beats field-merge); an
  * omitted/empty map inherits the lower layer. `defaultModel` is last-writer-wins.
  */
-export function mergeConfig(base: PiWorkflowsConfig, over: PiWorkflowsConfig): PiWorkflowsConfig {
-  const merged: PiWorkflowsConfig = {
+export function mergeConfig(base: WorkConfig, over: WorkConfig): WorkConfig {
+  const merged: WorkConfig = {
     providers: { ...base.providers, ...over.providers },
     models: { ...base.models, ...over.models },
   };
@@ -409,7 +409,7 @@ export function mergeConfig(base: PiWorkflowsConfig, over: PiWorkflowsConfig): P
 }
 
 /** Cross-reference validation, run ONCE on the merged config. */
-export function validateConfig(config: PiWorkflowsConfig): PiWorkflowsConfig {
+export function validateConfig(config: WorkConfig): WorkConfig {
   for (const [alias, m] of Object.entries(config.models)) {
     if (!(m.provider in config.providers)) {
       throw new UserFacingError(`config.models.${alias} references unknown provider "${m.provider}"`);
@@ -429,7 +429,7 @@ export function validateConfig(config: PiWorkflowsConfig): PiWorkflowsConfig {
 }
 
 /** Parse + validate a single config object (shape + cross-refs). */
-export function parseConfig(raw: unknown): PiWorkflowsConfig {
+export function parseConfig(raw: unknown): WorkConfig {
   return validateConfig(parsePartialConfig(raw));
 }
 
@@ -496,8 +496,8 @@ export function resolveConfigLayers(cliPath: string | undefined, opts: { noGloba
  * are validated once on the merged result. Returns `undefined` when no layer
  * loaded (so a project with no config behaves exactly as before).
  */
-export async function loadMergedConfig(layers: ConfigLayer[]): Promise<PiWorkflowsConfig | undefined> {
-  let merged: PiWorkflowsConfig = { providers: {}, models: {} };
+export async function loadMergedConfig(layers: ConfigLayer[]): Promise<WorkConfig | undefined> {
+  let merged: WorkConfig = { providers: {}, models: {} };
   let loaded = false;
   for (const layer of layers) {
     if (!existsSync(layer.path)) {
@@ -523,12 +523,12 @@ export async function loadMergedConfig(layers: ConfigLayer[]): Promise<PiWorkflo
 }
 
 /** Load + validate a single config file. Throws on bad JSON/shape/cross-ref. */
-export async function loadConfig(path: string): Promise<PiWorkflowsConfig> {
+export async function loadConfig(path: string): Promise<WorkConfig> {
   return (await loadMergedConfig([{ path, required: true }]))!;
 }
 
 /** Resolve a model alias (or the default) to connection details. */
-export function resolveModel(config: PiWorkflowsConfig, alias?: string): ResolvedModel {
+export function resolveModel(config: WorkConfig, alias?: string): ResolvedModel {
   const key = alias ?? config.defaultModel;
   if (!key) {
     throw new UserFacingError("no model specified and config has no defaultModel");

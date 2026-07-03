@@ -22,7 +22,7 @@ import { spawnSync } from "node:child_process";
 import { createWorkHandler, GuestPiRunner, type AgentRunner } from "../src/agent/index.ts";
 import { runComposite, type LoadedAction } from "../src/actions/index.ts";
 import type { UsesContext, UsesResult } from "../src/runtime/index.ts";
-import type { PiWorkflowsConfig } from "../src/config/index.ts";
+import type { WorkConfig } from "../src/config/index.ts";
 
 // A minimal stand-in for @earendil-works/pi-coding-agent: just the surface the
 // wrapper touches, with a getSessionStats() returning known token totals.
@@ -42,7 +42,7 @@ export async function createAgentSession() {
 }
 `;
 
-const CONFIG: PiWorkflowsConfig = {
+const CONFIG: WorkConfig = {
   providers: { anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKey: "sk-test" } },
   models: { opus: { provider: "anthropic", model: "claude-opus-4" } },
   defaultModel: "opus",

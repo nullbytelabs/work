@@ -28,7 +28,7 @@ See [`work.example.json`](../../work.example.json) for a complete, self-document
 ## The Full Shape
 
 ```typescript
-interface PiWorkflowsConfig {
+interface WorkConfig {
   providers: Record<string, ProviderConfig>;   // required
   models: Record<string, ModelConfig>;          // required
   defaultModel?: string;                         // model alias for steps with no `with.model`

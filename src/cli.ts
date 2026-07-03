@@ -15,7 +15,7 @@ import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseWorkflow, WorkflowParseError } from "./spec/index.ts";
 import { compile, WorkflowCompileError, type ExecutionPlan } from "./compiler/index.ts";
-import { resolveConfigLayers, loadMergedConfig, PROJECT_CONFIG_FILENAME, type PiWorkflowsConfig } from "./config/index.ts";
+import { resolveConfigLayers, loadMergedConfig, PROJECT_CONFIG_FILENAME, type WorkConfig } from "./config/index.ts";
 import { createAbsurdEngine, resetFailedJobs } from "./runtime/index.ts";
 import { RunRepository, type RunRow, type RunStatus } from "./persistence/runs.ts";
 import { RunEventRepository, type StoredFrame } from "./persistence/run-events.ts";
@@ -336,7 +336,7 @@ async function runWebServer(args: CliArgs): Promise<void> {
   const wsConfig = join(workspace, PROJECT_CONFIG_FILENAME);
   const cfgPath = args.config ?? (existsSync(wsConfig) ? wsConfig : undefined);
   const layers = resolveConfigLayers(cfgPath, { noGlobal: args.noGlobal });
-  const config: PiWorkflowsConfig | undefined = await loadMergedConfig(layers);
+  const config: WorkConfig | undefined = await loadMergedConfig(layers);
   // Persist run history under the project so it survives restarts (the server is
   // the sole owner of this dataDir — PGLite is single-process). Gitignore it.
   const dataDir = join(workspace, ".workflows", "db");
@@ -716,7 +716,7 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
   // layers (global is the creds home; the project layer overrides). Absent
   // config is fine until an agent step actually needs a model.
   const layers = resolveConfigLayers(args.config, { noGlobal: args.noGlobal });
-  const config: PiWorkflowsConfig | undefined = await loadMergedConfig(layers);
+  const config: WorkConfig | undefined = await loadMergedConfig(layers);
 
   // Resolve the store + run id up front (before any presenter output) so a bad
   // `--resume` fails cleanly. Resume recompiles the *same* workflow file, so its

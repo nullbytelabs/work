@@ -24,7 +24,7 @@ import { emitGraph } from "../graph/index.ts";
 import { listWorkflows, listScheduledWorkflows, findWorkflowByName, resolveWorkflowRef, type WorkflowLayout } from "../project.ts";
 import { createAbsurdEngine, type AbsurdEngine } from "../runtime/index.ts";
 import type { TargetFactory } from "../targets/index.ts";
-import { expandEnv, type PiWorkflowsConfig, type WebhookConfig } from "../config/index.ts";
+import { expandEnv, type WorkConfig, type WebhookConfig } from "../config/index.ts";
 import { VERSION } from "../version.ts";
 import { UserFacingError } from "../errors.ts";
 import { RunRepository } from "../persistence/runs.ts";
@@ -76,7 +76,7 @@ export interface StartWebServerOptions {
    */
   dataDir?: string;
   /** Provider/model config for agent steps. */
-  config?: PiWorkflowsConfig | undefined;
+  config?: WorkConfig | undefined;
   /** Override the runs-on → target factory (tests inject a host double). */
   makeTarget?: TargetFactory;
   /** Max runs executing at once (default 4) — bounds gondolin load under a trigger storm. */
