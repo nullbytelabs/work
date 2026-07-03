@@ -7,10 +7,15 @@
  */
 import { Cron } from "croner";
 import { parse as parseYaml } from "yaml";
+import { UserFacingError } from "../errors.ts";
 import type { EnvMap, InputSpec, JobSpec, MachineSpec, MatrixSpec, MatrixValue, OnSpec, ScheduleTrigger, StepSpec, StrategySpec, WebhookTrigger, WorkflowCallSpec, WorkflowSpec } from "./types.ts";
 
-/** Thrown when a workflow file is structurally invalid. */
-export class WorkflowParseError extends Error {
+/**
+ * Thrown when a workflow file is structurally invalid. Extends `UserFacingError`
+ * so it prints as a clean `work: <msg>` structurally, even on a path that doesn't
+ * catch the concrete type. `path` locates the offending node (`jobs.build.steps[0]`).
+ */
+export class WorkflowParseError extends UserFacingError {
   readonly path?: string;
   constructor(message: string, path?: string) {
     super(path ? `${path}: ${message}` : message);

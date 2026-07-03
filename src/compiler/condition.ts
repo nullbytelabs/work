@@ -21,6 +21,7 @@
  * silently passing, so an unsupported condition is never mistaken for `true`.
  */
 import { parseAccessPath, walkPath, closingBracket, type Segment } from "./expr.ts";
+import { UserFacingError } from "../errors.ts";
 
 /** A scalar value flowing through the evaluator. */
 type Value = string | number | boolean | null | undefined;
@@ -63,7 +64,10 @@ export interface ConditionContext {
   status?: ConditionStatus;
 }
 
-export class ConditionError extends Error {
+// Extends UserFacingError so a malformed `if:`/`when:` prints clean (no stack) if
+// it ever surfaces to the top level; the runtime still catches the concrete type
+// to convert it into a job-condition failure.
+export class ConditionError extends UserFacingError {
   constructor(message: string) {
     super(message);
     this.name = "ConditionError";
