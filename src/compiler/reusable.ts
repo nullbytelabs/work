@@ -37,6 +37,7 @@ import type { MatrixCell } from "./matrix.ts";
 import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
 import { interpolate, expressionBodies, replaceExpressions, parseAccessPath, type ExprContext } from "./expr.ts";
 import { compile, WorkflowCompileError, type CompileOptions } from "./compile.ts";
+import { DOCS } from "../errors.ts";
 
 /** A resolved callee workflow: its parsed spec, its directory (the next level's
  *  base for relative `./` refs), and its canonical file path (the cycle key). */
@@ -109,7 +110,10 @@ export function inlineCall(p: InlineParams): InlineResult {
   }
   const wc = W.on?.workflow_call;
   if (!wc) {
-    throw new WorkflowCompileError(`job "${p.baseId}": workflow "${W.name}" is not callable — add 'on: workflow_call' to ${file}`);
+    throw new WorkflowCompileError(`workflow "${W.name}" is not callable — add 'on: workflow_call' to ${file}`, {
+      path: `jobs.${p.baseId}`,
+      docs: DOCS.reusableWorkflows,
+    });
   }
   // A matrix-fanned call produces one output set PER cell, so `needs.<call>.outputs.*`
   // is ambiguous across legs and is never rewritten (see D2 below). Reject it at

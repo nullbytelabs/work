@@ -1148,7 +1148,11 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 /** Map a compile/parse error to a 400 with the human-readable message inline. */
 function sendCompileError(res: ServerResponse, err: unknown): void {
   if (err instanceof WorkflowCompileError || err instanceof WorkflowParseError) {
-    sendJson(res, 400, { error: err.message });
+    sendJson(res, 400, {
+      error: err.message,
+      ...(err.hint ? { hint: err.hint } : {}),
+      ...(err.docs ? { docs: err.docs } : {}),
+    });
     return;
   }
   throw err;

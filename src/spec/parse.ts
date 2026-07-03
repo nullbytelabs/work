@@ -16,11 +16,9 @@ import type { EnvMap, InputSpec, JobSpec, MachineSpec, MatrixSpec, MatrixValue, 
  * catch the concrete type. `path` locates the offending node (`jobs.build.steps[0]`).
  */
 export class WorkflowParseError extends UserFacingError {
-  readonly path?: string;
   constructor(message: string, path?: string) {
-    super(path ? `${path}: ${message}` : message);
+    super(message, path !== undefined ? { path } : {});
     this.name = "WorkflowParseError";
-    this.path = path;
   }
 }
 

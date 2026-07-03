@@ -8,7 +8,7 @@
  *  - expand `strategy.matrix` into one independent job per cell
  *  - compute a deterministic topological job order from `needs`, detecting cycles
  */
-import { UserFacingError } from "../errors.ts";
+import { UserFacingError, DOCS, type UserFacingErrorInit } from "../errors.ts";
 import type { JobSpec, MatrixSpec, StepSpec, WorkflowSpec } from "../spec/index.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "./plan.ts";
 
@@ -20,8 +20,8 @@ import type { ExecutionPlan, PlannedJob, PlannedStep } from "./plan.ts";
  * specific exit code (2), HTTP status (400), or a context prefix.
  */
 export class WorkflowCompileError extends UserFacingError {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, init: UserFacingErrorInit = {}) {
+    super(message, init);
     this.name = "WorkflowCompileError";
   }
 }
@@ -230,7 +230,10 @@ export function topoSort(jobs: Record<string, PlannedJob>): string[] {
       // namespaced a non-existent producer) would otherwise blow up with a raw
       // `undefined.push` TypeError escaping compile(); surface it as a clean error.
       if (!dependents.has(dep)) {
-        throw new WorkflowCompileError(`job "${id}" needs unknown job "${dep}"`);
+        throw new WorkflowCompileError(`needs unknown job "${dep}"`, {
+          path: `jobs.${id}`,
+          hint: `known jobs: ${[...dependents.keys()].join(", ")}`,
+        });
       }
       indegree.set(id, (indegree.get(id) ?? 0) + 1);
       dependents.get(dep)!.push(id);
@@ -379,8 +382,13 @@ function assertNoMatrixBaseRefs(spec: WorkflowSpec): void {
       const re = new RegExp(`\\bneeds\\.${base}\\.(outputs\\.[A-Za-z_][\\w-]*|result)\\b`);
       if (exprBodies.some((b) => re.test(b)) || conditions.some((c) => re.test(c))) {
         throw new WorkflowCompileError(
-          `job "${jobId}" references needs.${base}.* but "${base}" is a matrix job — its outputs/result ` +
-            `are ambiguous across legs (one set per matrix cell). Reference a specific leg, or make "${base}" non-matrix.`,
+          `references needs.${base}.* but "${base}" is a matrix job — its outputs/result ` +
+            `are ambiguous across legs (one set per matrix cell).`,
+          {
+            path: `jobs.${jobId}`,
+            hint: `reference a specific leg, or make "${base}" non-matrix`,
+            docs: DOCS.workflowSyntax,
+          },
         );
       }
     }

@@ -6,6 +6,7 @@
  */
 import type { InputSpec } from "../spec/index.ts";
 import { WorkflowCompileError } from "./compile.ts";
+import { DOCS } from "../errors.ts";
 
 /** Resolved input values, keyed by name. */
 export type ResolvedInputs = Record<string, string | number | boolean>;
@@ -36,7 +37,11 @@ export function resolveInputs(
     // by the own-properties-only `Object.entries(decl)` loop below. Matches the
     // convention in compile.ts/reusable.ts/expr.ts.
     if (!Object.hasOwn(decl, key)) {
-      throw new WorkflowCompileError(`unknown input "${key}" (not declared in inputs:)`);
+      throw new WorkflowCompileError(`unknown input "${key}"`, {
+        path: "inputs",
+        hint: `declared inputs: ${Object.keys(decl).join(", ") || "(none)"}`,
+        docs: DOCS.configuration,
+      });
     }
   }
 
@@ -55,7 +60,10 @@ export function resolveInputs(
     } else if (spec.default !== undefined) {
       value = spec.default;
     } else if (spec.required) {
-      throw new WorkflowCompileError(`required input "${name}" was not provided`);
+      throw new WorkflowCompileError(`required input "${name}" was not provided`, {
+        path: `inputs.${name}`,
+        hint: `pass it with --inputs '{"${name}": …}'`,
+      });
     } else {
       // Optional + unprovided + no default: a type-appropriate empty sentinel.
       value = type === "number" ? 0 : type === "boolean" ? false : "";
