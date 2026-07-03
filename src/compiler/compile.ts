@@ -8,10 +8,18 @@
  *  - expand `strategy.matrix` into one independent job per cell
  *  - compute a deterministic topological job order from `needs`, detecting cycles
  */
+import { UserFacingError } from "../errors.ts";
 import type { JobSpec, MatrixSpec, StepSpec, WorkflowSpec } from "../spec/index.ts";
 import type { ExecutionPlan, PlannedJob, PlannedStep } from "./plan.ts";
 
-export class WorkflowCompileError extends Error {
+/**
+ * A workflow-authoring error caught during compilation. Extends `UserFacingError`
+ * so it prints as a clean `work: <msg>` (never a stack trace) even on a code path
+ * that forgets to catch it explicitly — the clean-vs-stack contract is structural,
+ * not per-call-site. Call sites still catch the concrete type where they need a
+ * specific exit code (2), HTTP status (400), or a context prefix.
+ */
+export class WorkflowCompileError extends UserFacingError {
   constructor(message: string) {
     super(message);
     this.name = "WorkflowCompileError";

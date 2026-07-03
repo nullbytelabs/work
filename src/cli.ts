@@ -295,9 +295,9 @@ function resolveFile(s: FlagState, common: CommonArgs): CliArgs {
 }
 
 function printUsage(): void {
-  // The bin shim sets PI_WF_PROG to however the command was invoked (`work`,
+  // The bin shim sets WORK_PROG to however the command was invoked (`work`,
   // `workflow`); fall back to the dev launcher's name.
-  const prog = process.env["PI_WF_PROG"] ?? "work";
+  const prog = process.env["WORK_PROG"] ?? "work";
   process.stderr.write(
     "Usage:\n" +
       `  ${prog} <workflow.yaml> [--inputs '<json>'] [--config <file>] [--workdir <dir>] [--resume <id>] [--quiet]\n` +
@@ -389,7 +389,7 @@ function printRuns(rows: RunRow[], filter: string | undefined, full = false): vo
   // Resumable runs (didn't finish) are the actionable ones — show how to continue.
   const resumable = rows.filter((r) => r.status === "interrupted" || r.status === "running" || r.status === "queued");
   if (resumable.length > 0) {
-    const prog = process.env["PI_WF_PROG"] ?? "work";
+    const prog = process.env["WORK_PROG"] ?? "work";
     const ex = resumable[0]!;
     process.stdout.write(`\n${resumable.length} unfinished — resume one with: ${prog} run ${ex.name} --resume ${ex.id}\n`);
   }
@@ -423,7 +423,7 @@ async function listRuns(args: CliArgs): Promise<void> {
 async function showLogs(args: CliArgs): Promise<void> {
   const workspace = args.workspace ?? process.cwd();
   const dataDir = join(workspace, WORKFLOWS_DIR, "db");
-  const prog = process.env["PI_WF_PROG"] ?? "work";
+  const prog = process.env["WORK_PROG"] ?? "work";
   if (!existsSync(dataDir)) fail(`no run history yet (no ${dataDir}) — nothing to show`);
   const wanted = args.logs!.id;
   const engine = await createAbsurdEngine({ dataDir });
@@ -539,7 +539,7 @@ async function lookupRun(workspace: string, id: string): Promise<{ id: string; n
     await repo.ensureSchema();
     const matches = (await repo.list()).filter((r) => r.id === id || r.id.startsWith(id));
     if (matches.length > 1) {
-      const prog = process.env["PI_WF_PROG"] ?? "work";
+      const prog = process.env["WORK_PROG"] ?? "work";
       fail(`"${id}" matches ${matches.length} runs — use a longer id: ${matches.map((m) => m.id.slice(0, 12)).join(", ")} (see \`${prog} runs\`)`);
     }
     const row = matches[0];
@@ -558,7 +558,7 @@ async function applyRecover(args: CliArgs): Promise<void> {
   const workspace = args.workspace ?? process.cwd();
   const stored = await lookupRun(workspace, args.recover.id);
   if (!stored) {
-    const prog = process.env["PI_WF_PROG"] ?? "work";
+    const prog = process.env["WORK_PROG"] ?? "work";
     fail(`no run "${args.recover.id}" found in history (see \`${prog} runs\`)`);
   }
   args.name = stored.name;
@@ -575,7 +575,7 @@ async function applyRecover(args: CliArgs): Promise<void> {
  *  cleanly (mutating nothing) when there were no failed jobs. */
 async function applyRetry(workspace: string, id: string): Promise<void> {
   const dataDir = join(workspace, WORKFLOWS_DIR, "db");
-  const prog = process.env["PI_WF_PROG"] ?? "work";
+  const prog = process.env["WORK_PROG"] ?? "work";
   const engine = await createAbsurdEngine({ dataDir });
   try {
     const { jobsReset } = await resetFailedJobs(engine, id);
@@ -764,7 +764,7 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
   // can re-run just the failed jobs (the flaky-failure tactic) without redoing the
   // ones that passed.
   if (persistent) {
-    const prog = process.env["PI_WF_PROG"] ?? "work";
+    const prog = process.env["WORK_PROG"] ?? "work";
     if (result.status === "interrupted") {
       const how = args.name !== undefined ? `run ${args.name}` : args.file!;
       process.stderr.write(`work: run ${runId} was interrupted — resume with: ${prog} ${how} --resume ${runId}\n`);

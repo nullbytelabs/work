@@ -31,6 +31,6 @@ const prog = basename(process.argv[1] ?? "work").replace(/\.mjs$/, "");
 const child = spawn(
   process.execPath,
   ["--disable-warning=ExperimentalWarning", cli, ...process.argv.slice(2)],
-  { stdio: "inherit", env: { ...process.env, PI_WF_PROG: prog } },
+  { stdio: "inherit", env: { ...process.env, WORK_PROG: prog } },
 );
 child.on("close", (code) => process.exit(code ?? 1));

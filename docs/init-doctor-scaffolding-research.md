@@ -24,7 +24,7 @@ The pleasant surprise: the hard primitives are in the tree, just not exposed as 
 | `.workflows/` layout + by-name resolution | `src/project.ts` (`WORKFLOWS_DIR`, `findWorkflowByName`) | the `create` → `run <name>` payoff |
 | TTY/CI detection | `src/tui/presenter.ts:35-52`, `detectCI` | gating prompts + color |
 | `UserFacingError` → clean `exit 1` | `src/errors.ts`, caught at `src/cli.ts:249` | state-conflict errors ("already exists, pass --force") |
-| `PI_WF_PROG` (invoked-name plumbing) | `bin/work.mjs:34`, used in `printUsage` `src/cli.ts:135` | next-steps epilogues, error prefixes |
+| `WORK_PROG` (invoked-name plumbing) | `bin/work.mjs:34`, used in `printUsage` `src/cli.ts:135` | next-steps epilogues, error prefixes |
 | `mkdtemp`/`rm` temp-dir test harness | `test/project.test.ts:30-43` | integration tests for `init` |
 | `HostTarget` double (no-QEMU runtime) | `test/_support.ts:84-115` | fast-tier tests |
 
@@ -338,13 +338,13 @@ classic pipeline-hang trap). No new dependency.
 - `--yes`/`-y` (suppress the prompt).
 - Idempotent re-runs ("already initialized — nothing to do", exit 0).
 - **"Next steps" epilogue** — the biggest UX win: after `create deploy`, print
-  `run it: work run deploy` / `inspect: work graph deploy`, using `PI_WF_PROG` so it matches how
+  `run it: work run deploy` / `inspect: work graph deploy`, using `WORK_PROG` so it matches how
   the user invoked the tool. The `run <name>` form is *guaranteed* to resolve because `create`
   writes a matching `name:` into `.workflows/`.
 
 ### Two small fixes worth doing while in here (VERIFIED)
 - `fail()` hardcodes the literal `work:` prefix (`src/cli.ts:155`) even when invoked as
-  `work` — unlike `printUsage()`, which uses `PI_WF_PROG` (`:135`). One-line fix.
+  `work` — unlike `printUsage()`, which uses `WORK_PROG` (`:135`). One-line fix.
 - `NO_COLOR`/`FORCE_COLOR` are handled **nowhere** (grep: zero refs) — worth adding centrally
   when the palette is promoted out of `render.ts`.
 
