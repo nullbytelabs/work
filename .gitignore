@@ -31,3 +31,4 @@ work.json
 !.review/accepted.md
 
 .env.grafana-cloud
+conversation_history

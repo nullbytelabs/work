@@ -51,9 +51,18 @@ A step with `continue-on-error: true` records its failure outcome (visible in `s
 
 Secrets are available in `run:`/`env:`/`with:` interpolation but **deliberately not** threaded into the condition context (`condCtx`) or job-output interpolation. This prevents a secret from leaking via a skip-pattern branch (e.g. `if: ${{ secrets.token != '' }}` would otherwise reveal whether a secret is set) or persisting into a journaled job output. The runtime constructs `exprCtx` with `secrets` but builds `condCtx` without them (`src/runtime/absurd/runtime.ts`).
 
-### `StepInterrupted` — `uses:` Interruption Symmetry
+### `StepInterrupted` — `run:`/`uses:` Interruption Symmetry
 
-A `run:` step gets the resumable interruption path for free: a `target.run` rejection (a VM tear-out) propagates and becomes a `JobInterrupted`. A `uses:` step's handler would otherwise swallow the same rejection into a terminal failure. So the `uses:` dispatcher wraps `exec` to throw `StepInterrupted` (`src/runtime/types.ts`) on a `target.run` rejection, and every handler's `catch` re-throws it (never `fail()`s it) — so the run is recorded `interrupted` (resumable), not `failure`. This `run:`/`uses:` symmetry is what durable resume depends on.
+A `run:` step gets the resumable interruption path for free: a `target.run` rejection (a VM tear-out) is wrapped in `StepInterrupted` and propagates as a `JobInterrupted`. A `uses:` step's handler would otherwise swallow the same rejection into a terminal failure. So the `uses:` dispatcher wraps `exec` to throw `StepInterrupted` (`src/runtime/types.ts`) on a `target.run` rejection, and every handler's `catch` re-throws it (never `fail()`s it) — so the run is recorded `interrupted` (resumable), not `failure`. This `run:`/`uses:` symmetry is what durable resume depends on.
+
+### Interrupted vs. Terminal Throw
+
+A throw from `executeStep` is **not** automatically an interruption. `runSteps` distinguishes two kinds:
+
+- **`StepInterrupted`** — the target/VM was torn out under the step (it never reached a verdict). Raises `JobInterrupted` so the job task fails and a later invocation **resumes** from here.
+- **Any other throw** — a terminal, deterministic error (e.g. a bad expression: a missing `needs`/`steps` output from a skipped upstream). Re-running would throw the identical error forever, so the step is recorded as a terminal `failure` (`failed = true`, no later steps run, no resume).
+
+`runShellStep` wraps its `target.run` call to throw `StepInterrupted` on rejection, so a VM tear-out routes to the resumable path while an expression-resolution throw (which happens *before* `target.run`) propagates raw as a terminal failure.
 
 ### Output Capture (`src/runtime/output.ts`)
 
@@ -65,8 +74,8 @@ See [Workflow Syntax — `$WORK_OUTPUT`](../workflows/workflow-syntax.md#work_ou
 
 ### Interrupted vs. Failure
 
-- **`interrupted`** — a VM tear-out or process kill. Resumable: re-invoking `run()` with the same `runId` reuses finished jobs and re-drives interrupted ones.
-- **`failure`** — a step ran and exited non-zero. Terminal for that job.
+- **`interrupted`** — a VM tear-out or process kill (`StepInterrupted`). Resumable: re-invoking `run()` with the same `runId` reuses finished jobs and re-drives interrupted ones.
+- **`failure`** — a step ran and exited non-zero, or a step threw a non-`StepInterrupted` error (a deterministic authoring error like a missing output). Terminal for that job.
 
 This distinction drives the recovery UX (`resume` vs. `retry`).
 

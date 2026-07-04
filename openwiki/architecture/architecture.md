@@ -166,7 +166,16 @@ Two ways to launch:
 
 ## Error Handling (`src/errors.ts`)
 
-`UserFacingError` is a single error class for actionable conditions meant for end users. The CLI catches it and prints a clean one-liner (no stack trace). Everything else prints as an unexpected error with a stack.
+`UserFacingError` is the base class for actionable, end-user-facing errors. The CLI catches it and prints a clean message (no stack trace) via `formatUserFacing()`; everything else prints as an unexpected error with a stack.
+
+The clean-vs-stack distinction is **structural, not per-call-site**: all three authoring-error classes — `WorkflowParseError` (`spec/parse.ts`), `WorkflowCompileError` (`compiler/compile.ts`), and `ConditionError` (`compiler/condition.ts`) — **extend `UserFacingError`**, so even a code path that forgets to catch the concrete subtype still prints clean. Call sites still catch the concrete type where they need a specific exit code (2), HTTP status (400), or behavior (`ConditionError` → a job-condition failure step). `test/error-contract.test.ts` guards this contract.
+
+A `UserFacingError` may carry structured context — all optional:
+- **`path`** — the logical location of the offending node (`jobs.build.steps[0]`), prefixed onto the message and exposed as a field.
+- **`hint`** — a one-line actionable remediation.
+- **`docs`** — a documentation URL (centralized in the `DOCS` map, served from GitHub Pages).
+
+`formatUserFacing(err)` renders the message, then optional `hint:` and `see:` lines — every CLI surface routes through it. The web server reads the structured fields directly into its 400 JSON response (`sendCompileError`).
 
 ## How It All Connects
 

@@ -77,7 +77,7 @@ Webhooks are configured in `work.json` and matched to workflow `on: webhook:` bl
 
 The webhook receiver (`POST /hooks/:name`):
 - Validates auth — **bearer** (shared secret in `Authorization` header) or **hmac** (signature in a configurable header). HMAC verification handles both `sha256=<hex>` (GitHub) and bare `<hex>` (Grafana) formats; the algorithm is pinned to SHA-256, never trusts a header-supplied algorithm.
-- **Fail-closed multi-layer gating**: (1) hook must exist in config, (2) `checkHookConfig` verifies enabled + secret resolves + valid auth mode, (3) `loadOptedInSpec` verifies the workflow declares `on: webhook`, (4) `authorizeHook` authenticates, (5) dedup check, (6) body parse must be a JSON object.
+- **Fail-closed multi-layer gating**: (1) hook must exist in config, (2) `checkHookConfig` verifies enabled + secret resolves + valid auth mode, (3) `authorizeHook` authenticates (before any workflow I/O — so an unauthenticated caller can't learn that a hook exists or spam the audit log with parse errors), (4) `loadOptedInSpec` verifies the workflow declares `on: webhook`, (5) dedup check, (6) body parse must be a JSON object.
 - Deduplicates via `DeliveryRepository` — the key is `sha256(hook + raw body)` with a 5-minute TTL window (`DEDUPE_TTL_MS`). A duplicate returns the original `runId` with `deduped: true`. The in-memory ring is pruned opportunistically at >1000 entries.
 - Audit log: result, httpStatus, sourceIp — **never** payload/secret.
 - Delivers the payload as the workflow's `event` context, accessible via `${{ event.* }}`.
