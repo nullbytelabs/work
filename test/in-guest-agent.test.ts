@@ -1,8 +1,10 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, readdir, writeFile, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, symlink, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { parseWorkflow } from "../src/spec/index.ts";
 import { compile } from "../src/compiler/index.ts";
 import { parseConfig } from "../src/config/index.ts";
@@ -209,6 +211,46 @@ describe("GuestPiRunner", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("hands the guest an alias baseUrl for a loopback model host (localhost provider)", async () => {
+    // `baseUrl: http://localhost:8000/v1` in work.json: inside the guest, localhost
+    // is the GUEST's loopback, so the runner must rewrite the guest-facing baseUrl
+    // to the alias the egress resolver pins back to the host's loopback — and
+    // derive the key env from that same alias so the placeholder matches.
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-guest-"));
+    let capturedReq = "";
+    const exec = async (command: string) => {
+      if (/npm root -g/.test(command)) return { exitCode: 1, stdout: "", stderr: "", ok: false };
+      const m = /guest-runner-\w+\.mjs\s+(\S+)\s+(\S+)/.exec(command);
+      if (m) {
+        capturedReq = await readFile(m[1] as string, "utf-8");
+        const { writeFile } = await import("node:fs/promises");
+        await writeFile(m[2] as string, JSON.stringify({ text: "ok" }));
+      }
+      return { exitCode: 0, stdout: "", stderr: "", ok: true };
+    };
+    const runner = new GuestPiRunner({ exec, hostDir: dir, guestDir: dir });
+    await runner.run({
+      prompt: "p",
+      model: { baseUrl: "http://localhost:8000/v1", apiKey: "k", model: "ornith" },
+    });
+    const req = JSON.parse(capturedReq) as { keyEnv: string; model: { baseUrl: string } };
+    assert.equal(req.model.baseUrl, "http://localhost.loopback.internal:8000/v1", "guest baseUrl must carry the alias, not localhost");
+    assert.equal(req.keyEnv, modelKeyEnv("localhost.loopback.internal"), "key env must derive from the alias (matches the resolver)");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("rejects an IPv6-loopback model baseUrl with an actionable error", async () => {
+    const runner = new GuestPiRunner({
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "", ok: true }),
+      hostDir: "/unused",
+      guestDir: "/unused",
+    });
+    await assert.rejects(
+      () => runner.run({ prompt: "p", model: { baseUrl: "http://[::1]:8000/v1", apiKey: "k", model: "m" } }),
+      /bind the server on 127\.0\.0\.1/,
+    );
+  });
+
   // Regression: a prompt-injected agent could plant the result path as a symlink to
   // a host file (the shared mount follows symlinks), turning the wrapper's result
   // write into an arbitrary host-file overwrite. The host read must refuse to follow
@@ -235,6 +277,51 @@ describe("GuestPiRunner", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
       await rm(secretDir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: Pi records a failed model call (unreachable provider, bad auth) as
+  // an assistant message with stopReason "error" and EMPTY text — the wrapper used
+  // to return that as `{text: ""}`, so a run whose model never answered reported
+  // SUCCESS with blank outputs and no visible error anywhere. The wrapper must
+  // surface the cause as a failure instead.
+  it("the real guest wrapper fails loudly when the model call errored (no empty-success)", async () => {
+    const FAKE_ERROR_PI = `
+export class AuthStorage { static inMemory() { return new AuthStorage(); } }
+export class ModelRegistry { static inMemory() { return new ModelRegistry(); } registerProvider() {} find() { return { id: "stub" }; } }
+export class SettingsManager { static inMemory() { return new SettingsManager(); } }
+export class SessionManager { static inMemory() { return new SessionManager(); } }
+export class DefaultResourceLoader { async reload() {} }
+export async function createAgentSession() {
+  return { session: {
+    messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "connect ECONNREFUSED 127.0.0.1:8000" }],
+    async prompt() {},
+    dispose() {},
+  } };
+}
+`;
+    const dir = await mkdtemp(join(tmpdir(), "pi-wf-wrap-err-"));
+    try {
+      // Stage the SHIPPING wrapper next to a fake Pi whose session errored, exactly
+      // as GuestPiRunner stages it in-guest.
+      const pkgDir = join(dir, "node_modules", "@earendil-works", "pi-coding-agent");
+      await mkdir(pkgDir, { recursive: true });
+      await writeFile(join(pkgDir, "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.0.0-stub", type: "module", main: "index.mjs" }));
+      await writeFile(join(pkgDir, "index.mjs"), FAKE_ERROR_PI);
+      const wrapper = join(dir, "guest-runner.mjs");
+      await copyFile(fileURLToPath(new URL("../src/agent/guest-runner-script.mjs", import.meta.url)), wrapper);
+
+      const reqPath = join(dir, "req.json");
+      const resPath = join(dir, "res.json");
+      await writeFile(reqPath, JSON.stringify({ prompt: "hi", cwd: dir, keyEnv: "PI_WF_MODEL_KEY", model: { baseUrl: "http://localhost.loopback.internal:8000/v1", model: "m" } }));
+
+      const run = spawnSync(process.execPath, [wrapper, reqPath, resPath], { env: { ...process.env, PI_WF_MODEL_KEY: "k" }, encoding: "utf8" });
+      assert.notEqual(run.status, 0, "wrapper must exit non-zero when the model call errored");
+      const result = JSON.parse(await readFile(resPath, "utf8")) as { error?: string; text?: string };
+      assert.equal(result.text, undefined, "no text result on a provider error");
+      assert.match(result.error ?? "", /ECONNREFUSED 127\.0\.0\.1:8000/, "the provider error must surface in the result");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 
