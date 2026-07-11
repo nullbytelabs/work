@@ -40,7 +40,7 @@ interface WorkConfig {
 
 | Field | Purpose |
 |---|---|
-| `providers` | Named OpenAI-compatible endpoints — `baseUrl` + `apiKey`. |
+| `providers` | Named OpenAI-compatible endpoints — `baseUrl` + `apiKey`. A `baseUrl` on the engine host's loopback (`http://localhost:<port>/...` — llama.cpp, ollama, omlx) works transparently: the engine aliases the host for the guest and pins it back to loopback host-side. See [Agent Steps — Loopback model providers](../agent/agent-steps.md#loopback-model-providers-local-llamacpp--ollama--omlx). |
 | `models` | Named model aliases, each pointing at a `provider` + native model id. Optional `maxTokens` / `temperature`. |
 | `defaultModel` | The alias used when an agent step omits `with.model`. |
 | `secrets` | A whitelist of host secrets addressable as `${{ secrets.<name> }}` in workflows. |
