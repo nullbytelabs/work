@@ -311,7 +311,7 @@ function printUsage(): void {
       `  ${prog} [--workspace <dir>] logs <id>     # replay a past run's stored log (web-run logs)\n` +
       `  ${prog} [--workspace <dir>] serve [--port <n>]\n` +
       `  ${prog} init [--global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]\n` +
-      `  ${prog} create <name> [--template hello-world|agent-action] [--force] [--dry-run]\n` +
+      `  ${prog} create workflow|image|webhook <name> [--force] [--dry-run]\n` +
       `  ${prog} doctor [--json]\n` +
       `  ${prog} version\n`,
   );
