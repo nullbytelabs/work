@@ -41,7 +41,7 @@ export default withMermaid(defineConfig({
       { text: "Examples", link: "/examples/dogfooding", activeMatch: "/examples/" },
       { text: "Reference", link: "/reference/cli", activeMatch: "/reference/" },
       {
-        text: "v0.3.8",
+        text: "v0.3.9",
         items: [
           {
             text: "Changelog",
