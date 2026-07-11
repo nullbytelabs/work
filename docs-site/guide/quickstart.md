@@ -9,7 +9,7 @@ if you want to confirm your machine is ready first.
 The fastest start is to let `work` scaffold a project for you:
 
 ```bash
-work init                 # writes .workflows/hello-world.yaml + a starter config
+work init                 # writes .workflows/hello-world.yaml (a shell workflow — no config needed)
 work run hello-world      # run the scaffolded workflow by its name
 ```
 

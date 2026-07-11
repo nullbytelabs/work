@@ -5,7 +5,7 @@ The package installs a single command, `work`. These docs use it throughout.
 ## Synopsis
 
 ```bash
-# scaffold a project (a starter workflow + config), or a machine-wide config
+# scaffold a project (a starter workflow; a work.json only with --from-template agent-action), or a machine-wide config with --global
 work init [--project | --global] [--include-skill] [--from-template hello-world|agent-action] [--force] [--dry-run]
 
 # scaffold a single new workflow (optionally webhook-triggered)
@@ -23,8 +23,11 @@ work <workflow.yaml> [--inputs '<json>'] [--config <file>] [--no-global] [--work
 # run a project pipeline by name (resolves .workflows/*.yaml whose `name:` matches)
 work [--workspace <dir>] run <name> [--inputs '<json>'] [--config <file>] [--no-global] [--workdir <dir>] [--resume <id>] [--quiet]
 
-# list run history (filter by status)
-work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
+# list run history (filter by status; --full shows full run ids)
+work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted] [--full]
+
+# replay a past run's stored log
+work [--workspace <dir>] logs <id>
 
 # continue an interrupted run, re-run a past one fresh, or re-run just its failed
 # jobs (by id, from `work runs`)
@@ -251,7 +254,7 @@ instead of starting a new one; `work resume <id>` below is the shorthand.
 ### `work runs`
 
 ```bash
-work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted]
+work [--workspace <dir>] runs [--status queued|running|success|failure|interrupted] [--full]
 ```
 
 Lists the workspace's run history, newest first: the durable record of every
@@ -264,10 +267,22 @@ filters; for example, the runs that didn't finish:
 ```bash
 work runs
 work runs --status interrupted
+work runs --full                 # show full run ids instead of the short prefix
 ```
 
 Each row shows the run id, workflow, status, and when it started. A run shown as
 **interrupted** is resumable, and the listing prints the exact `resume` command.
+
+### `work logs`
+
+```bash
+work [--workspace <dir>] logs <id>
+```
+
+Replays a past run's stored log — the per-job, per-step output captured while the
+run executed (the same stream the console shows live). Like `work runs` it reads
+the durable store, so it's a *serve-is-down* tool: don't run it against a workspace
+a `serve` is currently holding.
 
 ### `work resume` / `work rerun` / `work retry`
 
@@ -413,6 +428,7 @@ v=$(work version)
 | `--workdir <dir>` | `run`, file | Where job workspaces are staged (default: a temp dir). |
 | `--resume <id>` | `run` | Continue an interrupted run instead of starting a new one (same run id; finished jobs are reused). Project workflows only. |
 | `--status <s>` | `runs` | Filter the run history by status (`queued`, `running`, `success`, `failure`, `interrupted`). |
+| `--full` | `runs` | Show full run ids instead of the truncated short prefix. |
 | `--quiet` | `run`, file | Suppress the live board / per-job output. |
 | `--format <fmt>` | `graph` | DAG output format: `mermaid`, `dot`, `json`, `ascii`. |
 | `--steps` | `graph` | Expand each job into its ordered steps. |

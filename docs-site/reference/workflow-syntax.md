@@ -415,7 +415,9 @@ Use `if` **or** `when` on a given step/job, not both.
 
 <code v-pre>${{ … }}</code> interpolates values into env, `with`, `outputs`, and
 conditions. The available contexts are `inputs`, `matrix`, `needs`, and `steps`
-(as listed above), plus `event` on a [webhook-triggered](#triggers) run.
+(as listed above), plus `event` on a [webhook-triggered](#triggers) run. `secrets`
+is also available, but only when interpolating `env` and `with` values — never in
+`outputs:` or `if`/`when` conditions.
 
 ### `event` (webhook runs)
 
