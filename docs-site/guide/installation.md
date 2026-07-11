@@ -31,7 +31,7 @@ the TypeScript directly — no build:
 git clone https://github.com/nullbytelabs/work
 cd work
 npm install
-./work --help
+./bin/work.mjs --help
 ```
 
 ## Verify your setup

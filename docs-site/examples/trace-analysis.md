@@ -52,7 +52,7 @@ inputs:
   run_id:
     type: string
     required: true
-    pattern: "^[0-9a-fA-F]{8}-...-[0-9a-fA-F]{12}$"   # a UUID
+    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"   # a UUID
   lookback_hours:
     type: number
     default: 720   # how far back to search Tempo (default 30 days)
@@ -75,7 +75,7 @@ jobs:
 
   # Feeds on fetch's distilled tree — no secret in scope.
   analyze:
-    runs-on: work:base
+    runs-on: work:pi
     machine: small
     needs: [fetch]
     steps:

@@ -35,6 +35,8 @@ jobs:
       - id: meta
         name: record version
         run: echo "version=$(node -p 'require("./package.json").version')" >> "$WORK_OUTPUT"
+    outputs:
+      version: ${{ steps.meta.outputs.version }}   # re-expose the step output at the job level
 
   report:
     needs: [build]
@@ -45,8 +47,6 @@ jobs:
         env:
           V: ${{ needs.build.outputs.version }}
         run: echo "built version $V"
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
 ```
 
 ## Building Blocks

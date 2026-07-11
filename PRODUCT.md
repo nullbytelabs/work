@@ -6,7 +6,7 @@ Developers and platform/infra engineers running workflows on their own machines.
 Their context: a terminal-first audience that already lives in YAML, CI configs, and
 shell. They reach for this when they want CI-style structure — jobs, a `needs`
 DAG, matrix fan-out, durable resumable runs — but locally, isolated per-job in a
-micro-VM, optionally with an AI agent strapped to a step. The web console (`work --web`)
+micro-VM, optionally with an AI agent strapped to a step. The web console (`work serve`)
 is where they watch runs execute, inspect the DAG, read per-step output and history, and
 fire webhook-triggered runs. The job to be done: *understand and trust what a workflow is
 doing as it runs* — see the shape, the progress, the failures, the outputs — without

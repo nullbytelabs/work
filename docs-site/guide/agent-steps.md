@@ -47,9 +47,11 @@ is a leaked key.
 :::
 
 ::: tip Scaffold the config
-`work init` writes a starter `work.json` like this, and
-`work init --global` puts one at `~/.config/work/work.json` to share across
-projects. Fill in a real `$FIREWORKS_API_KEY` (or your provider's key).
+`work init --global` writes a starter `work.json` at `~/.config/work/work.json`
+to share across projects, and `work init --from-template agent-action` writes one
+into a project alongside an agent workflow. What lands is a vendor-neutral
+placeholder — swap in your provider, endpoint, and API key. (A plain `work init`
+scaffolds a shell workflow only, with no config.)
 :::
 
 ## 2. Run an agent with `work/agent`
