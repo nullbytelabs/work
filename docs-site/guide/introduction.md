@@ -14,14 +14,10 @@ isolation, durability, and an agent strapped to any step that needs judgment.
 # .workflows/report.yaml
 name: report
 jobs:
-  collect:
+  summarize:
     runs-on: work:base         # a custom image with git + jq, in its own micro-VM
     steps:
-      - run: node scripts/aggregate.js > data.json
-  summarize:
-    needs: [collect]
-    runs-on: work:base
-    steps:
+      - run: node scripts/aggregate.js > data.json   # steps in a job share one workspace
       - uses: work/agent       # an AI agent reads data.json and writes the summary
         with:
           prompt: Read data.json and write a short summary.
