@@ -24,7 +24,11 @@ of a hostname is therefore **irrelevant** to whether it can be reached.
 The one carve-out: `localhost` and `*.localhost` are RFC-6761 special-cased
 (`qemu/dns.js: isLocalhostDnsName`) and answered with `127.0.0.1` — the
 guest's **own** loopback. A dial to such a name never leaves the VM. Never
-use a `.localhost` name as a guest-facing upstream label.
+use a `.localhost` name as a guest-facing upstream label. (Model providers on
+the engine host's loopback are handled for you: `loopbackModelPin`
+(`src/agent/guest-pi-runner.ts`) hands the guest an alias hostname and the
+egress resolver pins it back to the loopback IP host-side, so a
+`baseUrl: http://localhost:8000/v1` provider just works.)
 
 ## 2. The guest-dialed IP is ignored; the host re-resolves the hostname
 
@@ -73,6 +77,7 @@ for anything credential-bearing; the engine deliberately does not expose it.
 | You want | The answer |
 |---|---|
 | Reach a public upstream from a job | Egress is open (`allowedHosts: ["*"]`) for every job — no allowlist to maintain |
+| Use a local model server (llama.cpp, ollama, omlx) | Just set the provider's `baseUrl` to `http://localhost:<port>/...` — the engine aliases the host for the guest and pins it back to loopback host-side (`loopbackModelPin`) |
 | A guest-facing hostname | Any label works — it only needs to resolve host-side; never `localhost`/`*.localhost` |
 | Pass a credential to a `run:` step or action | Put it in the `secrets:` whitelist in `work.json` and reference `${{ secrets.NAME }}` — it flows into the step env, never via the allowlist |
 | Keep the model key out of the guest | Automatic — it's host-injected and scoped to the model host (`makeAgentEgressResolver`); no guest env ever sees it |

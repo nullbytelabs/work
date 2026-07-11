@@ -39,7 +39,7 @@ There is **no host-side runner** — every job is a gondolin sandbox, so the ent
 
 1. Creates an **unguessable** staging dir (`.pi-agent-<random8>`) inside the shared mount — randomization defeats pre-planting by a hostile checkout.
 2. Copies the standalone wrapper `guest-runner-script.mjs` with `COPYFILE_EXCL` (fails if a symlink already exists). Writes request JSON with flag `"wx"` (O_EXCL protection).
-3. The request JSON carries `{ system?, prompt, cwd, model: { baseUrl, model, maxTokens?, temperature? }, keyEnv }` — **never the API key**.
+3. The request JSON carries `{ system?, prompt, cwd, model: { baseUrl, model, maxTokens?, temperature? }, keyEnv }` — **never the API key**. For a loopback model provider (see below) `baseUrl` is the **guest-facing alias**, not the operator's `localhost`.
 4. Makes Pi loadable in-guest: first tries `linkPreinstalledPi()` (symlinks a globally-installed Pi from the `work:pi` guest image, skipping a ~30s npm install); falls back to `npm install` (hardened against hostile `.npmrc`).
 5. `exec("node <wrapper> <req> <res>")` with env `NODE_EXTRA_CA_CERTS=/etc/gondolin/mitm/ca.crt` — so in-guest Node trusts Gondolin's MITM proxy.
 6. Reads the result JSON back, **refusing to follow a symlink** at the result path (hostile). Cleans up staging files.
@@ -52,6 +52,7 @@ A standalone `.mjs` that runs in a **separate Node process inside the guest VM**
 - Reads the API key from `process.env[req.keyEnv]` — the placeholder that Gondolin swaps into the Authorization header host-side.
 - Creates a Pi agent session with `cwd` = the workspace mount, runs `session.prompt(req.prompt)`, extracts the last assistant message text, and reads cumulative token usage from `session.getSessionStats()`.
 - Writes result JSON `{ text, finishReason?, usage? }` or `{ error }`.
+- **Surfaces a failed model call as a step failure** — Pi records an unreachable provider or auth rejection as an assistant message with `stopReason: "error"` and **empty** text. The wrapper now throws `lastAssistant.errorMessage` (instead of returning the empty text as a "successful" result), so a run whose model never answered fails loudly with the provider's cause.
 
 ### The `work:pi` Image
 
@@ -66,6 +67,16 @@ The `work:pi` image (`src/images/image-builtin/pi/build-config.json`) is `work:b
 1. Resolves the model → extracts `modelHostOf(baseUrl)` (refuses `*` wildcards — fail-closed).
 2. Creates a secret entry: `{ [modelKeyEnv(host)]: { hosts: [host], value: model.apiKey } }`.
 3. Multiple steps on the same host collapse to one entry; different providers get distinct host-scoped keys.
+
+### Loopback model providers (local llama.cpp / ollama / omlx)
+
+A model server bound on the engine host's loopback (`baseUrl: http://localhost:8000/v1` — llama.cpp, ollama, omlx) can't be dialed as-is from the guest: guest DNS answers `localhost`/`*.localhost` with the **guest's own** loopback (RFC 6761), and a `127/8` literal is the guest's own interface — the dial never leaves the VM. This is handled for you with no out-of-band coordination:
+
+- `loopbackModelPin(host)` (`src/agent/guest-pi-runner.ts`) derives a guest-safe alias (`<slug>.loopback.internal`, using the private-use `.internal` TLD so it can't shadow a real upstream and never ending in `.localhost`). Both the egress resolver (host side) and the in-guest runner derive the **same** alias deterministically from the host.
+- The in-guest runner rewrites the model `baseUrl` to the alias (via `guestModelTarget`) and derives `keyEnv` from that same alias.
+- The egress resolver pins the alias back to the loopback IP host-side: `hostResolves[alias] = ip` (curl `--resolve` style), lifts the sandbox's internal-range block for that one IP (`allowedInternalHosts`), and scopes the injected key to the IP the request actually carries.
+
+So a `baseUrl: http://localhost:8000/v1` provider just works verbatim — the guest dials the alias, the engine dials `127.0.0.1`. An IPv6-loopback baseUrl (`http://[::1]:...`) is **rejected with an actionable error** (the sandbox can't pin it — bind on `127.0.0.1` instead).
 
 > **`action/*` steps use the default model's key.** The egress resolver can't introspect inside composite actions to see which inner `work/agent` step uses which model, so an `action/*` step gets the *default model's* key. If an action wraps `work/agent` with a non-default `with.model`, the wrong key may be injected — an open limitation to be aware of.
 

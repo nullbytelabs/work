@@ -116,6 +116,13 @@ async function main() {
   let lastAssistant;
   for (const msg of session.messages) if (msg.role === "assistant") lastAssistant = msg;
   if (!lastAssistant) throw new Error("agent produced no assistant message");
+  // Pi records a failed model call (unreachable provider, auth rejection, …) as an
+  // assistant message with stopReason "error" and the cause in errorMessage — the
+  // text content is empty. Surface the cause as a step failure instead of
+  // returning the empty text as a "successful" result.
+  if (lastAssistant.stopReason === "error") {
+    throw new Error(lastAssistant.errorMessage || "the model call failed (no error detail from the provider)");
+  }
   const text = (lastAssistant.content ?? [])
     .filter((b) => b.type === "text")
     .map((b) => b.text)

@@ -26,11 +26,15 @@
  */
 import type { PlannedJob } from "../compiler/index.ts";
 import { resolveModel, type WorkConfig } from "../config/index.ts";
-import { modelHostOf, modelKeyEnv } from "./guest-pi-runner.ts";
+import { loopbackModelPin, modelHostOf, modelKeyEnv } from "./guest-pi-runner.ts";
 
 /** Structural `JobNetwork` (kept local to avoid an agent→runtime import cycle). */
 export interface AgentJobNetwork {
   allowedHosts?: string[];
+  /** Hosts exempt from the sandbox's internal-IP-range block (loopback model servers). */
+  allowedInternalHosts?: string[];
+  /** Host-side dial pins (hostname → IP), like curl `--resolve`. */
+  hostResolves?: Record<string, string>;
   secrets?: Record<string, { hosts: string[]; value: string }>;
 }
 
@@ -63,15 +67,32 @@ export function makeAgentEgressResolver(
     // step's model, so a step always reads the placeholder for the host it calls.
     if (config) {
       const secrets: Record<string, { hosts: string[]; value: string }> = {};
+      const hostResolves: Record<string, string> = {};
+      const allowedInternalHosts: string[] = [];
       for (const [i, step] of job.steps.entries()) {
         if (!mightRunModel(step.uses)) continue;
         const alias = step.uses === "work/agent" ? stepModelAlias(job, i) : undefined;
         const model = resolveModel(config, alias);
         const host = modelHostOf(model.baseUrl);
         if (!host) continue;
-        secrets[modelKeyEnv(host)] = { hosts: [host], value: model.apiKey };
+        // A loopback provider (llama.cpp/ollama/omlx on the operator's machine):
+        // the guest dials a guest-safe alias — the in-guest runner derives the
+        // SAME one via `loopbackModelPin` — and the pin rewrites it to the
+        // loopback IP before policy checks and secret injection, so the key
+        // scopes to the IP the request actually carries when it's swapped in,
+        // and the internal-range block is lifted for exactly that IP.
+        const pin = loopbackModelPin(host);
+        if (pin) {
+          secrets[modelKeyEnv(pin.alias)] = { hosts: [pin.ip], value: model.apiKey };
+          hostResolves[pin.alias] = pin.ip;
+          if (!allowedInternalHosts.includes(pin.ip)) allowedInternalHosts.push(pin.ip);
+        } else {
+          secrets[modelKeyEnv(host)] = { hosts: [host], value: model.apiKey };
+        }
       }
       if (Object.keys(secrets).length > 0) net.secrets = secrets;
+      if (Object.keys(hostResolves).length > 0) net.hostResolves = hostResolves;
+      if (allowedInternalHosts.length > 0) net.allowedInternalHosts = allowedInternalHosts;
     }
 
     return net;
