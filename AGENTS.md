@@ -28,8 +28,14 @@ npm run sloc             # report-only: SLOC distribution — largest files + pe
 npm run jscpd            # report-only: copy/paste duplication across src/ TypeScript (see below)
 npm run build            # esbuild → dist/ (publish-only; see below)
 
-# run the CLI in dev — invoke the bin shim directly (it runs src/cli.ts when
-# there's no dist/, so no build step). This IS the `work` command.
+# Run the CLI: prefer the globally installed `work` command. Use the bin shim
+# only for development tasks where you need to verify changes to src/cli.ts
+# before the package is installed (e.g. editing the CLI and running it inline).
+# The shim runs src/cli.ts when dist/ is absent (no build step required), but
+# when `which work` succeeds, that's what should be used — the global install
+# is the published `@nullbytelabs/work` package and the one users actually run.
+work <args>
+# fallback for dev-only verification:
 ./bin/work.mjs <args>
 npm start -- <args>      # same thing via the start script
 ```

@@ -15,7 +15,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { makeAgentEgressResolver } from "../src/agent/index.ts";
+import { loopbackModelPin, makeAgentEgressResolver, modelKeyEnv } from "../src/agent/index.ts";
 import type { WorkConfig } from "../src/config/index.ts";
 import type { PlannedJob, PlannedStep } from "../src/compiler/index.ts";
 
@@ -68,6 +68,32 @@ describe("agent model-key egress resolution", () => {
     assert.equal(keyForHost(FIREWORKS_HOST), "fireworks-key-FFF", "Fireworks host must carry the Fireworks key");
   });
 
+  it("a loopback provider (localhost model server) gets a guest alias pinned back to loopback", () => {
+    // The everyday local setup: llama.cpp/ollama/omlx on the operator's machine,
+    // `baseUrl: http://localhost:8000/v1` written verbatim in work.json. The guest
+    // can't dial localhost (that's ITS loopback), so the resolver must emit a
+    // host-side pin for the alias the in-guest runner hands Pi, lift the
+    // internal-range block for the loopback IP, and scope the key to that IP
+    // (the hostname the request carries after the pin rewrite).
+    const local: WorkConfig = {
+      providers: { omlx: { baseUrl: "http://localhost:8000/v1", apiKey: "local-key-LLL" } },
+      models: { ornith: { provider: "omlx", model: "ornith-35b" } },
+      defaultModel: "ornith",
+    };
+    const net = makeAgentEgressResolver(local)(job("local", [agentStep("local/agent")]));
+
+    assert.ok(net?.secrets, "the local key should still ride host-side injection");
+    const pin = loopbackModelPin("localhost");
+    assert.ok(pin, "localhost must be recognized as a loopback model host");
+    assert.deepEqual(net.hostResolves, { [pin.alias]: "127.0.0.1" }, "the alias must pin to the host's loopback");
+    assert.deepEqual(net.allowedInternalHosts, ["127.0.0.1"], "the internal-range block must be lifted for the pin IP");
+    assert.deepEqual(
+      net.secrets[modelKeyEnv(pin.alias)],
+      { hosts: ["127.0.0.1"], value: "local-key-LLL" },
+      "the key must be scoped to the pinned IP under the alias-derived env name",
+    );
+  });
+
   it("a plain run: job gets open egress and no injected key", () => {
     // The egress wall was walked back (docs/egress-walk-back.md): every job gets
     // allow-all public egress, so a pure `run:` job (aws/kubectl/curl) is no longer
@@ -77,5 +103,26 @@ describe("agent model-key egress resolution", () => {
     assert.ok(net, "every job now gets a network");
     assert.deepEqual(net.allowedHosts, ["*"], "egress is open for every job");
     assert.equal(net.secrets, undefined, "no model step → no key injected");
+  });
+});
+
+describe("loopbackModelPin", () => {
+  it("maps localhost, *.localhost, and 127/8 literals to an alias + loopback IP", () => {
+    assert.deepEqual(loopbackModelPin("localhost"), { alias: "localhost.loopback.internal", ip: "127.0.0.1" });
+    assert.deepEqual(loopbackModelPin("api.localhost"), { alias: "api-localhost.loopback.internal", ip: "127.0.0.1" });
+    assert.deepEqual(loopbackModelPin("127.0.0.5"), { alias: "127-0-0-5.loopback.internal", ip: "127.0.0.5" });
+  });
+
+  it("leaves non-loopback hosts alone", () => {
+    assert.equal(loopbackModelPin("api.fireworks.ai"), undefined);
+    assert.equal(loopbackModelPin("mylocalhost.example.com"), undefined);
+    assert.equal(loopbackModelPin("[::1]"), undefined); // rejected upstream with a clear error
+  });
+
+  it("never emits an alias the guest DNS special-cases back to guest loopback", () => {
+    for (const host of ["localhost", "api.localhost", "127.0.0.1"]) {
+      const alias = loopbackModelPin(host)!.alias;
+      assert.ok(alias !== "localhost" && !alias.endsWith(".localhost"), `alias "${alias}" must not re-trigger the RFC-6761 carve-out`);
+    }
   });
 });

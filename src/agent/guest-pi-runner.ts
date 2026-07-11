@@ -68,6 +68,66 @@ export function modelKeyEnv(host: string): string {
   return `${GUEST_MODEL_KEY_ENV}_${slug}_${hash}`;
 }
 
+/**
+ * Guest-safe alias + host-side dial pin for a model server on the engine host's
+ * loopback (llama.cpp, ollama, omlx — `baseUrl: http://localhost:8000/v1`).
+ *
+ * A loopback host can never be dialed as-is from inside the guest: guest DNS
+ * answers `localhost`/`*.localhost` with the guest's OWN loopback (RFC 6761), and
+ * a 127/8 literal is the guest's own interface — either way the dial never leaves
+ * the VM. But the host dials upstreams from the engine process, which is exactly
+ * where the local server listens. So the runner hands the guest an alias hostname
+ * and the egress resolver pins that alias back to the loopback IP host-side
+ * (gondolin rewrites the URL before policy checks and secret injection): the
+ * guest dials the alias, the engine dials 127.0.0.1 — and it just works.
+ *
+ * The alias and the key scope both derive deterministically from the same host,
+ * so the resolver (host side) and this runner (guest side) agree with no
+ * out-of-band coordination — the same contract `modelKeyEnv` relies on. The
+ * alias never ends in `.localhost` (that would re-trigger the guest DNS
+ * special-case) and uses the ICANN private-use `.internal` TLD so it can't
+ * shadow a real upstream.
+ */
+export function loopbackModelPin(host: string): { alias: string; ip: string } | undefined {
+  const lower = host.toLowerCase();
+  const isName = lower === "localhost" || lower.endsWith(".localhost");
+  const isV4 = /^127(\.\d{1,3}){3}$/.test(lower);
+  if (!isName && !isV4) return undefined;
+  const slug = lower.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return { alias: `${slug}.loopback.internal`, ip: isV4 ? lower : "127.0.0.1" };
+}
+
+/** The same URL with its hostname swapped (port, path, scheme untouched). */
+function rewriteUrlHost(baseUrl: string, host: string): string {
+  const u = new URL(baseUrl);
+  u.hostname = host;
+  return u.toString();
+}
+
+/**
+ * The model endpoint as the GUEST must see it: the baseUrl to hand Pi and the
+ * env var holding the injected key placeholder. For a public provider both pass
+ * through unchanged; for a loopback provider the host is swapped for the
+ * `loopbackModelPin` alias (and the key env derives from that same alias, so it
+ * matches what the egress resolver injected).
+ */
+function guestModelTarget(baseUrl: string): { guestBaseUrl: string; keyEnv: string } {
+  const modelHost = modelHostOf(baseUrl);
+  if (!modelHost) {
+    throw new UserFacingError(`agent step model baseUrl is not a valid URL: ${baseUrl}`);
+  }
+  if (modelHost === "[::1]") {
+    throw new UserFacingError(
+      "agent step model baseUrl uses the IPv6 loopback ([::1]), which the sandbox can't pin — bind the server on 127.0.0.1 and use that (or localhost) in the provider baseUrl",
+    );
+  }
+  const pin = loopbackModelPin(modelHost);
+  return {
+    guestBaseUrl: pin ? rewriteUrlHost(baseUrl, pin.alias) : baseUrl,
+    keyEnv: modelKeyEnv(pin ? pin.alias : modelHost),
+  };
+}
+
 /** Default guest path for Gondolin's MITM CA, so in-guest Node trusts the proxy. */
 const GUEST_CA_PATH = "/etc/gondolin/mitm/ca.crt";
 
@@ -111,12 +171,10 @@ export class GuestPiRunner implements AgentRunner {
         "agent step needs a model — provide a config (--config) with providers/models and a defaultModel, or set with.model",
       );
     }
-    // The host whose injected key this step will read. Must agree with the egress
-    // resolver's `modelKeyEnv(host)` so the placeholder for the right host is read.
-    const modelHost = modelHostOf(req.model.baseUrl);
-    if (!modelHost) {
-      throw new UserFacingError(`agent step model baseUrl is not a valid URL: ${req.model.baseUrl}`);
-    }
+    // The endpoint as the guest sees it (loopback providers get an alias) and the
+    // env name of the injected key. Must agree with the egress resolver's
+    // `modelKeyEnv` derivation so the placeholder for the right host is read.
+    const { guestBaseUrl, keyEnv } = guestModelTarget(req.model.baseUrl);
     const { exec, hostDir, guestDir, emit } = this.deps;
     // Split the step's time into setup (staging + the in-guest Pi install) vs the
     // agent loop (the wrapper exec — model calls + tools). Surfaced as telemetry
@@ -154,11 +212,11 @@ export class GuestPiRunner implements AgentRunner {
       ...(req.system !== undefined ? { system: req.system } : {}),
       prompt: req.prompt,
       // Per-host key env: the egress resolver injected this model's key under the
-      // same name (derived from the host), scoped to that host only.
-      keyEnv: modelKeyEnv(modelHost),
+      // same name (derived from the guest-facing host), scoped to where it dials.
+      keyEnv,
       cwd: req.cwd ?? guestDir,
       model: {
-        baseUrl: req.model.baseUrl,
+        baseUrl: guestBaseUrl,
         model: req.model.model,
         ...(req.model.maxTokens !== undefined ? { maxTokens: req.model.maxTokens } : {}),
         ...(req.model.temperature !== undefined ? { temperature: req.model.temperature } : {}),
