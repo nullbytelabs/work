@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Workflow Syntax
+description: Reference for authoring OpenWiki workflow YAML files, covering jobs, ordered steps, triggers (webhook, cron schedule, workflow_call), typed inputs, env scoping, runs-on micro-VM images, needs dependencies, and step/job outputs. Syntax is modeled on GitHub Actions.
+resource: src/spec/types.ts
+tags: [workflows, yaml, syntax, reference, jobs, steps, matrix, conditionals, expressions, reusable, triggers]
+---
+
 # Workflow Syntax
 
 A workflow is a YAML file: a set of **jobs**, each a list of ordered **steps**. The syntax will feel familiar if you know GitHub Actions.

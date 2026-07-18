@@ -1,3 +1,11 @@
+---
+type: Technical Reference
+title: Agent Steps & Actions
+description: Reference for the Work/OpenWiki `work/agent` step primitive that runs a Pi coding agent inside a job's micro-VM. Covers step configuration via `with:`, in-guest execution through GuestPiRunner, the guest wrapper script, and the pre-installed `work:pi` image.
+resource: src/agent/work-handler.ts
+tags: [agent, work/agent, pi, micro-vm, guest-runner, egress, key-injection, security, actions]
+---
+
 # Agent Steps & Actions
 
 The agent surface is the dumb **`work/agent`** primitive: `uses: work/agent` runs a real [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) coding agent **inside the job's micro-VM**, rooted at the checkout with its full toolset. Its final message becomes the step output. Richer, reusable behavior lives one layer up in **user-space actions**.

@@ -1,3 +1,11 @@
+---
+type: Quickstart Guide
+title: Work — OpenWiki Quickstart
+description: Getting-started guide for `work` (@nullbytelabs/work), a local, secure YAML workflow engine that runs every job in an isolated Gondolin micro-VM with durable, crash-resumable execution and optional AI agent steps. Covers requirements, installation, a hello-world example, the CLI surface, and configuration.
+resource: https://github.com/nullbytelabs/work
+tags: [work, workflow-engine, quickstart, yaml, sandbox, micro-vm, cli]
+---
+
 # Work — OpenWiki Quickstart
 
 **`work`** (`@nullbytelabs/work`) is a local, secure workflow engine. You write YAML workflows (GitHub-Actions-style syntax — jobs → steps, a `needs` DAG), and every job runs isolated in a **Gondolin micro-VM** (real QEMU virtualization, not containers). Execution is **durable** — crash-resumable via an embedded Postgres journal. Any step can optionally hand off to an **AI agent** (a real Pi coding agent) that runs *inside the sandbox* alongside the work.

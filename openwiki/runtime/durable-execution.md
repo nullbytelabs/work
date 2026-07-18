@@ -1,3 +1,11 @@
+---
+type: Technical Reference
+title: Durable Execution & Targets
+description: How the OpenWiki workflow runtime executes jobs and steps durably via the AbsurdRuntime, journaling checkpoints to in-process PGLite Postgres for interruption-safe resume, retry, and rerun. Covers job phases (stage/provision/teardown), fine-grained DAG scheduling, if-gating, continue-on-error, secrets isolation, StepInterrupted vs terminal failures, output capture, the AbsurdEngine, and the GondolinTarget micro-VM execution target.
+resource: src/runtime/absurd/runtime.ts
+tags: [runtime, durable-execution, absurd, pglite, gondolin, execution-target, resume, retry, images, persistence]
+---
+
 # Durable Execution & Targets
 
 Every workflow runs durably: each **job** is an Absurd task and each **step** is a checkpoint, journaled to an in-process Postgres (PGLite). No external services. Interrupted runs resume; failed jobs can be retried individually.
