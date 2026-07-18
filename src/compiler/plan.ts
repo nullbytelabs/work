@@ -13,6 +13,7 @@
  */
 
 import type { ResolvedMachine } from "./machines.ts";
+import type { RunsOnSpec } from "./runs-on.ts";
 
 /** A fully-resolved step ready for execution. */
 export interface PlannedStep {
@@ -44,6 +45,12 @@ export interface PlannedJob {
   title?: string;
   /** Resolved execution target key (currently always "gondolin"). */
   runsOn: string;
+  /**
+   * The parsed form of `runsOn` (namespace + optional image variant). Parsed once
+   * here at the compile boundary so downstream image resolution consumes structured
+   * data instead of re-parsing the string at provision time.
+   */
+  runsOnSpec: RunsOnSpec;
   /** Resolved machine sizing (cpus/memory) for the job's micro-VM. */
   machine: ResolvedMachine;
   /** Resolved dependencies (job ids; matrix bases are already expanded to legs). */

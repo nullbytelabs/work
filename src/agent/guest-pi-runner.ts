@@ -104,6 +104,41 @@ function rewriteUrlHost(baseUrl: string, host: string): string {
   return u.toString();
 }
 
+/** A model `baseUrl` resolved into the tuple both sides of the guest/host split need. */
+export interface ModelEndpoint {
+  /** The model server's hostname (URL-lowercased, port stripped, wildcard-rejected). */
+  host: string;
+  /** Loopback alias + IP pin when `host` is on the engine's loopback, else undefined. */
+  pin: { alias: string; ip: string } | undefined;
+  /** The hostname the GUEST addresses — the pin alias for loopback, else `host`. */
+  guestHost: string;
+  /** The per-host env var the injected key lands under (derived from `guestHost`). */
+  keyEnv: string;
+}
+
+/**
+ * The single, canonical resolution of a model `baseUrl`. The host-side egress
+ * resolver (which injects the key) and this guest-side runner (which hands Pi the
+ * endpoint) MUST agree bit-for-bit on the host, the loopback pin, and the key env
+ * — so both derive them here rather than re-implementing the branch in parallel
+ * (which is how the two sides used to drift, e.g. on `[::1]`). Throws (fail closed)
+ * on a baseUrl neither side can honor, so both skip it identically.
+ */
+export function resolveModelEndpoint(baseUrl: string): ModelEndpoint {
+  const host = modelHostOf(baseUrl);
+  if (!host) {
+    throw new UserFacingError(`agent step model baseUrl is not a valid URL: ${baseUrl}`);
+  }
+  if (host === "[::1]") {
+    throw new UserFacingError(
+      "agent step model baseUrl uses the IPv6 loopback ([::1]), which the sandbox can't pin — bind the server on 127.0.0.1 and use that (or localhost) in the provider baseUrl",
+    );
+  }
+  const pin = loopbackModelPin(host);
+  const guestHost = pin ? pin.alias : host;
+  return { host, pin, guestHost, keyEnv: modelKeyEnv(guestHost) };
+}
+
 /**
  * The model endpoint as the GUEST must see it: the baseUrl to hand Pi and the
  * env var holding the injected key placeholder. For a public provider both pass
@@ -112,19 +147,10 @@ function rewriteUrlHost(baseUrl: string, host: string): string {
  * matches what the egress resolver injected).
  */
 function guestModelTarget(baseUrl: string): { guestBaseUrl: string; keyEnv: string } {
-  const modelHost = modelHostOf(baseUrl);
-  if (!modelHost) {
-    throw new UserFacingError(`agent step model baseUrl is not a valid URL: ${baseUrl}`);
-  }
-  if (modelHost === "[::1]") {
-    throw new UserFacingError(
-      "agent step model baseUrl uses the IPv6 loopback ([::1]), which the sandbox can't pin — bind the server on 127.0.0.1 and use that (or localhost) in the provider baseUrl",
-    );
-  }
-  const pin = loopbackModelPin(modelHost);
+  const { pin, keyEnv } = resolveModelEndpoint(baseUrl);
   return {
     guestBaseUrl: pin ? rewriteUrlHost(baseUrl, pin.alias) : baseUrl,
-    keyEnv: modelKeyEnv(pin ? pin.alias : modelHost),
+    keyEnv,
   };
 }
 

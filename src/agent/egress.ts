@@ -26,7 +26,7 @@
  */
 import type { PlannedJob } from "../compiler/index.ts";
 import { resolveModel, type WorkConfig } from "../config/index.ts";
-import { loopbackModelPin, modelHostOf, modelKeyEnv } from "./guest-pi-runner.ts";
+import { resolveModelEndpoint, type ModelEndpoint } from "./guest-pi-runner.ts";
 
 /** Structural `JobNetwork` (kept local to avoid an agent→runtime import cycle). */
 export interface AgentJobNetwork {
@@ -73,21 +73,29 @@ export function makeAgentEgressResolver(
         if (!mightRunModel(step.uses)) continue;
         const alias = step.uses === "work/agent" ? stepModelAlias(job, i) : undefined;
         const model = resolveModel(config, alias);
-        const host = modelHostOf(model.baseUrl);
-        if (!host) continue;
+        // Resolve host/pin/keyEnv through the SAME function the in-guest runner
+        // uses, so a step always reads the placeholder for the host it dials. A
+        // baseUrl the runner would reject (invalid, or an unpinnable loopback like
+        // `[::1]`) throws here too — skip injection so the two sides stay aligned;
+        // the step then fails at the runner with an actionable message.
+        let ep: ModelEndpoint;
+        try {
+          ep = resolveModelEndpoint(model.baseUrl);
+        } catch {
+          continue;
+        }
+        const { host, pin, keyEnv } = ep;
         // A loopback provider (llama.cpp/ollama/omlx on the operator's machine):
-        // the guest dials a guest-safe alias — the in-guest runner derives the
-        // SAME one via `loopbackModelPin` — and the pin rewrites it to the
-        // loopback IP before policy checks and secret injection, so the key
-        // scopes to the IP the request actually carries when it's swapped in,
-        // and the internal-range block is lifted for exactly that IP.
-        const pin = loopbackModelPin(host);
+        // the guest dials the guest-safe alias and the pin rewrites it to the
+        // loopback IP before policy checks and secret injection, so the key scopes
+        // to the IP the request actually carries when it's swapped in, and the
+        // internal-range block is lifted for exactly that IP.
         if (pin) {
-          secrets[modelKeyEnv(pin.alias)] = { hosts: [pin.ip], value: model.apiKey };
+          secrets[keyEnv] = { hosts: [pin.ip], value: model.apiKey };
           hostResolves[pin.alias] = pin.ip;
           if (!allowedInternalHosts.includes(pin.ip)) allowedInternalHosts.push(pin.ip);
         } else {
-          secrets[modelKeyEnv(host)] = { hosts: [host], value: model.apiKey };
+          secrets[keyEnv] = { hosts: [host], value: model.apiKey };
         }
       }
       if (Object.keys(secrets).length > 0) net.secrets = secrets;

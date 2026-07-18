@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AbsurdRuntime, createAbsurdEngine, type AbsurdEngine, type RunHooks, type WorkflowResult } from "./runtime/index.ts";
-import { parseRunsOn, expressionBodies, type ExecutionPlan } from "./compiler/index.ts";
+import { expressionBodies, type ExecutionPlan } from "./compiler/index.ts";
 import { resolveImageConfig, ensureImageTag } from "./images/index.ts";
 import type { TargetFactory } from "./targets/index.ts";
 import { createWorkHandler, makeAgentEgressResolver } from "./agent/index.ts";
@@ -22,11 +22,25 @@ import { createActionUsesHandler, type SubUsesDispatch } from "./actions/index.t
 import { VERSION } from "./version.ts";
 import type { UsesHandler } from "./runtime/index.ts";
 import { RunRepository } from "./persistence/runs.ts";
-import { RunEventRepository } from "./persistence/run-events.ts";
-import { WebPresenter } from "./web/web-presenter.ts";
+import { RunEventRepository, type StoredFrame } from "./persistence/run-events.ts";
 import { expandEnvStrict, type WorkConfig } from "./config/index.ts";
 import { UserFacingError } from "./errors.ts";
 import { startTelemetry, createTelemetryHooks, combineRunHooks, type TelemetryHandle } from "./observability/index.ts";
+
+/**
+ * Records a run's lifecycle as durable event frames — the `work.run_events`
+ * stream the web UI replays. A pure hooks→frame adapter with no transport; the
+ * concrete implementation (the web's frame presenter) is injected by the
+ * composition root so this shared run path depends on no front-end.
+ */
+interface RunRecorder {
+  hooks: RunHooks;
+  start(plan: ExecutionPlan): void;
+  finish(result: WorkflowResult): void;
+}
+
+/** Builds a {@link RunRecorder} bound to a run id + a sink for its emitted frames. */
+type RunRecorderFactory = (runId: string, emit: (frame: StoredFrame) => void) => RunRecorder;
 
 export interface StartRunOptions {
   /** The compiled plan to run. */
@@ -67,6 +81,14 @@ export interface StartRunOptions {
   engine?: AbsurdEngine;
   /** Override the runs-on → ExecutionTarget factory (tests inject a host double). */
   makeTarget?: TargetFactory;
+  /**
+   * Builds the durable run-event recorder for a persistent run (a `dataDir` run we
+   * own). The composition root injects it (the CLI passes the web's frame
+   * presenter) so this shared path reaches into no front-end. Omitted → a
+   * persistent run still records its history *row*, just no replayable event
+   * frames; ignored for a non-persistent run.
+   */
+  makeRecorder?: RunRecorderFactory;
   /**
    * Injected telemetry handle (tests pass an in-memory-backed one). When omitted,
    * `startRun` builds one from `config.observability` — off unless enabled, so the
@@ -201,7 +223,7 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
   // Fire-and-forget event appends, drained before the engine closes so the final
   // `run-end` write isn't lost to `engine.close()`.
   const eventWrites: Promise<unknown>[] = [];
-  const { runStore, recorder } = await setupDurableRecord(persistent, engine, runId, opts.plan, eventWrites);
+  const { runStore, recorder } = await setupDurableRecord(persistent, engine, runId, opts.plan, eventWrites, opts.makeRecorder);
 
   // Fan run events to the caller's presenter, the telemetry emitter, AND the durable
   // event recorder (when persistent).
@@ -220,8 +242,7 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
     // (user images override bundled) and is built on first use, returning the
     // selector to boot; stock `gondolin` resolves to undefined. Tests inject a
     // `makeTarget` double that ignores this, so they never build.
-    resolveImagePath: async (runsOn) => {
-      const spec = parseRunsOn(runsOn);
+    resolveImagePath: async (spec) => {
       if (spec.namespace !== "work" || spec.variant === undefined) return undefined;
       const configPath = resolveImageConfig(spec.variant, opts.workspaceSource);
       return ensureImageTag(spec.variant, configPath, (text) => process.stderr.write(text));
@@ -269,10 +290,11 @@ export async function startRun(opts: StartRunOptions): Promise<WorkflowResult> {
  * `RunManager` writes for a web-triggered run, so a run's `.workflows/db` record is
  * identical regardless of front-end and the web detail view can replay a CLI run in
  * full. (A *web* run reaches `startRun` with an injected engine, so `persistent` is
- * false here and the server owns these writes — no double-write.) `WebPresenter` is a
- * pure hooks→frame adapter (no server deps); seq is minted synchronously so frame order
- * is stable even if the async appends settle out of order. Returns empty when not
- * persistent.
+ * false here and the server owns these writes — no double-write.) The injected
+ * `makeRecorder` builds a pure hooks→frame adapter (no server deps); seq is minted
+ * synchronously so frame order is stable even if the async appends settle out of
+ * order. Returns empty when not persistent; records the history row but no event
+ * frames when no recorder is injected.
  */
 async function setupDurableRecord(
   persistent: boolean,
@@ -280,7 +302,8 @@ async function setupDurableRecord(
   runId: string,
   plan: ExecutionPlan,
   eventWrites: Promise<unknown>[],
-): Promise<{ runStore?: RunRepository; recorder?: WebPresenter }> {
+  makeRecorder: RunRecorderFactory | undefined,
+): Promise<{ runStore?: RunRepository; recorder?: RunRecorder }> {
   if (!persistent) return {};
   const runStore = new RunRepository(engine);
   await runStore.ensureSchema();
@@ -293,10 +316,11 @@ async function setupDurableRecord(
     startedAt: Date.now(),
     ...(plan.inputs ? { inputs: plan.inputs } : {}),
   });
+  if (!makeRecorder) return { runStore };
   const eventStore = new RunEventRepository(engine);
   await eventStore.ensureSchema();
   let seq = 0;
-  const recorder = new WebPresenter(runId, (frame) => {
+  const recorder = makeRecorder(runId, (frame) => {
     eventWrites.push(eventStore.append(runId, seq++, frame).catch(() => {}));
   });
   recorder.start(plan); // the `run-init` frame (the DAG)
