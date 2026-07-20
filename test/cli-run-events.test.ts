@@ -17,6 +17,7 @@ import { compile } from "../src/compiler/index.ts";
 import { startRun } from "../src/run.ts";
 import { createAbsurdEngine } from "../src/runtime/index.ts";
 import { RunEventRepository } from "../src/persistence/run-events.ts";
+import { WebPresenter } from "../src/web/index.ts";
 import { hostTargetFactory } from "./_support.ts";
 
 const WORKFLOW = `
@@ -35,7 +36,15 @@ describe("CLI run event persistence", () => {
     const runId = "ev-run-1";
     const plan = compile(parseWorkflow(WORKFLOW));
     try {
-      const res = await startRun({ plan, runId, dataDir, workdir, makeTarget: hostTargetFactory });
+      // The CLI entrypoint injects the durable-event recorder; mirror that here.
+      const res = await startRun({
+        plan,
+        runId,
+        dataDir,
+        workdir,
+        makeTarget: hostTargetFactory,
+        makeRecorder: (id, emit) => new WebPresenter(id, emit),
+      });
       assert.equal(res.status, "success");
 
       // Reopen the same db (startRun closed its engine) and read the persisted frames —

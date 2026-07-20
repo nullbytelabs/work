@@ -1,3 +1,11 @@
+---
+type: Configuration Reference
+title: Configuration (`work.json`)
+description: Reference for the `work.json` project configuration file — providers, models, secrets, webhooks, and observability. Documents the full WorkConfig schema and how it feeds the agent egress resolver, webhook receiver, scheduler, and telemetry bootstrap.
+resource: src/config/index.ts
+tags: [configuration, work.json, providers, models, secrets, webhooks, observability, env-expansion]
+---
+
 # Configuration (`work.json`)
 
 `work.json` is the project's configuration file — providers, models, secrets, webhooks, and observability. It's loaded by `src/config/index.ts` and feeds the agent egress resolver, the webhook receiver, the scheduler, and the telemetry bootstrap.

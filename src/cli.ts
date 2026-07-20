@@ -21,7 +21,7 @@ import { RunRepository, type RunRow, type RunStatus } from "./persistence/runs.t
 import { RunEventRepository, type StoredFrame } from "./persistence/run-events.ts";
 import { resolveWorkflowLayout, findWorkflowByName, resolveWorkflowRef, WORKFLOWS_DIR, type WorkflowLayout } from "./project.ts";
 import { startRun } from "./run.ts";
-import { startWebServer } from "./web/index.ts";
+import { startWebServer, WebPresenter } from "./web/index.ts";
 import { selectPresenter, detectCI } from "./tui/index.ts";
 import { emitGraph, isGraphFormat, GRAPH_FORMATS, type GraphFormat } from "./graph/index.ts";
 import { runDoctor } from "./doctor/index.ts";
@@ -755,6 +755,10 @@ async function dispatchRun(args: CliArgs, layout: WorkflowLayout, plan: Executio
     runId,
     ...(dataDir ? { dataDir } : {}),
     ...(args.workdir ? { workdir: args.workdir } : {}),
+    // The durable run-event recorder for a persistent run: `startRun` (shared with
+    // the web) stays free of any web import; the entrypoint injects the concrete
+    // frame presenter.
+    makeRecorder: (runId, emit) => new WebPresenter(runId, emit),
   });
 
   presenter.finish(result);

@@ -13,6 +13,7 @@ function job(id: string, needs: string[], steps = 1): PlannedJob {
   return {
     id,
     runsOn: "gondolin",
+    runsOnSpec: { namespace: "gondolin" },
     machine: MACHINE_TYPES.medium!,
     needs,
     steps: Array.from({ length: steps }, (_, i) => ({ name: `${id}/${i}`, env: {} })),

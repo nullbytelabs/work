@@ -1,3 +1,11 @@
+---
+type: Operations Guide
+title: Serving, Triggers & Observability
+description: Guide to `work serve` — the long-lived local host providing a browser console, authenticated webhook receiver, and cron scheduler. Covers the web server security posture (CSRF, DNS-rebinding, body caps), API routes, RunManager, triggers, and observability.
+resource: src/web/server.ts
+tags: [serve, web-server, webhooks, triggers, scheduler, cron, observability, opentelemetry, security]
+---
+
 # Serving, Triggers & Observability
 
 Beyond one-shot CLI runs, `work serve` boots a long-lived **local host** for a project: a browser console, an authenticated webhook receiver, and a cron scheduler — one process, the same engine.

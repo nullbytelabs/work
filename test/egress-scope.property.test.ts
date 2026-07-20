@@ -63,7 +63,7 @@ const literalSecret = fc.array(fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz012
 function agentStep(name: string, model?: string): PlannedStep {
   return { name, uses: "work/agent", env: {}, ...(model ? { with: { model } } : {}) };
 }
-const AGENT_JOB: PlannedJob = { id: "a", runsOn: "gondolin", machine: { cpus: 2, memory: "8G" }, needs: [], steps: [agentStep("a/0")] };
+const AGENT_JOB: PlannedJob = { id: "a", runsOn: "gondolin", runsOnSpec: { namespace: "gondolin" }, machine: { cpus: 2, memory: "8G" }, needs: [], steps: [agentStep("a/0")] };
 
 // ── P1: a derived host is an exact matchHostname pattern ─────────────────────
 // The contract every allowlist/key entry rides on. (a) no wildcard escape

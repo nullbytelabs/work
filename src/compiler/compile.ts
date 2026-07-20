@@ -29,7 +29,7 @@ export class WorkflowCompileError extends UserFacingError {
 // Imported after the error class so the (function-level) circular references
 // with inputs.ts / expr.ts are resolved by the time these are called.
 import { resolveInputs, type ResolvedInputs } from "./inputs.ts";
-import { parseRunsOn } from "./runs-on.ts";
+import { parseRunsOn, type RunsOnSpec } from "./runs-on.ts";
 import { interpolate, expressionBodies } from "./expr.ts";
 import { expandMatrix, cellId, cellLabel, type MatrixCell } from "./matrix.ts";
 import { resolveMachine } from "./machines.ts";
@@ -152,11 +152,13 @@ function compileLeg(
   inputs: ResolvedInputs,
   matrix: MatrixCell | undefined,
   event: Record<string, unknown> | undefined,
+  runsOnSpec: RunsOnSpec,
 ): PlannedJob {
   const jobEnv = mergeEnv(workflowEnv, job.env);
   const planned: PlannedJob = {
     id: legId,
     runsOn: job.runsOn ?? DEFAULT_RUNS_ON,
+    runsOnSpec,
     machine: resolveMachine(job.machine, legId),
     needs,
     steps: (job.steps ?? []).map((s, i) => compileStep(s, legId, i, jobEnv, inputs, matrix, event)),
@@ -473,9 +475,11 @@ export function compile(spec: WorkflowSpec, opts: CompileOptions = {}): Executio
     validateRunsOn(jobId, job.runsOn);
     const w = runsOnWarning(jobId, job.runsOn);
     if (w) warnings.push(w);
+    // Parse once per base job (validated just above); every matrix leg shares it.
+    const runsOnSpec = parseRunsOn(job.runsOn ?? DEFAULT_RUNS_ON);
     const needs = (job.needs ?? []).flatMap(legsOf);
     for (const leg of expansions.get(jobId)!) {
-      addJob(compileLeg(leg.id, leg.title, job, needs, workflowEnv, inputs, leg.cell, event));
+      addJob(compileLeg(leg.id, leg.title, job, needs, workflowEnv, inputs, leg.cell, event, runsOnSpec));
     }
   }
 

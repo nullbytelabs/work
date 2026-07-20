@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-07-11T04:20:02.893Z",
-  "command": "update",
-  "gitHead": "091aa8c0a918fb6899536ed8b59604afc656ba5e",
-  "model": "accounts/fireworks/models/glm-5p2"
+  "updatedAt": "2026-07-17T01:42:32.933Z",
+  "command": "init",
+  "gitHead": "38d98ea0485269620140dc2604082f489af6ca4f",
+  "model": "claude-opus-4-8"
 }

@@ -1,3 +1,11 @@
+---
+type: Architecture Reference
+title: Architecture
+description: Detailed overview of the `work` engine's layered compile pipeline, covering the spec, compiler, runtime, and target layers, the ExecutionPlan seam, matrix expansion, reusable workflow inlining, machine sizing, and durable checkpointing.
+resource: src/cli.ts
+tags: [architecture, pipeline, compiler, runtime, execution-plan, run-path, errors]
+---
+
 # Architecture
 
 The `work` engine is a straight-line pipeline with layered separation of concerns. Each layer is independently swappable and has a clean boundary.

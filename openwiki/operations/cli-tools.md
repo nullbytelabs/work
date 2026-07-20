@@ -1,3 +1,11 @@
+---
+type: Operations Guide
+title: CLI Tools — Doctor, Graph, Scaffold, Init, TUI
+description: Reference for the supporting `work` CLI tools — `work doctor` preflight checks, `work graph` DAG export, `work create` scaffolding generators, project init, and the terminal UI (TUI). Covers flags, exit codes, output formats, and source locations.
+resource: src/doctor/index.ts
+tags: [cli, doctor, graph, scaffold, init, tui, tooling]
+---
+
 # CLI Tools — Doctor, Graph, Scaffold, Init, TUI
 
 Beyond the run/resume/retry path, `work` ships several supporting CLI tools: a preflight checker, a DAG exporter, project/resource generators, and a terminal UI. All are read-only or write only into your project directory.

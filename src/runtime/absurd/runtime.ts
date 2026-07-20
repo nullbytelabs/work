@@ -40,7 +40,7 @@ import {
   type ConditionBag,
 } from "../../compiler/index.ts";
 import { createAbsurdEngine, JOBS_QUEUE, type AbsurdEngine } from "./engine.ts";
-import type { ExecutionPlan, PlannedJob, PlannedStep } from "../../compiler/index.ts";
+import type { ExecutionPlan, PlannedJob, PlannedStep, RunsOnSpec } from "../../compiler/index.ts";
 import type { JobHookMeta, JobPhase, JobResult, RunContext, Runtime, StepHookMeta, StepResult, UsesHandler, WorkflowResult } from "../types.ts";
 import { StepInterrupted } from "../types.ts";
 import { parseOutputFile } from "../output.ts";
@@ -153,7 +153,7 @@ export interface AbsurdRuntimeOptions {
    * composition root supplies it (it knows the workspace + builder); the core just
    * forwards a job-bound thunk to the target. Stays agent/image-agnostic.
    */
-  resolveImagePath?: (runsOn: string) => Promise<string | undefined>;
+  resolveImagePath?: (spec: RunsOnSpec) => Promise<string | undefined>;
   /**
    * Override how a job's `runs-on` becomes an ExecutionTarget. Defaults to the
    * production factory (gondolin micro-VM only). Tests inject a lightweight
@@ -180,7 +180,7 @@ interface JobDeps {
   /** Expanded `secrets:` whitelist, for `${{ secrets.* }}` resolution at runtime. */
   secrets?: Record<string, string>;
   /** Optional resolver for a job's guest image (a `work:<image>` selector). */
-  resolveImagePath?: (runsOn: string) => Promise<string | undefined>;
+  resolveImagePath?: (spec: RunsOnSpec) => Promise<string | undefined>;
   /** Builds the ExecutionTarget for a job's `runs-on`. */
   makeTarget: TargetFactory;
 }
@@ -194,7 +194,7 @@ export class AbsurdRuntime implements Runtime {
   private readonly usesHandlers: UsesHandler[];
   private readonly resolveJobNetwork: ((job: PlannedJob) => JobNetwork | undefined) | undefined;
   private readonly secrets: Record<string, string> | undefined;
-  private readonly resolveImagePath: ((runsOn: string) => Promise<string | undefined>) | undefined;
+  private readonly resolveImagePath: ((spec: RunsOnSpec) => Promise<string | undefined>) | undefined;
   private readonly makeTarget: TargetFactory;
 
   constructor(opts: AbsurdRuntimeOptions = {}) {
@@ -508,7 +508,7 @@ async function provisionTarget(
     // Bind the image resolver to this job's `runs-on` — the target awaits it at
     // provision time (a `work:<image>` builds on first use; stock → undefined).
     const resolveImagePath = deps.resolveImagePath
-      ? () => deps.resolveImagePath!(job.runsOn)
+      ? () => deps.resolveImagePath!(job.runsOnSpec)
       : undefined;
     const target = deps.makeTarget(job.runsOn, {
       workdir,

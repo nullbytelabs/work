@@ -15,7 +15,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { loopbackModelPin, makeAgentEgressResolver, modelKeyEnv } from "../src/agent/index.ts";
+import { loopbackModelPin, makeAgentEgressResolver, modelKeyEnv, resolveModelEndpoint } from "../src/agent/index.ts";
 import type { WorkConfig } from "../src/config/index.ts";
 import type { PlannedJob, PlannedStep } from "../src/compiler/index.ts";
 
@@ -41,7 +41,7 @@ function agentStep(name: string, model?: string): PlannedStep {
 }
 
 function job(id: string, steps: PlannedStep[]): PlannedJob {
-  return { id, runsOn: "gondolin", machine: { cpus: 2, memory: "8G" }, needs: [], steps };
+  return { id, runsOn: "gondolin", runsOnSpec: { namespace: "gondolin" }, machine: { cpus: 2, memory: "8G" }, needs: [], steps };
 }
 
 describe("agent model-key egress resolution", () => {
@@ -124,5 +124,32 @@ describe("loopbackModelPin", () => {
       const alias = loopbackModelPin(host)!.alias;
       assert.ok(alias !== "localhost" && !alias.endsWith(".localhost"), `alias "${alias}" must not re-trigger the RFC-6761 carve-out`);
     }
+  });
+});
+
+describe("resolveModelEndpoint", () => {
+  // The single derivation both sides of the guest/host split consume: the egress
+  // resolver (host-side key injection) and the in-guest runner. They used to
+  // re-derive host/pin/keyEnv in parallel and could drift; this pins the contract.
+  it("resolves a public provider to host == guestHost, no pin, host-derived keyEnv", () => {
+    const ep = resolveModelEndpoint("https://api.fireworks.ai/inference/v1");
+    assert.equal(ep.host, "api.fireworks.ai");
+    assert.equal(ep.pin, undefined);
+    assert.equal(ep.guestHost, "api.fireworks.ai");
+    assert.equal(ep.keyEnv, modelKeyEnv("api.fireworks.ai"));
+  });
+
+  it("resolves a loopback provider to the alias guestHost + a pin, keyEnv derived from the alias", () => {
+    const ep = resolveModelEndpoint("http://localhost:8000/v1");
+    assert.equal(ep.host, "localhost");
+    assert.deepEqual(ep.pin, { alias: "localhost.loopback.internal", ip: "127.0.0.1" });
+    assert.equal(ep.guestHost, "localhost.loopback.internal");
+    // The key scopes to the alias (what the guest dials), matching the guest runner.
+    assert.equal(ep.keyEnv, modelKeyEnv("localhost.loopback.internal"));
+  });
+
+  it("fails closed (throws) on an unpinnable [::1] and on an invalid baseUrl — so both sides skip identically", () => {
+    assert.throws(() => resolveModelEndpoint("http://[::1]:8000/v1"), /IPv6 loopback/);
+    assert.throws(() => resolveModelEndpoint("not a url"), /not a valid URL/);
   });
 });
