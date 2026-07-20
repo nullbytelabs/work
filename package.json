@@ -66,12 +66,12 @@
     "@types/node": "24.13.3",
     "@types/pg": "8.20.0",
     "esbuild": "0.28.1",
-    "eslint": "10.6.0",
+    "eslint": "10.7.0",
     "fast-check": "4.9.0",
     "globals": "17.7.0",
     "jscpd": "5.0.12",
     "knip": "6.24.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.62.1"
+    "typescript-eslint": "8.64.0"
   }
 }
