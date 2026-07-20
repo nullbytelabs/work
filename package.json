@@ -70,7 +70,7 @@
     "fast-check": "4.9.0",
     "globals": "17.7.0",
     "jscpd": "5.0.12",
-    "knip": "6.24.0",
+    "knip": "6.27.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.62.1"
   }
