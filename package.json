@@ -72,6 +72,6 @@
     "jscpd": "5.0.12",
     "knip": "6.29.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.64.0"
+    "typescript-eslint": "8.65.0"
   }
 }
