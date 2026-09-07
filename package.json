@@ -69,7 +69,7 @@
     "eslint": "10.9.1",
     "fast-check": "4.9.0",
     "globals": "17.11.0",
-    "jscpd": "5.0.14",
+    "jscpd": "5.1.2",
     "knip": "6.29.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.68.0"
