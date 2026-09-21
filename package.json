@@ -63,7 +63,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.63.0",
-    "@types/node": "24.13.4",
+    "@types/node": "24.13.5",
     "@types/pg": "8.23.1",
     "esbuild": "0.28.2",
     "eslint": "10.9.1",
